@@ -13,16 +13,7 @@ use crate::ui::tab::AnnotRef;
 use crate::ui::tools::Tool;
 
 /// Commands that are not implemented yet; they are shown greyed out.
-pub const PENDING: &[Cmd] = &[
-    Cmd::FromFiles,
-    Cmd::ContentsToImages,
-    Cmd::ExportText,
-    Cmd::ExportWord,
-    Cmd::Grayscale,
-    Cmd::WordCount,
-    Cmd::CompareDocuments,
-    Cmd::AccessibilityCheck,
-];
+pub const PENDING: &[Cmd] = &[];
 
 /// Files above this size are refused as attachments.
 const MAX_ATTACHMENT: u64 = 100 * 1024 * 1024;
@@ -80,7 +71,10 @@ impl MrPdfApp {
                 self.info(Cmd::FileAssociation.label(self.settings.language), text.to_string());
             }
             other => {
-                if !self.run_forms(ctx, other) && !self.run_outline(ctx, other) {
+                if !self.run_forms(ctx, other)
+                    && !self.run_outline(ctx, other)
+                    && !self.run_review(ctx, other)
+                {
                     self.run_structure(ctx, other);
                 }
             }

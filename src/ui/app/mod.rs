@@ -7,6 +7,7 @@ mod features;
 mod formdata;
 mod outline_tools;
 mod properties;
+mod review;
 mod ribbon;
 mod sidebar;
 mod statusbar;
@@ -238,6 +239,7 @@ pub enum RangePurpose {
     Rotate(i32),
     Flatten,
     Duplicate,
+    ToImages,
 }
 
 pub struct MrPdfApp {

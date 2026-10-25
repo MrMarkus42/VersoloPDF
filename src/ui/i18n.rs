@@ -248,6 +248,7 @@ strings! {
     comment_list: "Kommentarliste", "Comment list";
     flatten: "Abflachen", "Flatten";
     flatten_hint: "Kommentare und Formularfelder werden fest in den Seiteninhalt übernommen und sind danach nicht mehr bearbeitbar.", "Comments and form fields become part of the page content and can no longer be edited.";
+    to_images_hint: "Der Seiteninhalt wird durch ein Bild ersetzt (200 dpi). Text ist danach nicht mehr auswählbar; Kommentare bleiben erhalten.", "The page content is replaced by an image (200 dpi). Text can no longer be selected; comments are kept.";
     delete_comment: "Kommentar löschen", "Delete comment";
     no_comments: "Keine Kommentare", "No comments";
     color: "Farbe", "Colour";

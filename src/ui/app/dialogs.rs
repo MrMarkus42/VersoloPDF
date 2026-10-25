@@ -301,6 +301,9 @@ impl MrPdfApp {
                         RangePurpose::Duplicate => {
                             super::commands::Cmd::DuplicatePages.label(self.settings.language)
                         }
+                        RangePurpose::ToImages => {
+                            super::commands::Cmd::ContentsToImages.label(self.settings.language)
+                        }
                     };
                     ui.heading(title);
                     if let RangePurpose::Rotate(delta) = purpose {
@@ -312,6 +315,9 @@ impl MrPdfApp {
                     }
                     if *purpose == RangePurpose::Flatten {
                         ui.label(RichText::new(t.flatten_hint).weak());
+                    }
+                    if *purpose == RangePurpose::ToImages {
+                        ui.label(RichText::new(t.to_images_hint).weak());
                     }
                     ui.label(t.page_range_label);
                     ui.add(egui::TextEdit::singleline(text).hint_text("1-3, 5, 8-"));

@@ -910,3 +910,78 @@ fn bookmark_tools() {
     doc.delete_all_bookmarks().unwrap();
     assert!(doc.bookmarks().is_empty());
 }
+
+#[test]
+fn review_and_conversion() {
+    let _guard = common::lock();
+    let mut doc = open(2);
+    let count = doc.word_count().unwrap();
+    assert_eq!((count.pages, count.words), (2, 18), "{count:?}");
+
+    // Comparison: the longer document adds the lines of page 3.
+    let longer = open(3);
+    let changes = mrpdf::compare::diff(&doc.text_lines().unwrap(), &longer.text_lines().unwrap());
+    let added: Vec<_> = changes
+        .iter()
+        .filter_map(|c| match c {
+            mrpdf::compare::Change::Added(p, t) => Some((*p, t.clone())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(added.len(), 2, "{changes:?}");
+    assert!(added.iter().all(|(p, _)| *p == 2));
+
+    // Accessibility facts of a plain generated PDF.
+    let s = doc.accessibility_structure().unwrap();
+    assert!(!s.tagged && s.language.is_none());
+    assert!(doc.pages_without_text().unwrap().is_empty());
+
+    // Text and Word export.
+    let txt = temp_file("export.txt");
+    doc.export_text(&txt).unwrap();
+    let text = std::fs::read_to_string(&txt).unwrap();
+    assert!(text.contains("Page 2 Hello World") && text.contains('\u{c}'), "{text}");
+    let docx = temp_file("export.docx");
+    doc.export_word(&docx).unwrap();
+    let bytes = std::fs::read(&docx).unwrap();
+    assert_eq!(&bytes[..2], b"PK");
+    let xml = String::from_utf8_lossy(&bytes);
+    assert!(
+        xml.contains("Heading1\"/></w:pPr><w:r><w:t xml:space=\"preserve\">Page 1 Hello World"),
+        "headings are styled"
+    );
+    std::fs::remove_file(&txt).ok();
+    std::fs::remove_file(&docx).ok();
+
+    // Grayscale: a red image stamp and a red rectangle turn gray.
+    let png = temp_file("red.png");
+    image::RgbImage::from_pixel(40, 40, image::Rgb([220, 20, 20])).save(&png).unwrap();
+    doc.add_image_stamp(0, &png, &style(Rgba::RED)).unwrap();
+    let mut rect = NewAnnotation::new(AnnotKind::Square, style(Rgba::rgb(0, 0, 255)));
+    rect.rect = RectF::new(300.0, 300.0, 400.0, 400.0);
+    doc.add_annotation(1, &rect).unwrap();
+    doc.to_grayscale().unwrap();
+    let is_gray = |img: &mrpdf::document::RenderedImage| {
+        img.rgba.as_chunks::<4>().0.iter().all(|p| p[0].abs_diff(p[1]) < 8 && p[1].abs_diff(p[2]) < 8)
+    };
+    assert!(is_gray(&doc.render_page(0, 298, 421).unwrap()), "page 1 should be gray");
+    assert!(is_gray(&doc.render_page(1, 298, 421).unwrap()), "page 2 should be gray");
+    let page1 = doc.render_page(0, 298, 421).unwrap();
+    assert!(page1.rgba.as_chunks::<4>().0.iter().any(|p| p[0] < 200), "stamp still visible");
+
+    // Contents to images: text is gone, comments stay.
+    assert_eq!(doc.contents_to_images(&[1], 72.0).unwrap(), 1);
+    assert!(doc.page_text(1).unwrap().all_text().trim().is_empty());
+    assert!(doc.page_text(0).unwrap().all_text().contains("Page 1"));
+    assert!(doc.annotations(1).unwrap().iter().any(|a| a.kind == AnnotKind::Square));
+
+    // New document from an image and a PDF.
+    let pdf = temp_file("part.pdf");
+    std::fs::write(&pdf, common::text_pdf(2)).unwrap();
+    let merged = Document::from_files(&[png.clone(), pdf.clone()], "neu.pdf").unwrap();
+    assert_eq!(merged.page_count(), 3);
+    let (w, _) = merged.geometry(0).unwrap().view_size();
+    assert!((w - 40.0 * 72.0 / 150.0).abs() < 0.5, "image page size {w}");
+    std::fs::remove_file(&png).ok();
+    std::fs::remove_file(&pdf).ok();
+}

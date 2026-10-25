@@ -497,6 +497,9 @@ impl MrPdfApp {
             RangePurpose::Rotate(delta) => self.edit(ctx, |tab| tab.doc.rotate_pages(&pages, delta)),
             RangePurpose::Flatten => self.edit(ctx, |tab| tab.doc.flatten_pages(&pages)),
             RangePurpose::Duplicate => self.edit(ctx, |tab| tab.doc.duplicate_pages(&pages)),
+            RangePurpose::ToImages => {
+                self.edit(ctx, |tab| tab.doc.contents_to_images(&pages, 200.0).map(|_| ()))
+            }
             RangePurpose::Extract => {
                 let t = self.t();
                 let Some(tab) = self.active_tab() else { return };

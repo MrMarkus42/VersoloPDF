@@ -54,6 +54,15 @@ impl Default for RenderOptions {
     }
 }
 
+/// Result of [`Document::word_count`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WordCount {
+    pub pages: usize,
+    pub words: usize,
+    pub characters: usize,
+    pub characters_no_spaces: usize,
+}
+
 /// A rendered page (or part of a page) as straight RGBA pixels.
 #[derive(Debug, Clone)]
 pub struct RenderedImage {
@@ -1341,18 +1350,15 @@ impl Document {
         Ok(items.len())
     }
 
-    /// Applies all redaction marks: affected pages become images with the
-    /// marked areas blacked out (`dpi` sets their resolution) and the file is
-    /// rewritten without history. Returns the number of affected pages.
-    pub fn apply_redactions(&mut self, dpi: f32) -> Result<usize> {
-        self.require(self.has_full_access())?;
-        self.sync_bytes()?;
-        let marks = crate::redact::redaction_marks(&self.bytes, self.password.as_deref())?;
-        if marks.is_empty() {
-            return Ok(0);
-        }
+    /// Renders pages (without comments) as RGB images with marks painted
+    /// black, ready to replace the page content (see [crate::redact::apply]).
+    fn rasterize(
+        &self,
+        marks: &BTreeMap<usize, Vec<RectF>>,
+        dpi: f32,
+    ) -> Result<Vec<crate::redact::PageImage>> {
         let mut images = Vec::new();
-        for (&page, rects) in &marks {
+        for (&page, rects) in marks {
             let geo = *self.geometry(page).ok_or(Error::PageOutOfRange(page))?;
             let (vw, vh) = geo.view_size();
             let edge = MAX_BITMAP_EDGE as f32;
@@ -1385,9 +1391,134 @@ impl Document {
                 matrix: [px.x - o.x, px.y - o.y, py.x - o.x, py.y - o.y, o.x, o.y],
             });
         }
+        Ok(images)
+    }
+
+    /// Applies all redaction marks: affected pages become images with the
+    /// marked areas blacked out (`dpi` sets their resolution) and the file is
+    /// rewritten without history. Returns the number of affected pages.
+    pub fn apply_redactions(&mut self, dpi: f32) -> Result<usize> {
+        self.require(self.has_full_access())?;
+        self.sync_bytes()?;
+        let marks = crate::redact::redaction_marks(&self.bytes, self.password.as_deref())?;
+        if marks.is_empty() {
+            return Ok(0);
+        }
+        let images = self.rasterize(&marks, dpi)?;
         let count = images.len();
         self.edit_bytes("apply redactions", |b, pw| crate::redact::apply(b, pw, &images))?;
         Ok(count)
+    }
+
+    // -----------------------------------------------------------------
+    // Review and conversion
+
+    /// Words and characters of the document text.
+    pub fn word_count(&self) -> Result<WordCount> {
+        let mut count = WordCount { pages: self.page_count(), ..WordCount::default() };
+        for page in 0..self.page_count() {
+            let text = self.page_text(page)?.all_text();
+            count.words += text.split_whitespace().count();
+            count.characters += text.chars().filter(|c| !c.is_control()).count();
+            count.characters_no_spaces +=
+                text.chars().filter(|c| !c.is_whitespace() && !c.is_control()).count();
+        }
+        Ok(count)
+    }
+
+    /// All text lines as (page, text).
+    pub fn text_lines(&self) -> Result<Vec<(usize, String)>> {
+        let mut out = Vec::new();
+        for page in 0..self.page_count() {
+            out.extend(self.page_text(page)?.lines().into_iter().map(|(t, _)| (page, t)));
+        }
+        Ok(out)
+    }
+
+    /// Pages without any text (typically scans that need OCR).
+    pub fn pages_without_text(&self) -> Result<Vec<usize>> {
+        let mut out = Vec::new();
+        for page in 0..self.page_count() {
+            if self.page_text(page)?.all_text().trim().is_empty() {
+                out.push(page);
+            }
+        }
+        Ok(out)
+    }
+
+    pub fn accessibility_structure(&mut self) -> Result<crate::accessibility::StructureInfo> {
+        self.sync_bytes()?;
+        crate::accessibility::check_structure(&self.bytes, self.password.as_deref())
+    }
+
+    pub fn export_text(&self, dest: &Path) -> Result<()> {
+        let pages: Vec<String> =
+            (0..self.page_count()).map(|p| self.page_text(p).map(|t| t.all_text())).collect::<Result<_>>()?;
+        write_atomic(dest, crate::convert::text_export(&pages).as_bytes())
+    }
+
+    /// Writes the text as a Word document; headings are recognised by size.
+    pub fn export_word(&self, dest: &Path) -> Result<()> {
+        let headings: Vec<(usize, String)> =
+            self.heading_bookmarks()?.into_iter().map(|b| (b.page, b.title)).collect();
+        let mut pages = Vec::new();
+        for page in 0..self.page_count() {
+            let lines = self
+                .page_text(page)?
+                .lines()
+                .into_iter()
+                .map(|(t, _)| {
+                    let heading = headings.iter().any(|(p, h)| *p == page && *h == t);
+                    (t, heading)
+                })
+                .collect();
+            pages.push(lines);
+        }
+        write_atomic(dest, &crate::convert::docx(&self.display_name, &pages))
+    }
+
+    pub fn to_grayscale(&mut self) -> Result<()> {
+        self.require(self.has_full_access())?;
+        self.edit_bytes("convert to grayscale", crate::convert::to_grayscale)
+    }
+
+    /// Turns the content of `pages` into images (comments stay editable).
+    pub fn contents_to_images(&mut self, pages: &[usize], dpi: f32) -> Result<usize> {
+        self.require(self.has_full_access())?;
+        self.sync_bytes()?;
+        let marks: BTreeMap<usize, Vec<RectF>> =
+            pages.iter().filter(|p| **p < self.page_count()).map(|p| (*p, Vec::new())).collect();
+        let images = self.rasterize(&marks, dpi)?;
+        let count = images.len();
+        self.edit_bytes("contents to images", |b, pw| crate::redact::apply(b, pw, &images))?;
+        Ok(count)
+    }
+
+    /// A new document from PDF and image files (images at 150 dpi).
+    pub fn from_files(paths: &[PathBuf], display_name: &str) -> Result<Document> {
+        if paths.is_empty() {
+            return Err(Error::Invalid("no files selected".into()));
+        }
+        let pdfium = engine::pdfium()?;
+        let mut target = pdfium.create_new_pdf()?;
+        for path in paths {
+            let is_pdf = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("pdf"));
+            let bytes = if is_pdf {
+                read_pdf_file(path)?
+            } else {
+                crate::convert::image_page_pdf(&load_image(path)?, 150.0)?
+            };
+            let source = Self::load(bytes, None)?;
+            let count = source.pages().len();
+            if count > 0 {
+                let at = target.pages().len();
+                target.pages_mut().copy_page_range_from_document(&source, 0..=count - 1, at)?;
+            }
+        }
+        let bytes = target.save_to_bytes()?;
+        let mut doc = Self::from_bytes(bytes, display_name, None)?;
+        doc.modified = true;
+        Ok(doc)
     }
 
     // -----------------------------------------------------------------

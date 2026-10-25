@@ -9,7 +9,10 @@
 
 #![deny(unsafe_code)]
 
+pub mod accessibility;
 pub mod appearance;
+pub mod compare;
+pub mod convert;
 pub mod document;
 pub mod engine;
 pub mod error;

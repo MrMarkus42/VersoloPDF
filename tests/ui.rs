@@ -601,3 +601,33 @@ fn bookmark_tools_ui() {
     assert_eq!(tab.doc.page_count(), 4);
     save(&mut h, "27-table-of-contents");
 }
+
+#[test]
+fn review_tools_ui() {
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let file = sample_file(&dir, 2);
+    let mut h = harness(vec![file], false);
+    h.run_steps(10);
+    tab(&mut h, "Überprüfen");
+    quick(&mut h, "Wörter zählen");
+    match h.state().dialog() {
+        Some(mrpdf::ui::app::Dialog::Message { text, .. }) => assert!(text.contains("Wörter: 18"), "{text}"),
+        other => panic!("unexpected dialog {other:?}"),
+    }
+    save(&mut h, "28-word-count");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    quick(&mut h, "Barrierefreiheit prüfen");
+    assert_eq!(h.state().tab_count(), 2);
+    let report = h.state().active_tab().unwrap().doc.page_text(0).unwrap().all_text();
+    assert!(report.contains("Prüfungen bestanden"), "{report}");
+    save(&mut h, "29-accessibility-report");
+    // Colours: confirmation, then gray.
+    h.state_mut().set_active_tab(0);
+    h.run_steps(3);
+    quick(&mut h, "Farben umwandeln");
+    h.get_by_label("OK").click();
+    h.run_steps(4);
+    assert!(h.state().active_tab().unwrap().doc.is_modified());
+}
