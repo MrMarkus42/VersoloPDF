@@ -1,0 +1,139 @@
+//! Helpers that build test documents at runtime (no binary fixtures needed).
+
+#![allow(dead_code)]
+
+use std::sync::{Mutex, MutexGuard};
+
+use lopdf::{Dictionary, Object, Stream, dictionary};
+use pdfium_render::prelude::*;
+
+/// PDFium is not thread safe; tests that use it hold this lock.
+pub fn lock() -> MutexGuard<'static, ()> {
+    static LOCK: Mutex<()> = Mutex::new(());
+    LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// A PDF with `pages` A4 pages, each containing the line `Page N Hello World`.
+pub fn text_pdf(pages: usize) -> Vec<u8> {
+    let pdfium = mrpdf::engine::pdfium().expect("PDFium must be available for tests");
+    let mut doc = pdfium.create_new_pdf().unwrap();
+    let font = doc.fonts_mut().helvetica();
+    for i in 0..pages {
+        let mut page = doc
+            .pages_mut()
+            .create_page_at_end(PdfPagePaperSize::a4())
+            .unwrap();
+        page.objects_mut()
+            .create_text_object(
+                PdfPoints::new(72.0),
+                PdfPoints::new(700.0),
+                format!("Page {} Hello World", i + 1),
+                font,
+                PdfPoints::new(24.0),
+            )
+            .unwrap();
+        page.objects_mut()
+            .create_text_object(
+                PdfPoints::new(72.0),
+                PdfPoints::new(600.0),
+                "Zweite Zeile mit Umlauten: Grüße",
+                font,
+                PdfPoints::new(14.0),
+            )
+            .unwrap();
+    }
+    doc.save_to_bytes().unwrap()
+}
+
+/// A one page PDF with a text field `name` and a check box `agree`.
+pub fn form_pdf() -> Vec<u8> {
+    let mut doc = lopdf::Document::with_version("1.7");
+    let pages_id = doc.new_object_id();
+    let page_id = doc.new_object_id();
+    let font_id = doc.add_object(dictionary! {
+        "Type" => "Font",
+        "Subtype" => "Type1",
+        "BaseFont" => "Helvetica",
+        "Encoding" => "WinAnsiEncoding",
+    });
+    let text_field = doc.add_object(dictionary! {
+        "Type" => "Annot",
+        "Subtype" => "Widget",
+        "FT" => "Tx",
+        "T" => Object::string_literal("name"),
+        "V" => Object::string_literal(""),
+        "Rect" => vec![100.into(), 700.into(), 300.into(), 720.into()],
+        "DA" => Object::string_literal("/Helv 12 Tf 0 g"),
+        "F" => 4,
+        "P" => page_id,
+    });
+    let on = doc.add_object(Stream::new(
+        dictionary! {"Type" => "XObject", "Subtype" => "Form", "BBox" => vec![0.into(), 0.into(), 12.into(), 12.into()]},
+        b"0 g 2 2 8 8 re f".to_vec(),
+    ));
+    let off = doc.add_object(Stream::new(
+        dictionary! {"Type" => "XObject", "Subtype" => "Form", "BBox" => vec![0.into(), 0.into(), 12.into(), 12.into()]},
+        b"0 G 0.5 0.5 11 11 re S".to_vec(),
+    ));
+    let checkbox = doc.add_object(dictionary! {
+        "Type" => "Annot",
+        "Subtype" => "Widget",
+        "FT" => "Btn",
+        "T" => Object::string_literal("agree"),
+        "V" => "Off",
+        "AS" => "Off",
+        "Rect" => vec![100.into(), 650.into(), 112.into(), 662.into()],
+        "AP" => dictionary! { "N" => dictionary! { "Yes" => on, "Off" => off } },
+        "F" => 4,
+        "P" => page_id,
+    });
+    let content = doc.add_object(Stream::new(Dictionary::new(), b"".to_vec()));
+    doc.objects.insert(
+        page_id,
+        Object::Dictionary(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+            "Contents" => content,
+            "Annots" => vec![text_field.into(), checkbox.into()],
+            "Resources" => dictionary! {},
+        }),
+    );
+    doc.objects.insert(
+        pages_id,
+        Object::Dictionary(dictionary! {
+            "Type" => "Pages",
+            "Kids" => vec![page_id.into()],
+            "Count" => 1,
+        }),
+    );
+    let catalog = doc.add_object(dictionary! {
+        "Type" => "Catalog",
+        "Pages" => pages_id,
+        "AcroForm" => dictionary! {
+            "Fields" => vec![text_field.into(), checkbox.into()],
+            "DA" => Object::string_literal("/Helv 0 Tf 0 g"),
+            "DR" => dictionary! { "Font" => dictionary! { "Helv" => font_id } },
+        },
+    });
+    doc.trailer.set("Root", catalog);
+    let mut out = Vec::new();
+    doc.save_to(&mut out).unwrap();
+    out
+}
+
+/// Average colour of a rectangular pixel area of an RGBA image.
+pub fn average(img: &mrpdf::document::RenderedImage, x0: u32, y0: u32, x1: u32, y1: u32) -> [f32; 3] {
+    let mut sum = [0f64; 3];
+    let mut n = 0f64;
+    for y in y0..y1.min(img.height) {
+        for x in x0..x1.min(img.width) {
+            let i = ((y * img.width + x) * 4) as usize;
+            for c in 0..3 {
+                sum[c] += f64::from(img.rgba[i + c]);
+            }
+            n += 1.0;
+        }
+    }
+    [(sum[0] / n) as f32, (sum[1] / n) as f32, (sum[2] / n) as f32]
+}

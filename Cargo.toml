@@ -1,0 +1,52 @@
+[package]
+name = "mrpdf"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "MrPDF - a free, open-source PDF viewer and editor"
+license = "MIT OR Apache-2.0"
+authors = ["Mr. M <mr.m@users.noreply.github.com>"]
+repository = "https://github.com/MrMarkus42/MrPDF"
+readme = "README.md"
+keywords = ["pdf", "viewer", "editor", "annotation"]
+categories = ["gui", "text-processing"]
+
+[lib]
+name = "mrpdf"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mrpdf"
+path = "src/main.rs"
+
+[dependencies]
+eframe = { version = "=0.36.2", default-features = false, features = ["accesskit", "default_fonts", "glow", "links", "persistence", "wayland", "x11"] }
+egui = "=0.36.2"
+pdfium-render = { version = "=0.9.4", default-features = false, features = ["image_025", "pdfium_7881", "thread_safe"] }
+lopdf = { version = "=0.45.0", default-features = false }
+rfd = "=0.17.2"
+image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg"] }
+log = "0.4"
+env_logger = { version = "0.11", default-features = false, features = ["auto-color", "humantime"] }
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Storage_Xps",
+    "Win32_UI_Controls_Dialogs",
+] }
+
+[dev-dependencies]
+egui_kittest = { version = "=0.36.2", features = ["eframe", "wgpu"] }
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
+codegen-units = 4
+strip = "symbols"
+
+[profile.dev.package."*"]
+opt-level = 2

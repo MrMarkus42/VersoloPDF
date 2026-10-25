@@ -1,0 +1,728 @@
+//! Commands of the main window (file handling, editing, navigation).
+
+use std::path::{Path, PathBuf};
+
+use egui::Context;
+
+use super::{AfterSave, Dialog, InsertPosition, MrPdfApp, PaperChoice, RangePurpose};
+use crate::document::Document;
+use crate::error::Error;
+use crate::model::AnnotKind;
+use crate::pdf_edit::{AnnotUpdate, NewAnnotation};
+use crate::ui::canvas::CanvasEvent;
+use crate::ui::i18n::Strings;
+use crate::ui::tab::DocTab;
+use crate::ui::tools::Tool;
+use crate::ui::view::{self, ZoomMode};
+
+/// Human readable, localised description of an error.
+pub fn error_text(t: &Strings, err: &Error) -> String {
+    match err {
+        Error::EngineUnavailable(_) => t.err_engine.to_string(),
+        Error::PasswordRequired => t.err_password_required.to_string(),
+        Error::WrongPassword => t.err_wrong_password.to_string(),
+        Error::InvalidFormat => t.err_invalid_pdf.to_string(),
+        Error::FileTooLarge { .. } => t.err_too_large.to_string(),
+        Error::Io { path, source } => format!("{} {}\n{source}", t.err_io, path.display()),
+        Error::EncryptedNotSupported => t.err_encrypted.to_string(),
+        Error::NotPermitted => t.err_not_permitted.to_string(),
+        other => format!("{}\n{other}", t.err_generic),
+    }
+}
+
+/// Parses page ranges like `1-3, 5, 8-` (1-based) into zero-based indices.
+pub fn parse_page_range(text: &str, page_count: usize) -> Option<Vec<usize>> {
+    let mut pages = Vec::new();
+    for part in text.split([',', ';']) {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        let (a, b) = match part.split_once('-') {
+            Some((a, b)) => {
+                let a = if a.trim().is_empty() { 1 } else { a.trim().parse::<usize>().ok()? };
+                let b = if b.trim().is_empty() { page_count } else { b.trim().parse::<usize>().ok()? };
+                (a, b)
+            }
+            None => {
+                let n = part.parse::<usize>().ok()?;
+                (n, n)
+            }
+        };
+        if a == 0 || b == 0 || a > b || b > page_count {
+            return None;
+        }
+        pages.extend((a - 1)..b);
+    }
+    pages.sort_unstable();
+    pages.dedup();
+    (!pages.is_empty()).then_some(pages)
+}
+
+fn ensure_pdf_extension(mut path: PathBuf) -> PathBuf {
+    if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case("pdf")) {
+        path.set_extension("pdf");
+    }
+    path
+}
+
+/// Only these URI schemes may be opened from documents.
+pub fn is_safe_uri(uri: &str) -> bool {
+    let lower = uri.trim().to_ascii_lowercase();
+    (lower.starts_with("https://") || lower.starts_with("http://") || lower.starts_with("mailto:"))
+        && !uri.chars().any(|c| c.is_control() || c.is_whitespace())
+        && uri.len() <= 4096
+}
+
+impl MrPdfApp {
+    pub(super) fn show_error(&mut self, err: &Error) {
+        let t = self.t();
+        self.dialog = Some(Dialog::Message {
+            title: t.error.to_string(),
+            text: error_text(t, err),
+        });
+    }
+
+    /// Runs an edit on the active tab and refreshes dependent state.
+    pub(super) fn edit(&mut self, ctx: &Context, f: impl FnOnce(&mut DocTab) -> crate::Result<()>) {
+        let Some(tab) = self.tabs.get_mut(self.active) else {
+            return;
+        };
+        let result = f(tab);
+        tab.after_edit();
+        if let Err(err) = result {
+            self.show_error(&err);
+        }
+        ctx.request_repaint();
+    }
+
+    pub fn open_dialog(&mut self) {
+        let t = self.t();
+        if let Some(files) = rfd::FileDialog::new()
+            .set_title(t.open_file)
+            .add_filter("PDF", &["pdf", "PDF"])
+            .pick_files()
+        {
+            self.pending_open.extend(files);
+        }
+    }
+
+    /// Opens a document in a new tab (or activates it if already open).
+    pub fn open_path(&mut self, ctx: &Context, path: PathBuf, password: Option<String>) {
+        let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
+        if let Some(i) = self
+            .tabs
+            .iter()
+            .position(|t| t.doc.path().is_some_and(|p| p.canonicalize().ok().as_deref() == Some(canonical.as_path())))
+        {
+            self.active = i;
+            return;
+        }
+        match Document::open(&canonical, password.as_deref()) {
+            Ok(doc) => {
+                self.add_tab(doc);
+                self.settings.add_recent(&canonical);
+                ctx.request_repaint();
+            }
+            Err(Error::PasswordRequired) => {
+                self.dialog = Some(Dialog::Password {
+                    path: canonical,
+                    password: String::new(),
+                    wrong: false,
+                });
+            }
+            Err(Error::WrongPassword) => {
+                self.dialog = Some(Dialog::Password {
+                    path: canonical,
+                    password: String::new(),
+                    wrong: true,
+                });
+            }
+            Err(err) => {
+                self.settings.recent_files.retain(|p| p != &canonical);
+                self.show_error(&err);
+            }
+        }
+    }
+
+    pub fn add_tab(&mut self, doc: Document) {
+        let tab = DocTab::new(doc, self.settings.zoom_mode, self.settings.layout);
+        self.tabs.push(tab);
+        self.active = self.tabs.len() - 1;
+    }
+
+    pub fn new_document(&mut self, ctx: &Context) {
+        let t = self.t();
+        match Document::new_blank(t.untitled) {
+            Ok(doc) => {
+                self.add_tab(doc);
+                ctx.request_repaint();
+            }
+            Err(err) => self.show_error(&err),
+        }
+    }
+
+    /// Saves the tab with `tab_id` (default: active). Returns true on success.
+    pub fn save(&mut self, ctx: &Context, tab_id: Option<u64>) -> bool {
+        let index = match tab_id {
+            Some(id) => self.tabs.iter().position(|t| t.id == id),
+            None => (!self.tabs.is_empty()).then_some(self.active),
+        };
+        let Some(index) = index else { return false };
+        if self.tabs[index].doc.path().is_none() {
+            return self.save_as(ctx, Some(self.tabs[index].id));
+        }
+        match self.tabs[index].doc.save() {
+            Ok(()) => {
+                let t = self.t();
+                self.set_status(ctx, t.saved);
+                true
+            }
+            Err(err) => {
+                self.show_error(&err);
+                false
+            }
+        }
+    }
+
+    pub fn save_as(&mut self, ctx: &Context, tab_id: Option<u64>) -> bool {
+        let index = match tab_id {
+            Some(id) => self.tabs.iter().position(|t| t.id == id),
+            None => (!self.tabs.is_empty()).then_some(self.active),
+        };
+        let Some(index) = index else { return false };
+        let t = self.t();
+        let name = self.tabs[index].doc.display_name().to_string();
+        let mut dialog = rfd::FileDialog::new()
+            .set_title(t.save_as)
+            .add_filter("PDF", &["pdf"])
+            .set_file_name(name);
+        if let Some(dir) = self.tabs[index].doc.path().and_then(Path::parent) {
+            dialog = dialog.set_directory(dir);
+        }
+        let Some(path) = dialog.save_file() else {
+            return false;
+        };
+        let path = ensure_pdf_extension(path);
+        match self.tabs[index].doc.save_as(&path) {
+            Ok(()) => {
+                self.settings.add_recent(&path);
+                self.set_status(ctx, t.saved);
+                true
+            }
+            Err(err) => {
+                self.show_error(&err);
+                false
+            }
+        }
+    }
+
+    pub fn request_close_tab(&mut self, ctx: &Context, index: usize) {
+        let Some(tab) = self.tabs.get(index) else { return };
+        if tab.doc.is_modified() {
+            self.active = index;
+            self.dialog = Some(Dialog::Unsaved {
+                tab_id: tab.id,
+                then: AfterSave::CloseTab,
+            });
+        } else {
+            self.close_tab(ctx, tab.id);
+        }
+    }
+
+    pub fn close_tab(&mut self, ctx: &Context, tab_id: u64) {
+        if let Some(i) = self.tabs.iter().position(|t| t.id == tab_id) {
+            self.tabs.remove(i);
+            if self.active >= self.tabs.len() {
+                self.active = self.tabs.len().saturating_sub(1);
+            }
+        }
+        ctx.request_repaint();
+    }
+
+    /// Continues after the "unsaved changes" question was answered.
+    pub fn after_unsaved(&mut self, ctx: &Context, tab_id: u64, then: AfterSave, save: bool) {
+        if save && !self.save(ctx, Some(tab_id)) {
+            return;
+        }
+        match then {
+            AfterSave::CloseTab => self.close_tab(ctx, tab_id),
+            AfterSave::Exit => {
+                if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) {
+                    // Discard: mark as handled so the next check moves on.
+                    if !save {
+                        let id = tab.id;
+                        self.close_tab(ctx, id);
+                    }
+                }
+                if let Some(next) = self.tabs.iter().find(|t| t.doc.is_modified()) {
+                    self.dialog = Some(Dialog::Unsaved {
+                        tab_id: next.id,
+                        then: AfterSave::Exit,
+                    });
+                } else {
+                    self.exit_confirmed = true;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            }
+        }
+    }
+
+    pub fn undo(&mut self, ctx: &Context) {
+        self.edit(ctx, |tab| tab.doc.undo().map(|_| ()));
+    }
+
+    pub fn redo(&mut self, ctx: &Context) {
+        self.edit(ctx, |tab| tab.doc.redo().map(|_| ()));
+    }
+
+    pub fn zoom_step(&mut self, zoom_in: bool) {
+        if let Some(tab) = self.tab() {
+            tab.zoom = if zoom_in { view::zoom_in(tab.zoom) } else { view::zoom_out(tab.zoom) };
+            tab.zoom_mode = ZoomMode::Custom;
+            let page = tab.current_page;
+            tab.pending_scroll = Some(crate::ui::tab::ScrollRequest::Page(page));
+        }
+    }
+
+    pub fn set_zoom(&mut self, zoom: f32) {
+        if let Some(tab) = self.tab() {
+            tab.zoom = zoom.clamp(view::MIN_ZOOM, view::MAX_ZOOM);
+            tab.zoom_mode = ZoomMode::Custom;
+            let page = tab.current_page;
+            tab.pending_scroll = Some(crate::ui::tab::ScrollRequest::Page(page));
+        }
+    }
+
+    pub fn set_zoom_mode(&mut self, mode: ZoomMode) {
+        self.settings.zoom_mode = mode;
+        if let Some(tab) = self.tab() {
+            tab.zoom_mode = mode;
+            let page = tab.current_page;
+            tab.pending_scroll = Some(crate::ui::tab::ScrollRequest::Page(page));
+        }
+    }
+
+    pub fn set_layout(&mut self, layout: view::PageLayout) {
+        self.settings.layout = layout;
+        if let Some(tab) = self.tab() {
+            tab.layout_mode = layout;
+            let page = tab.current_page;
+            tab.pending_scroll = Some(crate::ui::tab::ScrollRequest::Page(page));
+        }
+    }
+
+    pub fn copy_selection(&mut self, ctx: &Context) {
+        let text = self.tab().and_then(|t| t.selected_text());
+        if let Some(text) = text.filter(|t| !t.is_empty()) {
+            let permitted = self.active_tab().is_some_and(|t| t.doc.permissions().copy);
+            let t = self.t();
+            if permitted {
+                ctx.copy_text(text);
+                self.set_status(ctx, t.copied);
+            } else {
+                self.set_status(ctx, t.err_not_permitted);
+            }
+        }
+    }
+
+    pub fn select_all_text(&mut self) {
+        if let Some(tab) = self.tab() {
+            let page = tab.current_page;
+            if let Some(text) = tab.page_text(page)
+                && !text.is_empty()
+            {
+                tab.selection = Some(crate::ui::tab::TextSelection {
+                    page,
+                    range: crate::text::TextRange::new(0, text.chars.len() - 1),
+                });
+            }
+        }
+    }
+
+    pub fn delete_selected_annotation(&mut self, ctx: &Context) {
+        let Some(sel) = self.active_tab().and_then(|t| t.selected_annot) else {
+            return;
+        };
+        self.edit(ctx, |tab| {
+            tab.selected_annot = None;
+            tab.doc.delete_annotation(sel.page, sel.index)
+        });
+    }
+
+    pub fn open_properties(&mut self) {
+        if let Some(tab) = self.active_tab() {
+            self.dialog = Some(Dialog::Properties { meta: tab.doc.metadata() });
+        }
+    }
+
+    /// Windows: shows the system print dialog. Elsewhere: MrPDF's own dialog.
+    pub fn open_print_dialog(&mut self, ctx: &Context) {
+        #[cfg(windows)]
+        {
+            let t = self.t();
+            let result = match self.active_tab() {
+                Some(tab) => crate::print::print_with_dialog(&tab.doc),
+                None => return,
+            };
+            match result {
+                Ok(true) => self.set_status(ctx, t.print_sent),
+                Ok(false) => {}
+                Err(err) => self.show_error(&err),
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = ctx;
+            if let Some(tab) = self.active_tab() {
+                self.dialog = Some(Dialog::Print {
+                    range: format!("1-{}", tab.doc.page_count()),
+                    copies: 1,
+                    error: false,
+                });
+            }
+        }
+    }
+
+    /// Prints through CUPS (Linux, macOS).
+    pub fn print(&mut self, ctx: &Context, pages: Vec<usize>, copies: u32) {
+        #[cfg(unix)]
+        {
+            let t = self.t();
+            let result = match self.tabs.get_mut(self.active) {
+                Some(tab) => crate::print::print_pages(&mut tab.doc, &pages, copies),
+                None => return,
+            };
+            match result {
+                Ok(job) => self.set_status(ctx, format!("{} {job}", t.print_sent)),
+                Err(err) => self.show_error(&err),
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (pages, copies);
+            self.open_print_dialog(ctx);
+        }
+    }
+
+    /// Creates a text markup annotation from the current text selection.
+    pub fn markup_selection(&mut self, ctx: &Context, tool: Tool) {
+        let style = self.settings.style(tool);
+        let Some(kind) = tool.annot_kind() else { return };
+        self.edit(ctx, |tab| {
+            let Some(sel) = tab.selection else { return Ok(()) };
+            let Some(text) = tab.page_text(sel.page) else { return Ok(()) };
+            let mut annot = NewAnnotation::new(kind, style);
+            annot.quads = text.line_rects(sel.range);
+            annot.contents = text.text_in(sel.range);
+            tab.doc.add_annotation(sel.page, &annot)
+        });
+    }
+
+    pub fn current_pages(&self) -> Vec<usize> {
+        self.active_tab().map(|t| vec![t.current_page]).unwrap_or_default()
+    }
+
+    pub fn rotate_current(&mut self, ctx: &Context, delta: i32) {
+        let pages = self.current_pages();
+        self.edit(ctx, |tab| tab.doc.rotate_pages(&pages, delta));
+    }
+
+    pub fn move_current_page(&mut self, ctx: &Context, up: bool) {
+        self.edit(ctx, |tab| {
+            let cur = tab.current_page;
+            let n = tab.doc.page_count();
+            let target = if up {
+                if cur == 0 {
+                    return Ok(());
+                }
+                cur - 1
+            } else {
+                if cur + 1 >= n {
+                    return Ok(());
+                }
+                cur + 2
+            };
+            tab.doc.move_pages(&[cur], target)?;
+            let new_page = if up { cur - 1 } else { cur + 1 };
+            tab.go_to_page(new_page);
+            Ok(())
+        });
+    }
+
+    pub fn move_page_to(&mut self, ctx: &Context, page: usize, to: usize) {
+        self.edit(ctx, |tab| {
+            tab.doc.move_pages(&[page], to)?;
+            let new_page = if to > page { to - 1 } else { to };
+            tab.go_to_page(new_page);
+            Ok(())
+        });
+    }
+
+    pub fn insert_from_file(&mut self, ctx: &Context, position: InsertPosition) {
+        let t = self.t();
+        let Some(path) = rfd::FileDialog::new()
+            .set_title(t.insert_from_file)
+            .add_filter("PDF", &["pdf", "PDF"])
+            .pick_file()
+        else {
+            return;
+        };
+        self.edit(ctx, |tab| {
+            let at = match position {
+                InsertPosition::Before => tab.current_page,
+                InsertPosition::After => tab.current_page + 1,
+                InsertPosition::End => tab.doc.page_count(),
+            };
+            let count = tab.doc.insert_pages_from(at, &path, None)?;
+            if count > 0 {
+                tab.go_to_page(at);
+            }
+            Ok(())
+        });
+    }
+
+    pub fn insert_blank(&mut self, ctx: &Context, count: u32, paper: PaperChoice, landscape: bool, position: InsertPosition) {
+        self.edit(ctx, |tab| {
+            let (mut w, mut h) = paper.size().unwrap_or_else(|| {
+                tab.doc
+                    .geometry(tab.current_page)
+                    .map_or((595.28, 841.89), |g| (g.crop.width(), g.crop.height()))
+            });
+            if landscape != (w > h) {
+                std::mem::swap(&mut w, &mut h);
+            }
+            let at = match position {
+                InsertPosition::Before => tab.current_page,
+                InsertPosition::After => tab.current_page + 1,
+                InsertPosition::End => tab.doc.page_count(),
+            };
+            for _ in 0..count.clamp(1, 500) {
+                tab.doc.insert_blank_page(at, w, h)?;
+            }
+            tab.go_to_page(at);
+            Ok(())
+        });
+    }
+
+    pub fn apply_range(&mut self, ctx: &Context, purpose: RangePurpose, pages: Vec<usize>) {
+        match purpose {
+            RangePurpose::Delete => self.edit(ctx, |tab| tab.doc.delete_pages(&pages)),
+            RangePurpose::Rotate(delta) => self.edit(ctx, |tab| tab.doc.rotate_pages(&pages, delta)),
+            RangePurpose::Flatten => self.edit(ctx, |tab| tab.doc.flatten_pages(&pages)),
+            RangePurpose::Extract => {
+                let t = self.t();
+                let Some(tab) = self.active_tab() else { return };
+                let stem = tab
+                    .doc
+                    .display_name()
+                    .trim_end_matches(".pdf")
+                    .trim_end_matches(".PDF")
+                    .to_string();
+                let Some(dest) = rfd::FileDialog::new()
+                    .set_title(t.extract_pages)
+                    .add_filter("PDF", &["pdf"])
+                    .set_file_name(format!("{stem}-{}.pdf", t.extract_suffix))
+                    .save_file()
+                else {
+                    return;
+                };
+                let dest = ensure_pdf_extension(dest);
+                let result = self.active_tab().map(|tab| tab.doc.extract_pages(&pages, &dest));
+                match result {
+                    Some(Ok(())) => {
+                        self.set_status(ctx, t.saved);
+                        self.pending_open.push_back(dest);
+                    }
+                    Some(Err(err)) => self.show_error(&err),
+                    None => {}
+                }
+            }
+        }
+    }
+
+    pub fn export_images(&mut self, ctx: &Context, pages: Vec<usize>, dpi: u32, jpeg: bool) {
+        let t = self.t();
+        let ext = if jpeg { "jpg" } else { "png" };
+        let Some(tab) = self.active_tab() else { return };
+        let stem = tab
+            .doc
+            .display_name()
+            .trim_end_matches(".pdf")
+            .trim_end_matches(".PDF")
+            .to_string();
+        let result = if pages.len() == 1 {
+            let Some(dest) = rfd::FileDialog::new()
+                .set_title(t.export_image)
+                .add_filter(ext, &[ext])
+                .set_file_name(format!("{stem}-{}.{ext}", pages[0] + 1))
+                .save_file()
+            else {
+                return;
+            };
+            tab.doc.export_page_image(pages[0], dpi as f32, &dest)
+        } else {
+            let Some(dir) = rfd::FileDialog::new().set_title(t.export_image).pick_folder() else {
+                return;
+            };
+            pages.iter().try_for_each(|&p| {
+                tab.doc
+                    .export_page_image(p, dpi as f32, &dir.join(format!("{stem}-{}.{ext}", p + 1)))
+            })
+        };
+        match result {
+            Ok(()) => self.set_status(ctx, t.export_done),
+            Err(err) => self.show_error(&err),
+        }
+    }
+
+    pub fn handle_canvas_event(&mut self, ctx: &Context, event: CanvasEvent) {
+        match event {
+            CanvasEvent::Create { page, annot } => {
+                self.edit(ctx, |tab| {
+                    tab.doc.add_annotation(page, &annot)?;
+                    let index = tab.doc.annotations(page)?.len().saturating_sub(1);
+                    tab.selected_annot = Some(crate::ui::tab::AnnotRef { page, index });
+                    Ok(())
+                });
+                if self.tool != Tool::Pencil && !self.tool.is_markup() {
+                    // Like most editors, return to the hand tool after placing a single object.
+                    self.tool = Tool::Hand;
+                }
+            }
+            CanvasEvent::RequestText { page, rect, kind } => {
+                self.dialog = Some(Dialog::TextInput {
+                    page,
+                    rect,
+                    kind,
+                    text: String::new(),
+                    edit: None,
+                });
+            }
+            CanvasEvent::EditText(annot) => {
+                let info = self.tab().and_then(|t| t.annotations(annot.page).get(annot.index).cloned());
+                if let Some(info) = info {
+                    self.dialog = Some(Dialog::TextInput {
+                        page: annot.page,
+                        rect: info.rect,
+                        kind: info.kind,
+                        text: info.contents,
+                        edit: Some(annot),
+                    });
+                }
+            }
+            CanvasEvent::Move { annot, dx, dy } => {
+                self.edit(ctx, |tab| {
+                    tab.doc.update_annotation(
+                        annot.page,
+                        annot.index,
+                        &AnnotUpdate {
+                            translate: Some((dx, dy)),
+                            ..AnnotUpdate::default()
+                        },
+                    )
+                });
+            }
+            CanvasEvent::OpenUri(uri) => {
+                if is_safe_uri(&uri) {
+                    self.dialog = Some(Dialog::ConfirmLink { uri });
+                } else {
+                    let t = self.t();
+                    self.set_status(ctx, t.link_blocked);
+                }
+            }
+            CanvasEvent::CommitField { page, annot_index, value } => {
+                let unchanged = self
+                    .tab()
+                    .and_then(|t| t.fields(page).iter().find(|f| f.annot_index == annot_index).map(|f| f.value == value))
+                    .unwrap_or(false);
+                if !unchanged {
+                    self.edit(ctx, |tab| tab.doc.set_text_field(page, annot_index, &value));
+                }
+            }
+            CanvasEvent::SetChecked { page, annot_index, checked } => {
+                self.edit(ctx, |tab| tab.doc.set_checked(page, annot_index, checked));
+            }
+            CanvasEvent::ChooseOption { page, annot_index, options, current } => {
+                self.dialog = Some(Dialog::Choice { page, annot_index, options, selected: current });
+            }
+            CanvasEvent::MarkupSelection(tool) => self.markup_selection(ctx, tool),
+            CanvasEvent::CopySelection => self.copy_selection(ctx),
+            CanvasEvent::DeleteSelected => self.delete_selected_annotation(ctx),
+            CanvasEvent::ShowProperties => self.settings.show_properties = true,
+            CanvasEvent::Status(text) => self.set_status(ctx, text),
+        }
+    }
+
+    /// Creates or edits a note / text box after the text dialog.
+    pub fn finish_text_input(
+        &mut self,
+        ctx: &Context,
+        page: usize,
+        rect: crate::geometry::RectF,
+        kind: AnnotKind,
+        text: String,
+        edit: Option<crate::ui::tab::AnnotRef>,
+    ) {
+        let tool = if kind == AnnotKind::Note { Tool::Note } else { Tool::TextBox };
+        let style = self.settings.style(tool);
+        self.edit(ctx, |tab| match edit {
+            Some(annot) => tab.doc.update_annotation(
+                annot.page,
+                annot.index,
+                &AnnotUpdate {
+                    contents: Some(text),
+                    ..AnnotUpdate::default()
+                },
+            ),
+            None => {
+                if text.trim().is_empty() && kind == AnnotKind::FreeText {
+                    return Ok(());
+                }
+                let mut annot = NewAnnotation::new(kind, style);
+                annot.rect = rect;
+                annot.contents = text;
+                tab.doc.add_annotation(page, &annot)?;
+                let index = tab.doc.annotations(page)?.len().saturating_sub(1);
+                tab.selected_annot = Some(crate::ui::tab::AnnotRef { page, index });
+                Ok(())
+            }
+        });
+        self.tool = Tool::Hand;
+    }
+
+    pub fn update_selected(&mut self, ctx: &Context, update: AnnotUpdate) {
+        let Some(sel) = self.active_tab().and_then(|t| t.selected_annot) else {
+            return;
+        };
+        self.edit(ctx, |tab| tab.doc.update_annotation(sel.page, sel.index, &update));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn page_ranges() {
+        assert_eq!(parse_page_range("1-3, 5", 10), Some(vec![0, 1, 2, 4]));
+        assert_eq!(parse_page_range("8-", 10), Some(vec![7, 8, 9]));
+        assert_eq!(parse_page_range("-2", 10), Some(vec![0, 1]));
+        assert_eq!(parse_page_range("3,3,1", 10), Some(vec![0, 2]));
+        assert_eq!(parse_page_range("0", 10), None);
+        assert_eq!(parse_page_range("11", 10), None);
+        assert_eq!(parse_page_range("5-2", 10), None);
+        assert_eq!(parse_page_range("a", 10), None);
+        assert_eq!(parse_page_range("", 10), None);
+    }
+
+    #[test]
+    fn uri_filter() {
+        assert!(is_safe_uri("https://example.org/a?b=c"));
+        assert!(is_safe_uri("mailto:someone@example.org"));
+        assert!(!is_safe_uri("file:///etc/passwd"));
+        assert!(!is_safe_uri("javascript:alert(1)"));
+        assert!(!is_safe_uri("https://exa mple.org"));
+        assert!(!is_safe_uri("C:\\Windows\\system32\\calc.exe"));
+    }
+}
