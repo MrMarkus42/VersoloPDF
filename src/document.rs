@@ -6,6 +6,7 @@
 //! metadata) are applied to the serialised bytes by [`crate::pdf_edit`] and
 //! the result is reloaded. Every edit records an undo snapshot.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -25,6 +26,7 @@ use crate::pages;
 use crate::pdf_edit::{self, AnnotDetails, AnnotUpdate, NewAnnotation};
 use crate::security::{self, ProtectOptions, SecurityInfo};
 use crate::text::{CharInfo, PageText};
+use crate::xfdf;
 
 /// Files larger than this are refused to protect against memory exhaustion.
 pub const MAX_FILE_SIZE: u64 = 1 << 31;
@@ -181,6 +183,16 @@ pub fn read_pdf_file(path: &Path) -> Result<Vec<u8>> {
 
 /// Writes `bytes` to `path` atomically (temporary file + rename), so a
 /// failure never leaves a half-written document behind.
+/// Reads an XFDF file (size-limited, UTF-8).
+fn read_xfdf(path: &Path) -> Result<String> {
+    let len = fs::metadata(path).map_err(|e| Error::io(path, e))?.len();
+    if len > xfdf::MAX_XFDF as u64 {
+        return Err(Error::FileTooLarge { size: len, limit: xfdf::MAX_XFDF as u64 });
+    }
+    String::from_utf8(fs::read(path).map_err(|e| Error::io(path, e))?)
+        .map_err(|_| Error::Invalid("XFDF file is not UTF-8".into()))
+}
+
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     let dir = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
     let file_name =
@@ -1059,6 +1071,105 @@ impl Document {
             return Err(Error::NotPermitted);
         }
         self.edit_bytes("fill form", |b, pw| forms::set_field_value(b, pw, page, annot_index, value))
+    }
+
+    /// Creates a new form field; returns the (unique) name it got.
+    pub fn create_field(
+        &mut self,
+        page: usize,
+        rect: RectF,
+        kind: &forms::NewFieldKind,
+        name: &str,
+    ) -> Result<String> {
+        self.check_page(page)?;
+        self.require(self.permissions().modify)?;
+        let mut used = String::new();
+        self.edit_bytes("add form field", |b, pw| {
+            let (bytes, name) = forms::create_field(b, pw, page, rect, kind, name)?;
+            used = name;
+            Ok(bytes)
+        })?;
+        Ok(used)
+    }
+
+    pub fn field_values(&mut self) -> Result<Vec<(String, String)>> {
+        self.sync_bytes()?;
+        forms::field_values(&self.bytes, self.password.as_deref())
+    }
+
+    pub fn reset_form(&mut self) -> Result<()> {
+        self.require(self.permissions().fill_forms)?;
+        self.edit_bytes("reset form", forms::reset_form)
+    }
+
+    /// Writes the form data as XFDF.
+    pub fn export_form_data(&mut self, dest: &Path) -> Result<()> {
+        let values = self.field_values()?;
+        write_atomic(dest, xfdf::export_fields(&values, &self.display_name).as_bytes())
+    }
+
+    /// Fills the form from an XFDF file. Returns the number of fields set.
+    pub fn import_form_data(&mut self, source: &Path) -> Result<usize> {
+        self.require(self.permissions().fill_forms)?;
+        let values = xfdf::import_fields(&read_xfdf(source)?)?;
+        let mut count = 0;
+        self.edit_bytes("import form data", |b, pw| {
+            let (bytes, n) = forms::set_values_by_name(b, pw, &values)?;
+            count = n;
+            Ok(bytes)
+        })?;
+        Ok(count)
+    }
+
+    // -----------------------------------------------------------------
+    // Comments as a whole
+
+    /// All comments of the document in page order.
+    pub fn comments(&mut self) -> Result<Vec<pdf_edit::AnnotRecord>> {
+        self.sync_bytes()?;
+        pdf_edit::read_annotations(&self.bytes, self.password.as_deref())
+    }
+
+    pub fn export_comments(&mut self, dest: &Path) -> Result<usize> {
+        let records = self.comments()?;
+        write_atomic(dest, xfdf::export_comments(&records, &self.display_name).as_bytes())?;
+        Ok(records.len())
+    }
+
+    /// Imports comments from an XFDF file. Returns the number added.
+    pub fn import_comments(&mut self, source: &Path, default_author: &str) -> Result<usize> {
+        self.require(self.permissions().annotate)?;
+        let pages = self.page_count();
+        let items: Vec<_> = xfdf::import_comments(&read_xfdf(source)?, default_author)?
+            .into_iter()
+            .filter(|(p, _)| *p < pages)
+            .collect();
+        if items.is_empty() {
+            return Ok(0);
+        }
+        self.edit_bytes("import comments", |b, pw| pdf_edit::add_annotations(b, pw, &items))?;
+        Ok(items.len())
+    }
+
+    /// Deletes every comment (links and form fields stay). Returns the count.
+    pub fn delete_all_comments(&mut self) -> Result<usize> {
+        self.require(self.permissions().annotate)?;
+        let records = self.comments()?;
+        if records.is_empty() {
+            return Ok(0);
+        }
+        let mut by_page: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+        for r in &records {
+            by_page.entry(r.page).or_default().push(r.index);
+        }
+        self.edit_bytes("delete all comments", |b, pw| {
+            let mut current = b.to_vec();
+            for (page, indices) in &by_page {
+                current = pdf_edit::delete_annotations(&current, pw, *page, indices)?;
+            }
+            Ok(current)
+        })?;
+        Ok(records.len())
     }
     // -----------------------------------------------------------------
     // Security

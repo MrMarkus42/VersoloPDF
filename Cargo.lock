@@ -2246,6 +2246,7 @@ dependencies = [
  "log",
  "lopdf",
  "pdfium-render",
+ "quick-xml 0.41.0",
  "rfd",
  "serde",
  "sha2",

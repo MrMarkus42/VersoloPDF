@@ -4,6 +4,7 @@ mod actions;
 pub mod commands;
 mod dialogs;
 mod features;
+mod formdata;
 mod properties;
 mod ribbon;
 mod sidebar;
@@ -203,6 +204,12 @@ pub enum Dialog {
     Duplicates {
         groups: Vec<Vec<usize>>,
     },
+    Confirm {
+        title: String,
+        text: String,
+        cmd: commands::Cmd,
+    },
+    NewField(Box<formdata::FieldForm>),
     About,
 }
 
@@ -238,6 +245,8 @@ pub struct MrPdfApp {
     props_style: Option<(AnnotRef, u64, crate::model::AnnotStyle)>,
     quick_query: String,
     quick_focus: bool,
+    /// Last radio group and number of buttons placed in it.
+    last_radio: (String, u32),
 }
 
 impl MrPdfApp {
@@ -273,6 +282,7 @@ impl MrPdfApp {
             props_style: None,
             quick_query: String::new(),
             quick_focus: false,
+            last_radio: ("RadioGroup1".into(), 0),
         }
     }
 
@@ -294,6 +304,13 @@ impl MrPdfApp {
 
     pub fn active_tab_mut(&mut self) -> Option<&mut DocTab> {
         self.tabs.get_mut(self.active)
+    }
+
+    /// Switches to tab index (ignored if out of range).
+    pub fn set_active_tab(&mut self, index: usize) {
+        if index < self.tabs.len() {
+            self.active = index;
+        }
     }
 
     pub fn tool(&self) -> Tool {

@@ -14,24 +14,9 @@ use crate::ui::tools::Tool;
 
 /// Commands that are not implemented yet; they are shown greyed out.
 pub const PENDING: &[Cmd] = &[
-    Cmd::SummarizeComments,
-    Cmd::ExportComments,
-    Cmd::ImportComments,
-    Cmd::DeleteAllComments,
     Cmd::ApplyRedactions,
     Cmd::SearchRedact,
     Cmd::Tool(Tool::Redact),
-    Cmd::ResetForm,
-    Cmd::ExportFormData,
-    Cmd::ImportFormData,
-    Cmd::Tool(Tool::SelectFields),
-    Cmd::Tool(Tool::FieldText),
-    Cmd::Tool(Tool::FieldButton),
-    Cmd::Tool(Tool::FieldCheckBox),
-    Cmd::Tool(Tool::FieldRadio),
-    Cmd::Tool(Tool::FieldList),
-    Cmd::Tool(Tool::FieldCombo),
-    Cmd::Tool(Tool::FieldSignature),
     Cmd::FromFiles,
     Cmd::ContentsToImages,
     Cmd::ExportText,
@@ -112,7 +97,9 @@ impl MrPdfApp {
                 self.info(Cmd::FileAssociation.label(self.settings.language), text.to_string());
             }
             other => {
-                self.run_structure(ctx, other);
+                if !self.run_forms(ctx, other) {
+                    self.run_structure(ctx, other);
+                }
             }
         }
     }
@@ -180,7 +167,7 @@ impl MrPdfApp {
                 });
             }
             CanvasEvent::AttachFile { page, rect } => self.attach_file(ctx, page, rect),
-            CanvasEvent::CreateField { .. } => {}
+            CanvasEvent::CreateField { page, rect, tool } => self.create_field(ctx, page, rect, tool),
             _ => {}
         }
     }

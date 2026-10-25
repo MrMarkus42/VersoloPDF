@@ -1315,3 +1315,80 @@ pub fn add_image_stamp(
         edit.finish()
     })
 }
+
+/// Complete description of an annotation as stored in the file.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AnnotRecord {
+    pub page: usize,
+    pub index: usize,
+    pub kind: AnnotKind,
+    pub rect: RectF,
+    pub color: Option<Rgba>,
+    pub fill: Option<Rgba>,
+    pub width: f32,
+    pub opacity: f32,
+    pub contents: String,
+    pub author: String,
+    pub subject: String,
+    pub date: String,
+    pub name: String,
+    pub quads: Vec<RectF>,
+    pub paths: Vec<Vec<PointF>>,
+    pub arrow_end: bool,
+    pub font_size: f32,
+}
+
+/// Reads all annotations of the document (except links, pop-ups and widgets).
+pub fn read_annotations(bytes: &[u8], password: Option<&str>) -> Result<Vec<AnnotRecord>> {
+    guarded(|| {
+        let edit = Edit::open(bytes, password)?;
+        let mut out = Vec::new();
+        for (page, page_id) in edit.page_ids().into_iter().enumerate() {
+            for (index, entry) in edit.annots(page_id)?.iter().enumerate() {
+                let Ok(dict) = edit.resolve(entry).and_then(|o| Ok(o.as_dict()?)) else { continue };
+                let kind = name(dict, b"Subtype").map(|s| kind_from_subtype(&s)).unwrap_or(AnnotKind::Other);
+                if !kind.is_comment() {
+                    continue;
+                }
+                let Some(rect) = read_rect(dict) else { continue };
+                let da = string(dict, b"DA").unwrap_or_default();
+                out.push(AnnotRecord {
+                    page,
+                    index,
+                    kind,
+                    rect,
+                    color: read_color(dict, b"C"),
+                    fill: read_color(dict, b"IC"),
+                    width: read_width(dict),
+                    opacity: dict.get(b"CA").ok().and_then(number).unwrap_or(1.0),
+                    contents: string(dict, b"Contents").unwrap_or_default(),
+                    author: string(dict, b"T").unwrap_or_default(),
+                    subject: string(dict, b"Subj").unwrap_or_default(),
+                    date: string(dict, b"M").unwrap_or_default(),
+                    name: name(dict, b"Name").unwrap_or_default(),
+                    quads: read_quads(dict),
+                    paths: read_paths(dict, kind),
+                    arrow_end: matches!(
+                        dict.get(b"LE"),
+                        Ok(Object::Array(ends)) if ends.get(1).and_then(|e| e.as_name().ok()).is_some_and(|n| n != b"None")
+                    ),
+                    font_size: font_size_from_da(&da).unwrap_or(12.0),
+                });
+            }
+        }
+        Ok(out)
+    })
+}
+
+/// Adds several annotations in one incremental update.
+pub fn add_annotations(
+    bytes: &[u8],
+    password: Option<&str>,
+    items: &[(usize, NewAnnotation)],
+) -> Result<Vec<u8>> {
+    let mut current = bytes.to_vec();
+    for (page, annot) in items {
+        current = add_annotation(&current, password, *page, annot)?;
+    }
+    Ok(current)
+}

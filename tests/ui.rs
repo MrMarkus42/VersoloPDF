@@ -482,3 +482,79 @@ fn document_structure_ui() {
     let tab = h.state_mut().active_tab_mut().unwrap();
     assert!(tab.doc.page_text(0).unwrap().all_text().contains("Page 3"));
 }
+
+#[test]
+fn form_designer_and_comment_commands() {
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let file = sample_file(&dir, 1);
+    let mut h = harness(vec![file], false);
+    h.run_steps(10);
+    let at = |h: &Harness<'_, MrPdfApp>, x: f32, y: f32| {
+        h.state().active_tab().unwrap().screen_pos(0, mrpdf::geometry::PointF::new(x, y)).unwrap()
+    };
+    let fields = |h: &mut Harness<'_, MrPdfApp>| {
+        let tab = h.state_mut().active_tab_mut().unwrap();
+        tab.doc.form_fields(0).unwrap().into_iter().map(|f| f.kind).collect::<Vec<_>>()
+    };
+    tab(&mut h, "Formular");
+
+    // Check box: drawn directly with an automatic name.
+    h.get_all_by_label("Auswahlfeld (Häkchen)").next().unwrap().click();
+    h.run_steps(3);
+    let (a, b) = (at(&h, 100.0, 700.0), at(&h, 116.0, 684.0));
+    drag(&mut h, a, b);
+    h.run_steps(4);
+    assert_eq!(fields(&mut h), vec![mrpdf::model::FieldKind::CheckBox]);
+
+    // Combo box asks for its items first.
+    h.get_all_by_label("Menü").next().unwrap().click();
+    h.run_steps(3);
+    let (a, b) = (at(&h, 100.0, 650.0), at(&h, 250.0, 630.0));
+    drag(&mut h, a, b);
+    h.run_steps(4);
+    assert!(h.state().dialog().is_some(), "options dialog");
+    save(&mut h, "22-new-field-dialog");
+    h.get_by_label("OK").click();
+    h.run_steps(6);
+    assert!(fields(&mut h).contains(&mrpdf::model::FieldKind::ComboBox));
+
+    // Text field, then the field selection tool selects it.
+    h.get_all_by_label("Text").next().unwrap().click();
+    h.run_steps(3);
+    let (a, b) = (at(&h, 100.0, 600.0), at(&h, 300.0, 580.0));
+    drag(&mut h, a, b);
+    h.run_steps(4);
+    assert_eq!(fields(&mut h).len(), 3);
+    h.get_all_by_label("Felder auswählen").next().unwrap().click();
+    h.run_steps(3);
+    let p = at(&h, 200.0, 590.0);
+    click(&mut h, p);
+    assert!(h.state().active_tab().unwrap().selected_annot.is_some(), "field selected");
+    save(&mut h, "23-form-designer");
+
+    // Comment summary opens a new tab; deleting all comments asks first.
+    {
+        let tab = h.state_mut().active_tab_mut().unwrap();
+        let mut note = mrpdf::pdf_edit::NewAnnotation::new(AnnotKind::Note, Default::default());
+        note.rect = mrpdf::geometry::RectF::new(400.0, 700.0, 420.0, 720.0);
+        note.contents = "Notiz".into();
+        tab.doc.add_annotation(0, &note).unwrap();
+        tab.after_edit();
+    }
+    quick(&mut h, "Anmerkungen zusammenfassen");
+    assert_eq!(h.state().tab_count(), 2);
+    {
+        let tab = h.state_mut().active_tab_mut().unwrap();
+        assert!(tab.doc.page_text(0).unwrap().all_text().contains("Notiz"));
+    }
+    save(&mut h, "24-comment-summary");
+    h.state_mut().set_active_tab(0);
+    h.run_steps(3);
+    quick(&mut h, "Anmerkungen löschen");
+    assert!(h.state().dialog().is_some(), "confirmation");
+    h.get_by_label("OK").click();
+    h.run_steps(4);
+    assert!(!kinds(&mut h).contains(&AnnotKind::Note));
+    assert_eq!(fields(&mut h).len(), 3, "form fields are kept");
+}

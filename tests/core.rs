@@ -664,3 +664,147 @@ fn page_marks_and_labels() {
     assert_eq!(doc.page_label(1).as_deref(), Some("ii"));
     assert_eq!(doc.page_label(2).as_deref(), Some("A-1"));
 }
+
+fn temp_file(name: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("mrpdf-test-{}-{name}", std::process::id()))
+}
+
+#[test]
+fn form_fields_can_be_created_reset_and_exchanged() {
+    use mrpdf::forms::NewFieldKind;
+    let _guard = common::lock();
+    let mut doc = open(1);
+    let r = |x: f32, y: f32, w: f32, h: f32| RectF::new(x, y, x + w, y + h);
+    assert_eq!(
+        doc.create_field(0, r(100.0, 700.0, 200.0, 20.0), &NewFieldKind::Text { multiline: false }, "")
+            .unwrap(),
+        "Text1"
+    );
+    assert_eq!(
+        doc.create_field(0, r(100.0, 660.0, 200.0, 20.0), &NewFieldKind::Text { multiline: false }, "")
+            .unwrap(),
+        "Text2"
+    );
+    doc.create_field(0, r(100.0, 620.0, 14.0, 14.0), &NewFieldKind::CheckBox, "agree").unwrap();
+    for (i, x) in [100.0, 130.0].iter().enumerate() {
+        let kind = NewFieldKind::Radio { group: "colour".into(), export: format!("c{i}") };
+        assert_eq!(doc.create_field(0, r(*x, 580.0, 14.0, 14.0), &kind, "").unwrap(), "colour");
+    }
+    let options = vec!["rot".to_string(), "grün".to_string()];
+    doc.create_field(
+        0,
+        r(100.0, 540.0, 120.0, 20.0),
+        &NewFieldKind::ComboBox { options: options.clone() },
+        "",
+    )
+    .unwrap();
+    doc.create_field(0, r(100.0, 460.0, 120.0, 60.0), &NewFieldKind::ListBox { options }, "").unwrap();
+    doc.create_field(
+        0,
+        r(300.0, 460.0, 80.0, 24.0),
+        &NewFieldKind::ResetButton { caption: "Reset".into() },
+        "",
+    )
+    .unwrap();
+    doc.create_field(0, r(300.0, 380.0, 160.0, 50.0), &NewFieldKind::Signature { label: "Sign".into() }, "")
+        .unwrap();
+
+    let fields = doc.form_fields(0).unwrap();
+    let kinds: Vec<_> = fields.iter().map(|f| f.kind.clone()).collect();
+    assert_eq!(fields.len(), 9, "{fields:#?}");
+    assert!(kinds.contains(&FieldKind::CheckBox));
+    assert_eq!(kinds.iter().filter(|k| **k == FieldKind::RadioButton).count(), 2);
+    assert!(kinds.contains(&FieldKind::ComboBox) && kinds.contains(&FieldKind::ListBox));
+    assert!(kinds.contains(&FieldKind::PushButton) && kinds.contains(&FieldKind::Signature));
+
+    // The new fields can be filled through the normal API.
+    let text1 = fields.iter().find(|f| f.name == "Text1").unwrap().annot_index;
+    doc.set_text_field(0, text1, "Hallo").unwrap();
+    let radio = fields.iter().filter(|f| f.kind == FieldKind::RadioButton).nth(1).unwrap().annot_index;
+    doc.set_checked(0, radio, true).unwrap();
+    let values = doc.field_values().unwrap();
+    assert!(values.contains(&("Text1".into(), "Hallo".into())), "{values:?}");
+    assert!(values.contains(&("colour".into(), "c1".into())), "{values:?}");
+
+    // XFDF export, reset, import.
+    let path = temp_file("fields.xfdf");
+    doc.export_form_data(&path).unwrap();
+    doc.reset_form().unwrap();
+    let values = doc.field_values().unwrap();
+    assert!(values.contains(&("Text1".into(), String::new())), "{values:?}");
+    assert!(values.contains(&("colour".into(), "Off".into())), "{values:?}");
+    assert_eq!(doc.import_form_data(&path).unwrap(), values.len());
+    let values = doc.field_values().unwrap();
+    assert!(values.contains(&("Text1".into(), "Hallo".into())), "{values:?}");
+    assert!(values.contains(&("colour".into(), "c1".into())), "{values:?}");
+    std::fs::remove_file(&path).ok();
+
+    // Survives saving and reloading.
+    let re = Document::from_bytes(doc.to_bytes().unwrap(), "f.pdf", None).unwrap();
+    assert_eq!(re.form_fields(0).unwrap().len(), 9);
+    assert_eq!(re.form_fields(0).unwrap().iter().find(|f| f.name == "Text1").unwrap().value, "Hallo");
+}
+
+#[test]
+fn comments_are_exchanged_summarized_and_deleted() {
+    let _guard = common::lock();
+    let mut doc = open(2);
+    let mut note = NewAnnotation::new(AnnotKind::Note, style(Rgba::rgb(255, 200, 0)));
+    note.rect = RectF::new(100.0, 700.0, 120.0, 720.0);
+    note.contents = "Bitte prüfen (wichtig)".into();
+    doc.add_annotation(0, &note).unwrap();
+    let mut square = NewAnnotation::new(AnnotKind::Square, style(Rgba::rgb(200, 0, 0)));
+    square.rect = RectF::new(100.0, 400.0, 300.0, 500.0);
+    doc.add_annotation(1, &square).unwrap();
+
+    let path = temp_file("comments.xfdf");
+    assert_eq!(doc.export_comments(&path).unwrap(), 2);
+    let xml = std::fs::read_to_string(&path).unwrap();
+    assert!(xml.contains("<text") && xml.contains("<square"), "{xml}");
+
+    let summary = mrpdf::report::build_pdf(
+        "Summary",
+        &doc.comments()
+            .unwrap()
+            .iter()
+            .map(|c| mrpdf::report::Line::new(format!("{} {}", c.page + 1, c.contents)))
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
+    let summary = Document::from_bytes(summary, "s.pdf", None).unwrap();
+    assert!(summary.page_text(0).unwrap().all_text().contains("Bitte prüfen (wichtig)"));
+
+    assert_eq!(doc.delete_all_comments().unwrap(), 2);
+    assert!(doc.comments().unwrap().is_empty());
+    assert_eq!(doc.import_comments(&path, "Import").unwrap(), 2);
+    let comments = doc.comments().unwrap();
+    assert_eq!(comments.len(), 2);
+    assert_eq!(comments[0].contents, "Bitte prüfen (wichtig)");
+    assert_eq!(comments[1].page, 1);
+    assert!(doc.undo().unwrap());
+    assert!(doc.comments().unwrap().is_empty());
+    std::fs::remove_file(&path).ok();
+}
+
+#[test]
+fn table_of_contents_pages_link_to_targets() {
+    let _guard = common::lock();
+    let mut doc = open(3);
+    let lines: Vec<_> = (0..3)
+        .map(|p| mrpdf::report::Line {
+            link: Some(p),
+            right: (p + 2).to_string(),
+            ..mrpdf::report::Line::new(format!("Kapitel {p}"))
+        })
+        .collect();
+    let mut bytes = doc.to_bytes().unwrap();
+    let (new, inserted) = mrpdf::report::insert_front(&bytes, None, &lines).unwrap();
+    bytes = new;
+    assert_eq!(inserted, 1);
+    let doc = Document::from_bytes(bytes, "toc.pdf", None).unwrap();
+    assert_eq!(doc.page_count(), 4);
+    assert!(doc.page_text(0).unwrap().all_text().contains("Kapitel 2"));
+    let links = doc.links(0).unwrap();
+    assert_eq!(links.len(), 3, "{links:?}");
+    assert!(links.iter().any(|l| matches!(l.target, mrpdf::model::LinkTarget::Page(3))), "{links:?}");
+}

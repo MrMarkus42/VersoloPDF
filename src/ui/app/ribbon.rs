@@ -116,7 +116,11 @@ impl MrPdfApp {
         let t = self.t();
         let dark = self.settings.dark_mode;
         let ctx = ui.ctx().clone();
-        let has_selection = self.active_tab().is_some_and(|tab| tab.selected_annot.is_some());
+        // Form fields have no Format tab; they are edited in the properties panel.
+        let has_selection = self
+            .tab()
+            .and_then(|tab| tab.selected_annotation())
+            .is_some_and(|a| a.kind != crate::model::AnnotKind::Widget);
         if !has_selection && self.ribbon == RibbonTab::Format {
             self.ribbon = RibbonTab::Home;
         }

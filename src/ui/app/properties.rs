@@ -3,6 +3,7 @@
 use egui::{Panel, RichText, Ui};
 
 use super::MrPdfApp;
+use super::commands::Cmd;
 use crate::model::{AnnotKind, AnnotStyle, Rgba};
 use crate::pdf_edit::AnnotUpdate;
 use crate::ui::i18n::Strings;
@@ -123,6 +124,15 @@ impl MrPdfApp {
         let details = tab.selected_details();
         let rev = tab.doc.revision();
         let sel = tab.selected_annot.expect("checked above");
+        if info.kind == AnnotKind::Widget {
+            let field = tab
+                .doc
+                .form_fields(sel.page)
+                .ok()
+                .and_then(|f| f.into_iter().find(|f| f.annot_index == sel.index));
+            self.field_properties(ui, &ctx, sel.page, field);
+            return;
+        }
         ui.label(RichText::new(super::sidebar::kind_name(t, info.kind)).strong());
         ui.label(format!("{} {}", t.page, info.page + 1));
         if !info.author.is_empty() {
@@ -203,6 +213,47 @@ impl MrPdfApp {
         }
         if update != AnnotUpdate::default() {
             self.update_selected(&ctx, update);
+        }
+    }
+
+    /// Properties of a selected form field (form designer).
+    fn field_properties(
+        &mut self,
+        ui: &mut Ui,
+        ctx: &egui::Context,
+        page: usize,
+        field: Option<crate::model::FormFieldInfo>,
+    ) {
+        use crate::model::FieldKind;
+        let t = self.t();
+        let de = self.settings.language == crate::ui::i18n::Language::German;
+        ui.label(RichText::new(if de { "Formularfeld" } else { "Form field" }).strong());
+        ui.label(format!("{} {}", t.page, page + 1));
+        if let Some(f) = field {
+            let kind = match f.kind {
+                FieldKind::Text { .. } => Cmd::Tool(Tool::FieldText),
+                FieldKind::CheckBox => Cmd::Tool(Tool::FieldCheckBox),
+                FieldKind::RadioButton => Cmd::Tool(Tool::FieldRadio),
+                FieldKind::ComboBox => Cmd::Tool(Tool::FieldCombo),
+                FieldKind::ListBox => Cmd::Tool(Tool::FieldList),
+                FieldKind::PushButton => Cmd::Tool(Tool::FieldButton),
+                FieldKind::Signature => Cmd::Tool(Tool::FieldSignature),
+                FieldKind::Unknown => Cmd::Tool(Tool::SelectFields),
+            };
+            ui.label(format!("{}: {}", if de { "Typ" } else { "Type" }, kind.label(self.settings.language)));
+            ui.label(format!("Name: {}", f.name));
+            if !f.value.is_empty() {
+                ui.label(format!("{}: {}", if de { "Wert" } else { "Value" }, f.value));
+            }
+            if !f.options.is_empty() {
+                ui.label(format!("{}: {}", if de { "Einträge" } else { "Items" }, f.options.join(", ")));
+            }
+        }
+        ui.add_space(4.0);
+        ui.label(RichText::new(t.tool_hint(Tool::SelectFields)).weak().small());
+        ui.add_space(8.0);
+        if ui.button(if de { "Feld löschen" } else { "Delete field" }).clicked() {
+            self.delete_selected_annotation(ctx);
         }
     }
 }

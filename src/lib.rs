@@ -20,10 +20,12 @@ pub mod outline;
 pub mod pages;
 pub mod pdf_edit;
 pub mod print;
+pub mod report;
 pub mod search;
 pub mod security;
 pub mod text;
 pub mod ui;
+pub mod xfdf;
 
 pub use document::Document;
 pub use error::{Error, Result};
