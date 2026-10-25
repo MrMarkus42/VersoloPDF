@@ -11,15 +11,18 @@ desktop PDF editors.
 * **Viewing** – fast rendering with PDFium, tabs for several documents,
   continuous / single / two-page layouts, zoom (fit width, fit page, 5 %–6400 %,
   Ctrl + mouse wheel), sharp tiles at very high zoom levels, dark mode
-* **Navigation** – page thumbnails, bookmarks (outline), links, page
-  number entry, keyboard shortcuts
+* **Navigation** – page thumbnails, bookmarks (add, rename, delete), links,
+  page number entry, keyboard shortcuts, full screen (F11)
 * **Text** – select and copy text, full-text search with match case / whole
   words and a result list
 * **Comments** – highlight, underline, strike-out, squiggly, sticky notes,
-  text boxes, rectangles, ellipses, lines, arrows, freehand drawing and
-  stamps; colours, fill, line width, opacity and font size; moving, editing
+  text boxes, rectangles, ellipses, lines, arrows, freehand drawing, stamps
+  and image stamps (e.g. a scanned signature); colours, fill, line width, opacity and font size; moving, editing
   and deleting; comment list; flattening
-* **Forms** – fill in text fields, check boxes and radio buttons
+* **Forms** – fill in text fields, check boxes, radio buttons and choice fields
+  (with proper appearance streams)
+* **Security** – open protected files, password protection with AES-256 and
+  permissions, removing protection, file attachments (save / add / delete)
 * **Pages** – rotate, delete, insert blank pages, insert / append other PDFs,
   extract pages, reorder (buttons or drag & drop in the thumbnails)
 * **Documents** – document properties (title, author, …), export pages as
@@ -42,11 +45,11 @@ cargo run --release -- file.pdf
 The PDFium library (`pdfium.dll`, `libpdfium.so` or `libpdfium.dylib`) must be
 placed next to the executable for distribution.
 
-Cross-compiling for Windows on Linux (MinGW):
+Cross-compiling and packaging for Windows on Linux (MinGW):
 
 ```bash
 rustup target add x86_64-pc-windows-gnu
-cargo build --release --target x86_64-pc-windows-gnu
+scripts/package-windows.sh      # creates dist/MrPDF-<version>-windows-x64.zip
 ```
 
 ### Tests
@@ -58,6 +61,12 @@ python3 scripts/check-release-age.py
 ```
 
 The UI tests render screenshots into `target/ui-screenshots/`.
+
+### macOS
+
+The code is portable; build on a Mac with `scripts/fetch-pdfium.sh mac-arm64`
+(or `mac-x64`) and `cargo build --release`, then place `libpdfium.dylib` next
+to the binary or in `MrPDF.app/Contents/Frameworks`. Printing uses CUPS (`lp`).
 
 ## Licence
 
@@ -82,10 +91,11 @@ PDF-Editoren.
 Zoom, Miniaturansichten, Lesezeichen, Links, Text markieren und kopieren,
 Volltextsuche, Kommentare (Hervorheben, Unterstreichen, Durchstreichen,
 Wellenlinie, Notizen, Textfelder, Rechtecke, Ellipsen, Linien, Pfeile,
-Freihand, Stempel), Formulare ausfüllen, Seiten drehen/löschen/einfügen/
-extrahieren/umsortieren, Dokumente zusammenfügen, Dokumenteigenschaften,
-Export als Bild, Drucken, Rückgängig/Wiederholen, deutsche und englische
-Oberfläche.
+Freihand, Stempel, Bilder), Formulare ausfüllen, Seiten drehen/löschen/einfügen/
+extrahieren/umsortieren, Dokumente zusammenfügen, Lesezeichen bearbeiten,
+Kennwortschutz (AES-256) setzen/entfernen, Dateianhänge, Dokumenteigenschaften,
+Export als Bild, Drucken, Rückgängig/Wiederholen, Vollbild, deutsche und
+englische Oberfläche.
 
 **Bauen:** `scripts/fetch-pdfium.sh` lädt die PDF-Bibliothek (mit
 Prüfsummenkontrolle), danach `cargo run --release`.

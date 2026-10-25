@@ -285,3 +285,47 @@ fn protect_ribbon_and_attachments() {
     h.run_steps(3);
     save(&mut h, "16-attachments");
 }
+
+/// Manual check with a real document: `MRPDF_SAMPLE=/path/file.pdf cargo test --test ui -- --ignored`
+#[test]
+#[ignore]
+fn real_world_sample() {
+    let _guard = common::lock();
+    let Some(path) = std::env::var_os("MRPDF_SAMPLE").map(PathBuf::from) else { return };
+    let name = path.file_stem().unwrap().to_string_lossy().into_owned();
+    let mut h = harness(vec![path], false);
+    h.run_steps(15);
+    save(&mut h, &format!("sample-{name}-1"));
+    h.get_by_label("Lesezeichen").click();
+    h.run_steps(5);
+    h.get_by_label("Ansicht").click();
+    h.run_steps(2);
+    h.get_by_label("Doppelseite").click();
+    h.run_steps(10);
+    save(&mut h, &format!("sample-{name}-2"));
+
+    // Fill in the first text field (if any) through the document API.
+    let tab = h.state_mut().active_tab_mut().unwrap();
+    let field = tab
+        .doc
+        .form_fields(0)
+        .unwrap()
+        .into_iter()
+        .find(|f| matches!(f.kind, mrpdf::model::FieldKind::Text { .. }));
+    if let Some(field) = field {
+        tab.doc.set_text_field(0, field.annot_index, "MrPDF Test 123").unwrap();
+        tab.after_edit();
+        let value = tab
+            .doc
+            .form_fields(0)
+            .unwrap()
+            .into_iter()
+            .find(|f| f.annot_index == field.annot_index)
+            .unwrap()
+            .value;
+        assert_eq!(value, "MrPDF Test 123");
+        h.get_by_label("Einzelseite").click();
+        h.run_steps(10);
+        save(&mut h, &format!("sample-{name}-3"));
+    }
+}
