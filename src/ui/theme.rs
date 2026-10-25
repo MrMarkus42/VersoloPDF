@@ -6,27 +6,15 @@ pub const ACCENT: Color32 = Color32::from_rgb(30, 100, 220);
 pub const BRAND: Color32 = Color32::from_rgb(200, 35, 45);
 
 pub fn canvas_background(dark: bool) -> Color32 {
-    if dark {
-        Color32::from_gray(48)
-    } else {
-        Color32::from_gray(128)
-    }
+    if dark { Color32::from_gray(48) } else { Color32::from_gray(128) }
 }
 
 pub fn ribbon_background(dark: bool) -> Color32 {
-    if dark {
-        Color32::from_gray(38)
-    } else {
-        Color32::from_gray(250)
-    }
+    if dark { Color32::from_gray(38) } else { Color32::from_gray(250) }
 }
 
 pub fn icon_color(dark: bool) -> Color32 {
-    if dark {
-        Color32::from_gray(220)
-    } else {
-        Color32::from_gray(50)
-    }
+    if dark { Color32::from_gray(220) } else { Color32::from_gray(50) }
 }
 
 pub fn apply(ctx: &Context, dark: bool) {
@@ -38,6 +26,8 @@ pub fn apply(ctx: &Context, dark: bool) {
         visuals.panel_fill = Color32::from_gray(240);
         visuals.window_fill = Color32::from_gray(252);
         visuals.extreme_bg_color = Color32::WHITE;
+        // Visible borders for text fields and buttons on light backgrounds.
+        visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, Color32::from_gray(195));
     }
     for w in [
         &mut visuals.widgets.inactive,

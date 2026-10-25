@@ -32,7 +32,7 @@ the original file structure intact.
 
 ## Building
 
-Requirements: Rust 1.85 or newer.
+Requirements: Rust 1.88 or newer.
 
 ```bash
 scripts/fetch-pdfium.sh          # downloads and verifies PDFium

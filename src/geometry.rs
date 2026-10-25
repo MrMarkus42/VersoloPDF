@@ -157,10 +157,7 @@ pub struct PageGeometry {
 
 impl PageGeometry {
     pub fn new(crop: RectF, rotation: Rotation) -> Self {
-        Self {
-            crop: crop.normalized(),
-            rotation,
-        }
+        Self { crop: crop.normalized(), rotation }
     }
 
     /// Size of the page in view space (points).
@@ -229,11 +226,7 @@ mod tests {
     fn round_trip_all_rotations() {
         for rot in [Rotation::R0, Rotation::R90, Rotation::R180, Rotation::R270] {
             let g = geometry(rot);
-            for p in [
-                PointF::new(10.0, 20.0),
-                PointF::new(210.0, 320.0),
-                PointF::new(57.5, 111.25),
-            ] {
+            for p in [PointF::new(10.0, 20.0), PointF::new(210.0, 320.0), PointF::new(57.5, 111.25)] {
                 let back = g.view_to_pdf(g.pdf_to_view(p));
                 assert!((back.x - p.x).abs() < 1e-4 && (back.y - p.y).abs() < 1e-4, "{rot:?}");
             }

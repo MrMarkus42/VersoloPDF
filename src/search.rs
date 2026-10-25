@@ -4,19 +4,13 @@ use crate::model::{SearchHit, SearchOptions};
 use crate::text::{PageText, TextRange};
 
 fn fold(c: char, match_case: bool) -> char {
-    if match_case {
-        c
-    } else {
-        c.to_lowercase().next().unwrap_or(c)
-    }
+    if match_case { c } else { c.to_lowercase().next().unwrap_or(c) }
 }
 
 /// Finds all occurrences of `query` on one page.
 pub fn search_page(page: usize, text: &PageText, query: &str, opts: SearchOptions) -> Vec<SearchHit> {
-    let needle: Vec<char> = query
-        .chars()
-        .map(|c| if c.is_whitespace() { ' ' } else { fold(c, opts.match_case) })
-        .collect();
+    let needle: Vec<char> =
+        query.chars().map(|c| if c.is_whitespace() { ' ' } else { fold(c, opts.match_case) }).collect();
     if needle.iter().all(|c| *c == ' ') {
         return Vec::new();
     }
@@ -45,26 +39,20 @@ pub fn search_page(page: usize, text: &PageText, query: &str, opts: SearchOption
     while start + n <= hay.len() {
         if hay[start..start + n] == needle[..] {
             let boundary_ok = !opts.whole_word
-                || (!is_word(start.checked_sub(1).and_then(|i| hay.get(i)))
-                    && !is_word(hay.get(start + n)));
+                || (!is_word(start.checked_sub(1).and_then(|i| hay.get(i))) && !is_word(hay.get(start + n)));
             if boundary_ok {
                 let range = TextRange::new(map[start], map[start + n - 1]);
                 let ctx_start = start.saturating_sub(30);
                 let ctx_end = (start + n + 30).min(hay.len());
-                let mut context: String = text
-                    .text_in(TextRange::new(map[ctx_start], map[ctx_end - 1]))
-                    .replace(['\n', '\r'], " ");
+                let mut context: String =
+                    text.text_in(TextRange::new(map[ctx_start], map[ctx_end - 1])).replace(['\n', '\r'], " ");
                 if ctx_start > 0 {
                     context.insert(0, '…');
                 }
                 if ctx_end < hay.len() {
                     context.push('…');
                 }
-                hits.push(SearchHit {
-                    page,
-                    rects: text.line_rects(range),
-                    context,
-                });
+                hits.push(SearchHit { page, rects: text.line_rects(range), context });
                 start += n;
                 continue;
             }
@@ -98,14 +86,8 @@ mod tests {
         }
     }
 
-    const CASE: SearchOptions = SearchOptions {
-        match_case: true,
-        whole_word: false,
-    };
-    const NOCASE: SearchOptions = SearchOptions {
-        match_case: false,
-        whole_word: false,
-    };
+    const CASE: SearchOptions = SearchOptions { match_case: true, whole_word: false };
+    const NOCASE: SearchOptions = SearchOptions { match_case: false, whole_word: false };
 
     #[test]
     fn finds_case_insensitive() {
@@ -118,10 +100,7 @@ mod tests {
     #[test]
     fn whole_word() {
         let p = page("Testfall Test");
-        let opts = SearchOptions {
-            match_case: false,
-            whole_word: true,
-        };
+        let opts = SearchOptions { match_case: false, whole_word: true };
         assert_eq!(search_page(0, &p, "test", opts).len(), 1);
     }
 

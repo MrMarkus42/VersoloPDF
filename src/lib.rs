@@ -19,6 +19,7 @@ pub mod model;
 pub mod pdf_edit;
 pub mod print;
 pub mod search;
+pub mod security;
 pub mod text;
 pub mod ui;
 

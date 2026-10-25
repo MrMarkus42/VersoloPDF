@@ -34,21 +34,14 @@ fn app_icon() -> egui::IconData {
             rgba[i + 3] = 255;
         }
     }
-    egui::IconData {
-        rgba,
-        width: N,
-        height: N,
-    }
+    egui::IconData { rgba, width: N, height: N }
 }
 
 fn main() -> eframe::Result {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
 
-    let files: Vec<PathBuf> = std::env::args_os()
-        .skip(1)
-        .map(PathBuf::from)
-        .filter(|p| p.is_file())
-        .collect();
+    let files: Vec<PathBuf> =
+        std::env::args_os().skip(1).map(PathBuf::from).filter(|p| p.is_file()).collect();
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -60,9 +53,5 @@ fn main() -> eframe::Result {
             .with_icon(app_icon()),
         ..Default::default()
     };
-    eframe::run_native(
-        "MrPDF",
-        options,
-        Box::new(move |cc| Ok(Box::new(MrPdfApp::new(cc, files)))),
-    )
+    eframe::run_native("MrPDF", options, Box::new(move |cc| Ok(Box::new(MrPdfApp::new(cc, files)))))
 }

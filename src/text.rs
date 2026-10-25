@@ -27,10 +27,7 @@ pub struct TextRange {
 
 impl TextRange {
     pub fn new(a: usize, b: usize) -> Self {
-        Self {
-            start: a.min(b),
-            end: a.max(b),
-        }
+        Self { start: a.min(b), end: a.max(b) }
     }
 }
 
@@ -103,9 +100,7 @@ impl PageText {
     /// Range of the word containing character `index`.
     pub fn word_at(&self, index: usize) -> Option<TextRange> {
         let is_word = |i: usize| {
-            self.chars
-                .get(i)
-                .is_some_and(|c| c.ch.is_alphanumeric() || c.ch == '_' || c.ch == '-')
+            self.chars.get(i).is_some_and(|c| c.ch.is_alphanumeric() || c.ch == '_' || c.ch == '-')
         };
         if !is_word(index) {
             return self.chars.get(index).map(|_| TextRange::new(index, index));
@@ -166,16 +161,8 @@ mod tests {
 
     fn sample() -> PageText {
         let mut chars = line("Hello world", 10.0, 100.0);
-        chars.push(CharInfo {
-            ch: '\r',
-            rect: RectF::default(),
-            generated: true,
-        });
-        chars.push(CharInfo {
-            ch: '\n',
-            rect: RectF::default(),
-            generated: true,
-        });
+        chars.push(CharInfo { ch: '\r', rect: RectF::default(), generated: true });
+        chars.push(CharInfo { ch: '\n', rect: RectF::default(), generated: true });
         chars.extend(line("Second", 10.0, 80.0));
         PageText { chars }
     }

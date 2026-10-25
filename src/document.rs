@@ -13,14 +13,15 @@ use std::path::{Path, PathBuf};
 use pdfium_render::prelude::*;
 
 use crate::engine;
-use crate::forms::{self, FieldValue};
 use crate::error::{Error, Result};
+use crate::forms::{self, FieldValue};
 use crate::geometry::{PageGeometry, RectF, Rotation};
 use crate::model::{
     AnnotKind, AnnotationInfo, Bookmark, FieldKind, FormFieldInfo, LinkInfo, LinkTarget, Metadata,
     Permissions,
 };
 use crate::pdf_edit::{self, AnnotDetails, AnnotUpdate, NewAnnotation};
+use crate::security::{self, ProtectOptions, SecurityInfo};
 use crate::text::{CharInfo, PageText};
 
 /// Files larger than this are refused to protect against memory exhaustion.
@@ -80,6 +81,8 @@ pub struct Document {
     history: History,
     revision: u64,
     modified: bool,
+    /// Security handler details of encrypted documents.
+    security: Option<SecurityInfo>,
 }
 
 fn map_load_error(err: PdfiumError, had_password: bool) -> Error {
@@ -154,10 +157,7 @@ fn annot_kind(t: PdfPageAnnotationType) -> AnnotKind {
 pub fn read_pdf_file(path: &Path) -> Result<Vec<u8>> {
     let meta = fs::metadata(path).map_err(|e| Error::io(path, e))?;
     if meta.len() > MAX_FILE_SIZE {
-        return Err(Error::FileTooLarge {
-            size: meta.len(),
-            limit: MAX_FILE_SIZE,
-        });
+        return Err(Error::FileTooLarge { size: meta.len(), limit: MAX_FILE_SIZE });
     }
     fs::read(path).map_err(|e| Error::io(path, e))
 }
@@ -165,17 +165,15 @@ pub fn read_pdf_file(path: &Path) -> Result<Vec<u8>> {
 /// Writes `bytes` to `path` atomically (temporary file + rename), so a
 /// failure never leaves a half-written document behind.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
-    let dir = path
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    let file_name = path
-        .file_name()
-        .ok_or_else(|| Error::Invalid("invalid file name".into()))?
-        .to_string_lossy();
-    let tmp = dir.join(format!(".{file_name}.{}.mrpdf-tmp", std::process::id()));
+    let dir = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let file_name =
+        path.file_name().ok_or_else(|| Error::Invalid("invalid file name".into()))?.to_string_lossy();
+    let nonce =
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let tmp = dir.join(format!(".{file_name}.{}-{nonce:x}.mrpdf-tmp", std::process::id()));
     let result = (|| -> std::io::Result<()> {
-        let mut file = fs::File::create(&tmp)?;
+        // create_new refuses to follow a pre-existing file or symlink.
+        let mut file = fs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
         file.write_all(bytes)?;
         file.sync_all()?;
         drop(file);
@@ -215,7 +213,9 @@ impl Document {
             history: History::default(),
             revision: 0,
             modified: false,
+            security: None,
         };
+        doc.refresh_security();
         doc.refresh_geometry();
         Ok(doc)
     }
@@ -224,8 +224,7 @@ impl Document {
     pub fn new_blank(display_name: &str) -> Result<Self> {
         let pdfium = engine::pdfium()?;
         let mut pdf = pdfium.create_new_pdf()?;
-        pdf.pages_mut()
-            .create_page_at_end(PdfPagePaperSize::a4())?;
+        pdf.pages_mut().create_page_at_end(PdfPagePaperSize::a4())?;
         let bytes = pdf.save_to_bytes()?;
         let mut doc = Self::from_bytes(bytes, display_name, None)?;
         doc.modified = true;
@@ -234,9 +233,7 @@ impl Document {
 
     fn load(bytes: Vec<u8>, password: Option<&str>) -> Result<PdfDocument<'static>> {
         let pdfium = engine::pdfium()?;
-        pdfium
-            .load_pdf_from_byte_vec(bytes, password)
-            .map_err(|e| map_load_error(e, password.is_some()))
+        pdfium.load_pdf_from_byte_vec(bytes, password).map_err(|e| map_load_error(e, password.is_some()))
     }
 
     fn refresh_geometry(&mut self) {
@@ -250,13 +247,8 @@ impl Document {
                     .crop()
                     .or_else(|_| page.boundaries().media())
                     .map(|b| to_rectf(&b.bounds))
-                    .unwrap_or_else(|_| {
-                        RectF::new(0.0, 0.0, page.width().value, page.height().value)
-                    });
-                let rotation = page
-                    .rotation()
-                    .map(from_pdf_rotation)
-                    .unwrap_or_default();
+                    .unwrap_or_else(|_| RectF::new(0.0, 0.0, page.width().value, page.height().value));
+                let rotation = page.rotation().map(from_pdf_rotation).unwrap_or_default();
                 PageGeometry::new(crop, rotation)
             })
             .collect();
@@ -292,12 +284,21 @@ impl Document {
 
     pub fn is_encrypted(&self) -> bool {
         self.password.is_some()
+            || self.security.is_some()
             || !matches!(
                 self.pdf.permissions().security_handler_revision(),
-                Ok(PdfSecurityHandlerRevision::Unprotected) | Err(_)
+                Ok(PdfSecurityHandlerRevision::Unprotected)
             )
     }
 
+    fn refresh_security(&mut self) {
+        let encrypted = !matches!(
+            self.pdf.permissions().security_handler_revision(),
+            Ok(PdfSecurityHandlerRevision::Unprotected)
+        );
+        self.security =
+            if encrypted { security::security_info(&self.bytes, self.password.as_deref()) } else { None };
+    }
     pub fn can_undo(&self) -> Option<&str> {
         self.history.undo.last().map(|s| s.label.as_str())
     }
@@ -314,9 +315,7 @@ impl Document {
     }
 
     pub fn page_label(&self, index: usize) -> Option<String> {
-        self.page(index)
-            .ok()
-            .and_then(|p| p.label().map(str::to_string))
+        self.page(index).ok().and_then(|p| p.label().map(str::to_string))
     }
 
     // -----------------------------------------------------------------
@@ -340,7 +339,8 @@ impl Document {
         h: u32,
     ) -> Result<RenderedImage> {
         let limit = MAX_BITMAP_EDGE * 8;
-        if w == 0 || h == 0 || w > MAX_BITMAP_EDGE || h > MAX_BITMAP_EDGE || full_w > limit || full_h > limit {
+        if w == 0 || h == 0 || w > MAX_BITMAP_EDGE || h > MAX_BITMAP_EDGE || full_w > limit || full_h > limit
+        {
             return Err(Error::Invalid(format!("invalid render size {w}x{h}")));
         }
         let page = self.page(index)?;
@@ -353,11 +353,7 @@ impl Document {
             .render_annotations(true)
             .set_clear_color(PdfColor::WHITE);
         page.render_into_bitmap_with_config(&mut bitmap, &config)?;
-        Ok(RenderedImage {
-            width: w,
-            height: h,
-            rgba: bitmap.as_rgba_bytes(),
-        })
+        Ok(RenderedImage { width: w, height: h, rgba: bitmap.as_rgba_bytes() })
     }
 
     // -----------------------------------------------------------------
@@ -371,10 +367,7 @@ impl Document {
             .iter()
             .map(|c| CharInfo {
                 ch: c.unicode_char().unwrap_or('\u{FFFD}'),
-                rect: c
-                    .loose_bounds()
-                    .map(|r| to_rectf(&r))
-                    .unwrap_or_default(),
+                rect: c.loose_bounds().map(|r| to_rectf(&r)).unwrap_or_default(),
                 generated: c.is_generated().unwrap_or(false),
             })
             .collect();
@@ -409,11 +402,7 @@ impl Document {
                 if depth < MAX_BOOKMARK_DEPTH {
                     collect(bookmark.first_child(), depth + 1, budget, &mut children);
                 }
-                out.push(Bookmark {
-                    title: bookmark.title().unwrap_or_default(),
-                    page,
-                    children,
-                });
+                out.push(Bookmark { title: bookmark.title().unwrap_or_default(), page, children });
                 current = bookmark.next_sibling();
             }
         }
@@ -428,10 +417,8 @@ impl Document {
         let mut out = Vec::new();
         for link in page.links().iter() {
             let Ok(rect) = link.rect() else { continue };
-            let target = if let Some(page) = link
-                .destination()
-                .and_then(|d| d.page_index().ok())
-                .and_then(|i| usize::try_from(i).ok())
+            let target = if let Some(page) =
+                link.destination().and_then(|d| d.page_index().ok()).and_then(|i| usize::try_from(i).ok())
             {
                 LinkTarget::Page(page)
             } else if let Some(action) = link.action() {
@@ -450,10 +437,7 @@ impl Document {
             } else {
                 LinkTarget::Unsupported
             };
-            out.push(LinkInfo {
-                rect: to_rectf(&rect),
-                target,
-            });
+            out.push(LinkInfo { rect: to_rectf(&rect), target });
         }
         Ok(out)
     }
@@ -507,10 +491,7 @@ impl Document {
                 read_only: field.is_read_only(),
             };
             if let Some(text) = field.as_text_field() {
-                info.kind = FieldKind::Text {
-                    multiline: text.is_multiline(),
-                    password: text.is_password(),
-                };
+                info.kind = FieldKind::Text { multiline: text.is_multiline(), password: text.is_password() };
                 info.value = text.value().unwrap_or_default();
             } else if let Some(cb) = field.as_checkbox_field() {
                 info.kind = FieldKind::CheckBox;
@@ -521,19 +502,11 @@ impl Document {
             } else if let Some(combo) = field.as_combo_box_field() {
                 info.kind = FieldKind::ComboBox;
                 info.value = combo.value().unwrap_or_default();
-                info.options = combo
-                    .options()
-                    .iter()
-                    .filter_map(|o| o.label().cloned())
-                    .collect();
+                info.options = combo.options().iter().filter_map(|o| o.label().cloned()).collect();
             } else if let Some(list) = field.as_list_box_field() {
                 info.kind = FieldKind::ListBox;
                 info.value = list.value().unwrap_or_default();
-                info.options = list
-                    .options()
-                    .iter()
-                    .filter_map(|o| o.label().cloned())
-                    .collect();
+                info.options = list.options().iter().filter_map(|o| o.label().cloned()).collect();
             } else if field.as_push_button_field().is_some() {
                 info.kind = FieldKind::PushButton;
             } else if field.as_signature_field().is_some() {
@@ -559,20 +532,56 @@ impl Document {
         }
     }
 
+    /// Effective permissions. PDFium (via pdfium-render) does not know
+    /// revision 5/6 handlers and checks the wrong bit for copying, so the
+    /// `/P` bits are evaluated here.
     pub fn permissions(&self) -> Permissions {
-        let p = self.pdf.permissions();
+        let encrypted = self.is_encrypted();
+        let all = Permissions {
+            encrypted,
+            print: true,
+            modify: true,
+            copy: true,
+            annotate: true,
+            fill_forms: true,
+            assemble: true,
+        };
+        let Some(info) = self.security else { return all };
+        if info.owner == Some(true) {
+            return all;
+        }
+        if info.owner.is_none() {
+            // Revisions 2-4: PDFium grants every right after unlocking with
+            // the owner password; detect that case.
+            let p = self.pdf.permissions();
+            let pdfium_all = [
+                p.can_print_high_quality(),
+                p.can_modify_document_content(),
+                p.can_add_or_modify_text_annotations(),
+                p.can_assemble_document(),
+                p.can_fill_existing_interactive_form_fields(),
+            ]
+            .iter()
+            .all(|r| matches!(r, Ok(true)));
+            let restricted = !(info.can_print()
+                && info.can_modify()
+                && info.can_annotate()
+                && info.can_assemble()
+                && info.can_fill_forms());
+            if pdfium_all && restricted {
+                return all;
+            }
+        }
         Permissions {
-            encrypted: self.is_encrypted(),
-            print: p.can_print_high_quality().unwrap_or(true)
-                || p.can_print_only_low_quality().unwrap_or(true),
-            modify: p.can_modify_document_content().unwrap_or(true),
-            copy: p.can_extract_text_and_graphics().unwrap_or(true),
-            annotate: p.can_add_or_modify_text_annotations().unwrap_or(true),
-            fill_forms: p.can_fill_existing_interactive_form_fields().unwrap_or(true),
-            assemble: p.can_assemble_document().unwrap_or(true),
+            encrypted,
+            print: info.can_print(),
+            modify: info.can_modify(),
+            copy: info.can_copy(),
+            annotate: info.can_annotate(),
+            fill_forms: info.can_fill_forms(),
+            assemble: info.can_assemble(),
         }
     }
-
     pub fn file_size(&self) -> usize {
         self.bytes.len()
     }
@@ -620,10 +629,7 @@ impl Document {
         let new_bytes = f(&self.bytes, self.password.as_deref())?;
         let old = self.bytes.clone();
         self.reload(new_bytes)?;
-        self.history.push_undo(Snapshot {
-            label: label.to_string(),
-            bytes: old,
-        });
+        self.history.push_undo(Snapshot { label: label.to_string(), bytes: old });
         self.modified = true;
         Ok(())
     }
@@ -639,10 +645,7 @@ impl Document {
         match f(&mut self.pdf) {
             Ok(()) => {
                 self.engine_dirty = true;
-                self.history.push_undo(Snapshot {
-                    label: label.to_string(),
-                    bytes: snapshot,
-                });
+                self.history.push_undo(Snapshot { label: label.to_string(), bytes: snapshot });
                 self.refresh_geometry();
                 self.mark_changed();
                 Ok(())
@@ -660,10 +663,7 @@ impl Document {
             return Ok(false);
         };
         self.sync_bytes()?;
-        let current = Snapshot {
-            label: snapshot.label.clone(),
-            bytes: self.bytes.clone(),
-        };
+        let current = Snapshot { label: snapshot.label.clone(), bytes: self.bytes.clone() };
         self.reload(snapshot.bytes)?;
         self.history.redo.push(current);
         self.modified = true;
@@ -675,10 +675,7 @@ impl Document {
             return Ok(false);
         };
         self.sync_bytes()?;
-        let current = Snapshot {
-            label: snapshot.label.clone(),
-            bytes: self.bytes.clone(),
-        };
+        let current = Snapshot { label: snapshot.label.clone(), bytes: self.bytes.clone() };
         self.reload(snapshot.bytes)?;
         self.history.undo.push(current);
         self.modified = true;
@@ -687,10 +684,7 @@ impl Document {
 
     /// Saves to the current file.
     pub fn save(&mut self) -> Result<()> {
-        let path = self
-            .path
-            .clone()
-            .ok_or_else(|| Error::Invalid("document has no file name yet".into()))?;
+        let path = self.path.clone().ok_or_else(|| Error::Invalid("document has no file name yet".into()))?;
         self.save_as(&path)
     }
 
@@ -708,24 +702,27 @@ impl Document {
     // -----------------------------------------------------------------
     // Annotations
 
+    fn require(&self, allowed: bool) -> Result<()> {
+        if allowed { Ok(()) } else { Err(Error::NotPermitted) }
+    }
+
     pub fn add_annotation(&mut self, page: usize, annot: &NewAnnotation) -> Result<()> {
         self.check_page(page)?;
+        self.require(self.permissions().annotate)?;
         let label = format!("add {}", annot.kind.pdf_subtype());
         self.edit_bytes(&label, |b, pw| pdf_edit::add_annotation(b, pw, page, annot))
     }
 
     pub fn update_annotation(&mut self, page: usize, index: usize, update: &AnnotUpdate) -> Result<()> {
         self.check_page(page)?;
-        self.edit_bytes("edit annotation", |b, pw| {
-            pdf_edit::update_annotation(b, pw, page, index, update)
-        })
+        self.require(self.permissions().annotate)?;
+        self.edit_bytes("edit annotation", |b, pw| pdf_edit::update_annotation(b, pw, page, index, update))
     }
 
     pub fn delete_annotation(&mut self, page: usize, index: usize) -> Result<()> {
         self.check_page(page)?;
-        self.edit_bytes("delete annotation", |b, pw| {
-            pdf_edit::delete_annotation(b, pw, page, index)
-        })
+        self.require(self.permissions().annotate)?;
+        self.edit_bytes("delete annotation", |b, pw| pdf_edit::delete_annotation(b, pw, page, index))
     }
 
     /// Converts all annotations and form fields of the given pages into
@@ -734,6 +731,7 @@ impl Document {
         for &p in pages {
             self.check_page(p)?;
         }
+        self.require(self.permissions().modify)?;
         self.edit_engine("flatten", |pdf| {
             for &p in pages {
                 let mut page = pdf.pages().get(page_index(p)?)?;
@@ -766,14 +764,89 @@ impl Document {
         self.edit_bytes("fill form", |b, pw| forms::set_field_value(b, pw, page, annot_index, value))
     }
     // -----------------------------------------------------------------
+    // Security
+
+    /// Encrypts the document with AES-256. The undo history is cleared
+    /// because older snapshots use different passwords.
+    pub fn protect(&mut self, opts: &ProtectOptions) -> Result<()> {
+        self.require(self.has_full_access())?;
+        self.sync_bytes()?;
+        let (bytes, owner) = security::protect(&self.bytes, self.password.as_deref(), opts)?;
+        let previous = self.password.replace(owner);
+        if let Err(err) = self.reload(bytes) {
+            self.password = previous;
+            return Err(err);
+        }
+        self.history = History::default();
+        self.refresh_security();
+        self.modified = true;
+        Ok(())
+    }
+
+    /// Removes password protection (requires full access).
+    pub fn unprotect(&mut self) -> Result<()> {
+        self.require(self.has_full_access())?;
+        self.sync_bytes()?;
+        let bytes = security::remove_protection(&self.bytes, self.password.as_deref())?;
+        let previous = self.password.take();
+        if let Err(err) = self.reload(bytes) {
+            self.password = previous;
+            return Err(err);
+        }
+        self.history = History::default();
+        self.refresh_security();
+        self.modified = true;
+        Ok(())
+    }
+
+    /// True if the document is unencrypted or was opened with full rights.
+    pub fn has_full_access(&self) -> bool {
+        let p = self.permissions();
+        p.print && p.modify && p.copy && p.annotate && p.fill_forms && p.assemble
+    }
+
+    // -----------------------------------------------------------------
+    // Attachments
+
+    /// Embedded files as (name, size in bytes).
+    pub fn attachments(&self) -> Vec<(String, usize)> {
+        self.pdf.attachments().iter().map(|a| (a.name(), a.len())).collect()
+    }
+
+    /// Writes an embedded file to disk. Attachments are never opened or executed.
+    pub fn save_attachment(&self, index: usize, dest: &Path) -> Result<()> {
+        let index = u16::try_from(index).map_err(|_| Error::Invalid("attachment index".into()))?;
+        let bytes = self.pdf.attachments().get(index)?.save_to_bytes()?;
+        write_atomic(dest, &bytes)
+    }
+
+    pub fn add_attachment(&mut self, source: &Path) -> Result<()> {
+        self.require(self.permissions().modify)?;
+        let bytes = read_pdf_file(source)?;
+        let name = source
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .ok_or_else(|| Error::Invalid("invalid file name".into()))?;
+        self.edit_engine("attach file", |pdf| {
+            pdf.attachments_mut().create_attachment_from_bytes(&name, &bytes)?;
+            Ok(())
+        })
+    }
+
+    pub fn delete_attachment(&mut self, index: usize) -> Result<()> {
+        self.require(self.permissions().modify)?;
+        let index = u16::try_from(index).map_err(|_| Error::Invalid("attachment index".into()))?;
+        self.edit_engine("delete attachment", |pdf| {
+            pdf.attachments_mut().delete_at_index(index)?;
+            Ok(())
+        })
+    }
+
+    // -----------------------------------------------------------------
     // Pages
 
     fn check_page(&self, page: usize) -> Result<()> {
-        if page < self.page_count() {
-            Ok(())
-        } else {
-            Err(Error::PageOutOfRange(page))
-        }
+        if page < self.page_count() { Ok(()) } else { Err(Error::PageOutOfRange(page)) }
     }
 
     /// Rotates the given pages by `delta` degrees (multiple of 90).
@@ -781,10 +854,9 @@ impl Document {
         for &p in pages {
             self.check_page(p)?;
         }
-        let rotations: Vec<(usize, Rotation)> = pages
-            .iter()
-            .map(|&p| (p, self.geometry[p].rotation.rotated_by(delta)))
-            .collect();
+        self.require(self.permissions().assemble)?;
+        let rotations: Vec<(usize, Rotation)> =
+            pages.iter().map(|&p| (p, self.geometry[p].rotation.rotated_by(delta))).collect();
         self.edit_engine("rotate pages", |pdf| {
             for (p, rot) in rotations {
                 let mut page = pdf.pages().get(page_index(p)?)?;
@@ -804,6 +876,7 @@ impl Document {
         if pages.len() >= self.page_count() {
             return Err(Error::Invalid("a document must keep at least one page".into()));
         }
+        self.require(self.permissions().assemble)?;
         self.edit_engine("delete pages", |pdf| {
             for &p in pages.iter().rev() {
                 pdf.pages().get(page_index(p)?)?.delete()?;
@@ -814,9 +887,11 @@ impl Document {
 
     /// Inserts an empty page of the given size (points) before `at`.
     pub fn insert_blank_page(&mut self, at: usize, width: f32, height: f32) -> Result<()> {
-        if at > self.page_count() || !(1.0..=14_400.0).contains(&width) || !(1.0..=14_400.0).contains(&height) {
+        if at > self.page_count() || !(1.0..=14_400.0).contains(&width) || !(1.0..=14_400.0).contains(&height)
+        {
             return Err(Error::Invalid("invalid page size or position".into()));
         }
+        self.require(self.permissions().assemble)?;
         self.edit_engine("insert page", |pdf| {
             pdf.pages_mut().create_page_at_index(
                 PdfPagePaperSize::new_custom(PdfPoints::new(width), PdfPoints::new(height)),
@@ -831,6 +906,7 @@ impl Document {
         if at > self.page_count() {
             return Err(Error::PageOutOfRange(at));
         }
+        self.require(self.permissions().assemble)?;
         let other = Self::load(read_pdf_file(source)?, password)?;
         let count = usize::try_from(other.pages().len()).unwrap_or(0);
         if count == 0 {
@@ -860,22 +936,17 @@ impl Document {
         for &p in pages {
             self.check_page(p)?;
         }
-        let spec = pages
-            .iter()
-            .map(|p| (p + 1).to_string())
-            .collect::<Vec<_>>()
-            .join(",");
+        let spec = pages.iter().map(|p| (p + 1).to_string()).collect::<Vec<_>>().join(",");
         let pdfium = engine::pdfium()?;
         let mut target = pdfium.create_new_pdf()?;
-        target
-            .pages_mut()
-            .copy_pages_from_document(&self.pdf, &spec, 0)?;
+        target.pages_mut().copy_pages_from_document(&self.pdf, &spec, 0)?;
         Ok(target.save_to_bytes()?)
     }
 
     /// Moves `pages` so that they start at position `to` (index in the
     /// document *before* the move).
     pub fn move_pages(&mut self, pages: &[usize], to: usize) -> Result<()> {
+        self.require(self.permissions().assemble)?;
         let n = self.page_count();
         let order = move_order(n, pages, to)?;
         if order.iter().enumerate().all(|(i, &p)| i == p) {
@@ -885,6 +956,7 @@ impl Document {
     }
 
     pub fn set_metadata(&mut self, meta: &Metadata) -> Result<()> {
+        self.require(self.permissions().modify)?;
         self.edit_bytes("document properties", |b, pw| pdf_edit::write_metadata(b, pw, meta))
     }
 
@@ -898,15 +970,10 @@ impl Document {
         let img = self.render_page(page, pw, ph)?;
         let buffer = image::RgbaImage::from_raw(img.width, img.height, img.rgba)
             .ok_or_else(|| Error::Invalid("bitmap size mismatch".into()))?;
-        let ext = dest
-            .extension()
-            .map(|e| e.to_string_lossy().to_ascii_lowercase())
-            .unwrap_or_default();
+        let ext = dest.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
         let mut out = std::io::Cursor::new(Vec::new());
         if ext == "jpg" || ext == "jpeg" {
-            image::DynamicImage::ImageRgba8(buffer)
-                .to_rgb8()
-                .write_to(&mut out, image::ImageFormat::Jpeg)
+            image::DynamicImage::ImageRgba8(buffer).to_rgb8().write_to(&mut out, image::ImageFormat::Jpeg)
         } else {
             buffer.write_to(&mut out, image::ImageFormat::Png)
         }

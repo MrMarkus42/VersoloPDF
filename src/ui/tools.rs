@@ -77,10 +77,7 @@ impl Tool {
 
     /// Tools that work on a text selection.
     pub fn is_markup(self) -> bool {
-        matches!(
-            self,
-            Tool::Highlight | Tool::Underline | Tool::StrikeOut | Tool::Squiggly
-        )
+        matches!(self, Tool::Highlight | Tool::Underline | Tool::StrikeOut | Tool::Squiggly)
     }
 
     /// Tools that draw a shape by dragging.
@@ -105,38 +102,13 @@ impl Tool {
     pub fn default_style(self) -> AnnotStyle {
         let base = AnnotStyle::default();
         match self {
-            Tool::Highlight => AnnotStyle {
-                color: Rgba::YELLOW,
-                opacity: 1.0,
-                ..base
-            },
-            Tool::Underline | Tool::Squiggly => AnnotStyle {
-                color: Rgba::GREEN,
-                ..base
-            },
-            Tool::StrikeOut => AnnotStyle {
-                color: Rgba::RED,
-                ..base
-            },
-            Tool::Note => AnnotStyle {
-                color: Rgba::YELLOW,
-                ..base
-            },
-            Tool::TextBox => AnnotStyle {
-                color: Rgba::BLACK,
-                width: 0.0,
-                font_size: 12.0,
-                ..base
-            },
-            Tool::Pencil => AnnotStyle {
-                color: Rgba::BLUE,
-                width: 2.0,
-                ..base
-            },
-            Tool::Stamp => AnnotStyle {
-                color: Rgba::RED,
-                ..base
-            },
+            Tool::Highlight => AnnotStyle { color: Rgba::YELLOW, opacity: 1.0, ..base },
+            Tool::Underline | Tool::Squiggly => AnnotStyle { color: Rgba::GREEN, ..base },
+            Tool::StrikeOut => AnnotStyle { color: Rgba::RED, ..base },
+            Tool::Note => AnnotStyle { color: Rgba::YELLOW, ..base },
+            Tool::TextBox => AnnotStyle { color: Rgba::BLACK, width: 0.0, font_size: 12.0, ..base },
+            Tool::Pencil => AnnotStyle { color: Rgba::BLUE, width: 2.0, ..base },
+            Tool::Stamp => AnnotStyle { color: Rgba::RED, ..base },
             _ => base,
         }
     }

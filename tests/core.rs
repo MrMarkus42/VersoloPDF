@@ -14,12 +14,7 @@ fn open(pages: usize) -> Document {
 }
 
 fn style(color: Rgba) -> AnnotStyle {
-    AnnotStyle {
-        color,
-        width: 4.0,
-        author: "Tester".into(),
-        ..AnnotStyle::default()
-    }
+    AnnotStyle { color, width: 4.0, author: "Tester".into(), ..AnnotStyle::default() }
 }
 
 #[test]
@@ -213,11 +208,7 @@ fn annotation_on_rotated_page_lands_where_drawn() {
     let view = RectF::new(100.0, 50.0, 150.0, 100.0);
     let mut sq = NewAnnotation::new(
         AnnotKind::Square,
-        AnnotStyle {
-            color: Rgba::BLACK,
-            fill: Some(Rgba::BLACK),
-            ..AnnotStyle::default()
-        },
+        AnnotStyle { color: Rgba::BLACK, fill: Some(Rgba::BLACK), ..AnnotStyle::default() },
     );
     sq.rect = g.view_rect_to_pdf(&view);
     doc.add_annotation(0, &sq).unwrap();
@@ -277,9 +268,7 @@ fn save_and_reopen_preserves_edits() {
     doc.add_annotation(1, &sq).unwrap();
     doc.rotate_pages(&[0], 180).unwrap();
     doc.set_metadata(&Metadata {
-        title: "Titel äöü".into(),
-        author: "Mr. M".into(),
-        ..Metadata::default()
+        title: "Titel äöü".into(), author: "Mr. M".into(), ..Metadata::default()
     })
     .unwrap();
     doc.save_as(&path).unwrap();
@@ -352,8 +341,100 @@ fn export_image() {
 #[test]
 fn missing_file_is_io_error() {
     let _guard = common::lock();
-    let err = Document::open(std::path::Path::new("/nonexistent/file.pdf"), None)
-        .err()
-        .unwrap();
+    let err = Document::open(std::path::Path::new("/nonexistent/file.pdf"), None).err().unwrap();
     assert!(matches!(err, Error::Io { .. }));
+}
+
+#[test]
+fn encrypted_documents_stay_encrypted() {
+    let _guard = common::lock();
+    let bytes = common::encrypted_pdf("geheim", "owner-pw", lopdf::Permissions::all());
+    assert!(matches!(Document::from_bytes(bytes.clone(), "e.pdf", None), Err(Error::PasswordRequired)));
+    assert!(matches!(
+        Document::from_bytes(bytes.clone(), "e.pdf", Some("falsch")),
+        Err(Error::WrongPassword)
+    ));
+    let mut doc = Document::from_bytes(bytes, "e.pdf", Some("geheim")).unwrap();
+    assert!(doc.is_encrypted());
+    assert!(doc.page_text(0).unwrap().all_text().contains("Hello"));
+
+    let mut sq = NewAnnotation::new(AnnotKind::Square, style(Rgba::RED));
+    sq.rect = RectF::new(50.0, 50.0, 150.0, 150.0);
+    doc.add_annotation(0, &sq).unwrap();
+    // An engine edit followed by a structural edit.
+    doc.rotate_pages(&[0], 90).unwrap();
+    sq.rect = RectF::new(200.0, 50.0, 300.0, 150.0);
+    doc.add_annotation(0, &sq).unwrap();
+
+    let out = doc.to_bytes().unwrap();
+    assert!(
+        matches!(Document::from_bytes(out.clone(), "e.pdf", None), Err(Error::PasswordRequired)),
+        "saved file must still be protected"
+    );
+    let re = Document::from_bytes(out, "e.pdf", Some("geheim")).unwrap();
+    assert_eq!(re.annotations(0).unwrap().len(), 2);
+    assert_eq!(re.geometry(0).unwrap().rotation, Rotation::R90);
+}
+
+#[test]
+fn document_permissions_are_respected() {
+    let _guard = common::lock();
+    // Empty user password: opens without prompt, but only printing is allowed.
+    let bytes = common::encrypted_pdf("", "owner-pw", lopdf::Permissions::PRINTABLE);
+    let mut doc = Document::from_bytes(bytes, "r.pdf", None).unwrap();
+    let perms = doc.permissions();
+    assert!(perms.encrypted && !perms.annotate && !perms.assemble);
+    let mut sq = NewAnnotation::new(AnnotKind::Square, style(Rgba::RED));
+    sq.rect = RectF::new(50.0, 50.0, 150.0, 150.0);
+    assert!(matches!(doc.add_annotation(0, &sq), Err(Error::NotPermitted)));
+    assert!(matches!(doc.rotate_pages(&[0], 90), Err(Error::NotPermitted)));
+}
+
+#[test]
+fn password_protection_round_trip() {
+    let _guard = common::lock();
+    let mut doc = open(1);
+    let opts = mrpdf::security::ProtectOptions {
+        user_password: "lesen".into(),
+        owner_password: "admin".into(),
+        allow_copy: false,
+        ..Default::default()
+    };
+    doc.protect(&opts).unwrap();
+    assert!(doc.is_encrypted());
+    assert!(doc.has_full_access(), "the session continues with owner rights");
+    let bytes = doc.to_bytes().unwrap();
+    assert!(matches!(Document::from_bytes(bytes.clone(), "p.pdf", None), Err(Error::PasswordRequired)));
+
+    let user = Document::from_bytes(bytes.clone(), "p.pdf", Some("lesen")).unwrap();
+    let perms = user.permissions();
+    assert!(!perms.copy && perms.print, "{perms:?}");
+    assert!(user.page_text(0).unwrap().all_text().contains("Hello"));
+    assert!(!user.has_full_access());
+
+    let mut owner = Document::from_bytes(bytes, "p.pdf", Some("admin")).unwrap();
+    assert!(owner.has_full_access());
+    owner.unprotect().unwrap();
+    let plain = Document::from_bytes(owner.to_bytes().unwrap(), "p.pdf", None).unwrap();
+    assert!(!plain.is_encrypted());
+    assert!(plain.page_text(0).unwrap().all_text().contains("Hello"));
+}
+
+#[test]
+fn attachments_can_be_added_saved_and_removed() {
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("notiz.txt");
+    std::fs::write(&src, "Inhalt des Anhangs").unwrap();
+    let mut doc = open(1);
+    assert!(doc.attachments().is_empty());
+    doc.add_attachment(&src).unwrap();
+    assert_eq!(doc.attachments(), vec![("notiz.txt".to_string(), 18)]);
+    let out = dir.path().join("kopie.txt");
+    doc.save_attachment(0, &out).unwrap();
+    assert_eq!(std::fs::read_to_string(&out).unwrap(), "Inhalt des Anhangs");
+    doc.delete_attachment(0).unwrap();
+    assert!(doc.attachments().is_empty());
+    doc.undo().unwrap();
+    assert_eq!(doc.attachments().len(), 1);
 }

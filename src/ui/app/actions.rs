@@ -77,10 +77,7 @@ pub fn is_safe_uri(uri: &str) -> bool {
 impl MrPdfApp {
     pub(super) fn show_error(&mut self, err: &Error) {
         let t = self.t();
-        self.dialog = Some(Dialog::Message {
-            title: t.error.to_string(),
-            text: error_text(t, err),
-        });
+        self.dialog = Some(Dialog::Message { title: t.error.to_string(), text: error_text(t, err) });
     }
 
     /// Runs an edit on the active tab and refreshes dependent state.
@@ -98,10 +95,8 @@ impl MrPdfApp {
 
     pub fn open_dialog(&mut self) {
         let t = self.t();
-        if let Some(files) = rfd::FileDialog::new()
-            .set_title(t.open_file)
-            .add_filter("PDF", &["pdf", "PDF"])
-            .pick_files()
+        if let Some(files) =
+            rfd::FileDialog::new().set_title(t.open_file).add_filter("PDF", &["pdf", "PDF"]).pick_files()
         {
             self.pending_open.extend(files);
         }
@@ -110,11 +105,9 @@ impl MrPdfApp {
     /// Opens a document in a new tab (or activates it if already open).
     pub fn open_path(&mut self, ctx: &Context, path: PathBuf, password: Option<String>) {
         let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
-        if let Some(i) = self
-            .tabs
-            .iter()
-            .position(|t| t.doc.path().is_some_and(|p| p.canonicalize().ok().as_deref() == Some(canonical.as_path())))
-        {
+        if let Some(i) = self.tabs.iter().position(|t| {
+            t.doc.path().is_some_and(|p| p.canonicalize().ok().as_deref() == Some(canonical.as_path()))
+        }) {
             self.active = i;
             return;
         }
@@ -125,18 +118,12 @@ impl MrPdfApp {
                 ctx.request_repaint();
             }
             Err(Error::PasswordRequired) => {
-                self.dialog = Some(Dialog::Password {
-                    path: canonical,
-                    password: String::new(),
-                    wrong: false,
-                });
+                self.dialog =
+                    Some(Dialog::Password { path: canonical, password: String::new(), wrong: false });
             }
             Err(Error::WrongPassword) => {
-                self.dialog = Some(Dialog::Password {
-                    path: canonical,
-                    password: String::new(),
-                    wrong: true,
-                });
+                self.dialog =
+                    Some(Dialog::Password { path: canonical, password: String::new(), wrong: true });
             }
             Err(err) => {
                 self.settings.recent_files.retain(|p| p != &canonical);
@@ -193,10 +180,8 @@ impl MrPdfApp {
         let Some(index) = index else { return false };
         let t = self.t();
         let name = self.tabs[index].doc.display_name().to_string();
-        let mut dialog = rfd::FileDialog::new()
-            .set_title(t.save_as)
-            .add_filter("PDF", &["pdf"])
-            .set_file_name(name);
+        let mut dialog =
+            rfd::FileDialog::new().set_title(t.save_as).add_filter("PDF", &["pdf"]).set_file_name(name);
         if let Some(dir) = self.tabs[index].doc.path().and_then(Path::parent) {
             dialog = dialog.set_directory(dir);
         }
@@ -221,10 +206,7 @@ impl MrPdfApp {
         let Some(tab) = self.tabs.get(index) else { return };
         if tab.doc.is_modified() {
             self.active = index;
-            self.dialog = Some(Dialog::Unsaved {
-                tab_id: tab.id,
-                then: AfterSave::CloseTab,
-            });
+            self.dialog = Some(Dialog::Unsaved { tab_id: tab.id, then: AfterSave::CloseTab });
         } else {
             self.close_tab(ctx, tab.id);
         }
@@ -256,10 +238,7 @@ impl MrPdfApp {
                     }
                 }
                 if let Some(next) = self.tabs.iter().find(|t| t.doc.is_modified()) {
-                    self.dialog = Some(Dialog::Unsaved {
-                        tab_id: next.id,
-                        then: AfterSave::Exit,
-                    });
+                    self.dialog = Some(Dialog::Unsaved { tab_id: next.id, then: AfterSave::Exit });
                 } else {
                     self.exit_confirmed = true;
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -482,7 +461,14 @@ impl MrPdfApp {
         });
     }
 
-    pub fn insert_blank(&mut self, ctx: &Context, count: u32, paper: PaperChoice, landscape: bool, position: InsertPosition) {
+    pub fn insert_blank(
+        &mut self,
+        ctx: &Context,
+        count: u32,
+        paper: PaperChoice,
+        landscape: bool,
+        position: InsertPosition,
+    ) {
         self.edit(ctx, |tab| {
             let (mut w, mut h) = paper.size().unwrap_or_else(|| {
                 tab.doc
@@ -513,12 +499,8 @@ impl MrPdfApp {
             RangePurpose::Extract => {
                 let t = self.t();
                 let Some(tab) = self.active_tab() else { return };
-                let stem = tab
-                    .doc
-                    .display_name()
-                    .trim_end_matches(".pdf")
-                    .trim_end_matches(".PDF")
-                    .to_string();
+                let stem =
+                    tab.doc.display_name().trim_end_matches(".pdf").trim_end_matches(".PDF").to_string();
                 let Some(dest) = rfd::FileDialog::new()
                     .set_title(t.extract_pages)
                     .add_filter("PDF", &["pdf"])
@@ -545,12 +527,7 @@ impl MrPdfApp {
         let t = self.t();
         let ext = if jpeg { "jpg" } else { "png" };
         let Some(tab) = self.active_tab() else { return };
-        let stem = tab
-            .doc
-            .display_name()
-            .trim_end_matches(".pdf")
-            .trim_end_matches(".PDF")
-            .to_string();
+        let stem = tab.doc.display_name().trim_end_matches(".pdf").trim_end_matches(".PDF").to_string();
         let result = if pages.len() == 1 {
             let Some(dest) = rfd::FileDialog::new()
                 .set_title(t.export_image)
@@ -566,8 +543,7 @@ impl MrPdfApp {
                 return;
             };
             pages.iter().try_for_each(|&p| {
-                tab.doc
-                    .export_page_image(p, dpi as f32, &dir.join(format!("{stem}-{}.{ext}", p + 1)))
+                tab.doc.export_page_image(p, dpi as f32, &dir.join(format!("{stem}-{}.{ext}", p + 1)))
             })
         };
         match result {
@@ -591,13 +567,7 @@ impl MrPdfApp {
                 }
             }
             CanvasEvent::RequestText { page, rect, kind } => {
-                self.dialog = Some(Dialog::TextInput {
-                    page,
-                    rect,
-                    kind,
-                    text: String::new(),
-                    edit: None,
-                });
+                self.dialog = Some(Dialog::TextInput { page, rect, kind, text: String::new(), edit: None });
             }
             CanvasEvent::EditText(annot) => {
                 let info = self.tab().and_then(|t| t.annotations(annot.page).get(annot.index).cloned());
@@ -616,10 +586,7 @@ impl MrPdfApp {
                     tab.doc.update_annotation(
                         annot.page,
                         annot.index,
-                        &AnnotUpdate {
-                            translate: Some((dx, dy)),
-                            ..AnnotUpdate::default()
-                        },
+                        &AnnotUpdate { translate: Some((dx, dy)), ..AnnotUpdate::default() },
                     )
                 });
             }
@@ -634,7 +601,9 @@ impl MrPdfApp {
             CanvasEvent::CommitField { page, annot_index, value } => {
                 let unchanged = self
                     .tab()
-                    .and_then(|t| t.fields(page).iter().find(|f| f.annot_index == annot_index).map(|f| f.value == value))
+                    .and_then(|t| {
+                        t.fields(page).iter().find(|f| f.annot_index == annot_index).map(|f| f.value == value)
+                    })
                     .unwrap_or(false);
                 if !unchanged {
                     self.edit(ctx, |tab| tab.doc.set_text_field(page, annot_index, &value));
@@ -670,10 +639,7 @@ impl MrPdfApp {
             Some(annot) => tab.doc.update_annotation(
                 annot.page,
                 annot.index,
-                &AnnotUpdate {
-                    contents: Some(text),
-                    ..AnnotUpdate::default()
-                },
+                &AnnotUpdate { contents: Some(text), ..AnnotUpdate::default() },
             ),
             None => {
                 if text.trim().is_empty() && kind == AnnotKind::FreeText {

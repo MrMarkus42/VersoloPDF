@@ -56,7 +56,12 @@ fn drag(harness: &mut Harness<'_, MrPdfApp>, from: Pos2, to: Pos2) {
     harness.step();
     input(
         harness,
-        Event::PointerButton { pos: from, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE },
+        Event::PointerButton {
+            pos: from,
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers: Modifiers::NONE,
+        },
     );
     harness.step();
     for i in 1..=8 {
@@ -66,7 +71,12 @@ fn drag(harness: &mut Harness<'_, MrPdfApp>, from: Pos2, to: Pos2) {
     }
     input(
         harness,
-        Event::PointerButton { pos: to, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE },
+        Event::PointerButton {
+            pos: to,
+            button: PointerButton::Primary,
+            pressed: false,
+            modifiers: Modifiers::NONE,
+        },
     );
     harness.run_steps(4);
 }
@@ -75,9 +85,25 @@ fn click(harness: &mut Harness<'_, MrPdfApp>, at: Pos2) {
     let input = |h: &mut Harness<'_, MrPdfApp>, e: Event| h.input_mut().events.push(e);
     input(harness, Event::PointerMoved(at));
     harness.step();
-    input(harness, Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+    input(
+        harness,
+        Event::PointerButton {
+            pos: at,
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers: Modifiers::NONE,
+        },
+    );
     harness.step();
-    input(harness, Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+    input(
+        harness,
+        Event::PointerButton {
+            pos: at,
+            button: PointerButton::Primary,
+            pressed: false,
+            modifiers: Modifiers::NONE,
+        },
+    );
     harness.run_steps(4);
 }
 
@@ -212,4 +238,50 @@ fn form_filling() {
     assert_eq!(fields[0].value, "Erika Musterfrau");
     assert!(fields[1].checked, "check box should be ticked");
     save(&mut h, "13-form-filled");
+}
+
+#[test]
+fn delete_key_removes_selected_annotation() {
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let file = sample_file(&dir, 1);
+    let mut h = harness(vec![file], false);
+    h.run_steps(10);
+    h.get_by_label("Kommentar").click();
+    h.run_steps(2);
+    h.get_by_label("Ellipse").click();
+    h.run_steps(2);
+    drag(&mut h, pos2(500.0, 300.0), pos2(650.0, 420.0));
+    h.run_steps(4);
+    let count = |h: &mut Harness<'_, MrPdfApp>| {
+        let tab = h.state_mut().active_tab_mut().unwrap();
+        tab.doc.annotations(0).unwrap().len()
+    };
+    assert_eq!(count(&mut h), 1);
+    assert!(h.state().active_tab().unwrap().selected_annot.is_some());
+    h.key_press(egui::Key::Delete);
+    h.run_steps(4);
+    assert_eq!(count(&mut h), 0);
+}
+
+#[test]
+fn protect_ribbon_and_attachments() {
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let file = sample_file(&dir, 1);
+    let mut h = harness(vec![file], false);
+    h.run_steps(10);
+    h.get_by_label("Schützen").click();
+    h.run_steps(3);
+    save(&mut h, "14-protect-ribbon");
+    h.get_by_label("Kennwortschutz").click();
+    h.run_steps(3);
+    assert!(h.state().dialog().is_some());
+    save(&mut h, "15-protect-dialog");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    assert!(h.state().dialog().is_none());
+    h.get_all_by_label("Anhänge").next().unwrap().click();
+    h.run_steps(3);
+    save(&mut h, "16-attachments");
 }

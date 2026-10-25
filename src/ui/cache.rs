@@ -17,12 +17,7 @@ pub struct Budget {
 
 impl Budget {
     pub fn new(limit: Duration) -> Self {
-        Self {
-            start: Instant::now(),
-            limit,
-            rendered: 0,
-            pending: false,
-        }
+        Self { start: Instant::now(), limit, rendered: 0, pending: false }
     }
 
     /// Whether another render may start. The first render per frame is
@@ -63,10 +58,7 @@ pub struct TextureCache {
 }
 
 fn upload(ctx: &Context, name: String, img: &RenderedImage) -> TextureHandle {
-    let image = ColorImage::from_rgba_unmultiplied(
-        [img.width as usize, img.height as usize],
-        &img.rgba,
-    );
+    let image = ColorImage::from_rgba_unmultiplied([img.width as usize, img.height as usize], &img.rgba);
     ctx.load_texture(name, image, TextureOptions::LINEAR)
 }
 
@@ -93,22 +85,14 @@ impl TextureCache {
         budget: &mut Budget,
         id: u64,
     ) -> Option<&CachedImage> {
-        let fresh = self
-            .pages
-            .get(&page)
-            .is_some_and(|c| c.revision == doc.revision() && c.px == px);
+        let fresh = self.pages.get(&page).is_some_and(|c| c.revision == doc.revision() && c.px == px);
         if !fresh && budget.allow() {
             match doc.render_page(page, px[0], px[1]) {
                 Ok(img) => {
                     let tex = upload(ctx, format!("doc{id}-p{page}"), &img);
                     self.pages.insert(
                         page,
-                        CachedImage {
-                            tex,
-                            px,
-                            revision: doc.revision(),
-                            last_used: self.frame,
-                        },
+                        CachedImage { tex, px, revision: doc.revision(), last_used: self.frame },
                     );
                 }
                 Err(err) => log::warn!("rendering page {page} failed: {err}"),
@@ -182,22 +166,14 @@ impl TextureCache {
         budget: &mut Budget,
         id: u64,
     ) -> Option<&CachedImage> {
-        let fresh = self
-            .thumbs
-            .get(&page)
-            .is_some_and(|c| c.revision == doc.revision() && c.px == px);
+        let fresh = self.thumbs.get(&page).is_some_and(|c| c.revision == doc.revision() && c.px == px);
         if !fresh && budget.allow() {
             match doc.render_page(page, px[0], px[1]) {
                 Ok(img) => {
                     let tex = upload(ctx, format!("doc{id}-th{page}"), &img);
                     self.thumbs.insert(
                         page,
-                        CachedImage {
-                            tex,
-                            px,
-                            revision: doc.revision(),
-                            last_used: self.frame,
-                        },
+                        CachedImage { tex, px, revision: doc.revision(), last_used: self.frame },
                     );
                 }
                 Err(err) => log::warn!("rendering thumbnail {page} failed: {err}"),

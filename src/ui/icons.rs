@@ -65,6 +65,10 @@ pub enum Icon {
     Language,
     Theme,
     Form,
+    Lock,
+    Unlock,
+    Attachment,
+    Fullscreen,
     Logo,
 }
 
@@ -82,13 +86,7 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
     let yellow = Color32::from_rgb(250, 210, 40);
     let page = |x0: f32, y0: f32, x1: f32, y1: f32| {
         let fold = (x1 - x0) * 0.3;
-        let pts = vec![
-            u(x0, y0),
-            u(x1 - fold, y0),
-            u(x1, y0 + fold * 0.9),
-            u(x1, y1),
-            u(x0, y1),
-        ];
+        let pts = vec![u(x0, y0), u(x1 - fold, y0), u(x1, y0 + fold * 0.9), u(x1, y1), u(x0, y1)];
         p.add(PathShape::convex_polygon(pts, Color32::WHITE, st));
         p.line_segment([u(x1 - fold, y0), u(x1 - fold, y0 + fold * 0.9)], thin);
         p.line_segment([u(x1 - fold, y0 + fold * 0.9), u(x1, y0 + fold * 0.9)], thin);
@@ -121,11 +119,7 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
             PathStroke::new(w * 1.4, color),
         ));
         let tip = d;
-        let (e1, e2) = if left {
-            (u(0.2, 0.2), u(0.45, 0.47))
-        } else {
-            (u(0.8, 0.2), u(0.55, 0.47))
-        };
+        let (e1, e2) = if left { (u(0.2, 0.2), u(0.45, 0.47)) } else { (u(0.8, 0.2), u(0.55, 0.47)) };
         p.line_segment([tip, e1], Stroke::new(w * 1.4, color));
         p.line_segment([tip, e2], Stroke::new(w * 1.4, color));
     };
@@ -137,13 +131,20 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
             p.line_segment([u(0.33, 0.58), u(0.65, 0.58)], Stroke::new(w * 1.5, accent));
         }
         Icon::Open => {
-            let back = vec![u(0.08, 0.22), u(0.38, 0.22), u(0.46, 0.32), u(0.9, 0.32), u(0.9, 0.82), u(0.08, 0.82)];
+            let back =
+                vec![u(0.08, 0.22), u(0.38, 0.22), u(0.46, 0.32), u(0.9, 0.32), u(0.9, 0.82), u(0.08, 0.82)];
             p.add(PathShape::convex_polygon(back, Color32::from_rgb(240, 200, 90), st));
             let front = vec![u(0.18, 0.45), u(0.98, 0.45), u(0.88, 0.82), u(0.08, 0.82)];
             p.add(PathShape::convex_polygon(front, Color32::from_rgb(252, 222, 120), st));
         }
         Icon::Save | Icon::SaveAs => {
-            p.rect(Rect::from_min_max(u(0.12, 0.12), u(0.88, 0.88)), 2.0, accent, st, egui::StrokeKind::Inside);
+            p.rect(
+                Rect::from_min_max(u(0.12, 0.12), u(0.88, 0.88)),
+                2.0,
+                accent,
+                st,
+                egui::StrokeKind::Inside,
+            );
             p.rect_filled(Rect::from_min_max(u(0.28, 0.12), u(0.72, 0.38)), 0.0, Color32::WHITE);
             p.rect_filled(Rect::from_min_max(u(0.56, 0.17), u(0.66, 0.33)), 0.0, accent);
             p.rect_filled(Rect::from_min_max(u(0.24, 0.55), u(0.76, 0.84)), 1.0, Color32::WHITE);
@@ -152,9 +153,27 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
             }
         }
         Icon::Print => {
-            p.rect(Rect::from_min_max(u(0.28, 0.1), u(0.72, 0.4)), 0.0, Color32::WHITE, st, egui::StrokeKind::Inside);
-            p.rect(Rect::from_min_max(u(0.08, 0.36), u(0.92, 0.72)), 2.0, Color32::from_gray(200), st, egui::StrokeKind::Inside);
-            p.rect(Rect::from_min_max(u(0.26, 0.6), u(0.74, 0.92)), 0.0, Color32::WHITE, st, egui::StrokeKind::Inside);
+            p.rect(
+                Rect::from_min_max(u(0.28, 0.1), u(0.72, 0.4)),
+                0.0,
+                Color32::WHITE,
+                st,
+                egui::StrokeKind::Inside,
+            );
+            p.rect(
+                Rect::from_min_max(u(0.08, 0.36), u(0.92, 0.72)),
+                2.0,
+                Color32::from_gray(200),
+                st,
+                egui::StrokeKind::Inside,
+            );
+            p.rect(
+                Rect::from_min_max(u(0.26, 0.6), u(0.74, 0.92)),
+                0.0,
+                Color32::WHITE,
+                st,
+                egui::StrokeKind::Inside,
+            );
             p.circle_filled(u(0.8, 0.47), s * 0.035, Color32::from_rgb(60, 180, 60));
         }
         Icon::Undo => curved(p, true),
@@ -163,9 +182,16 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
             let fill = Color32::from_rgb(255, 225, 190);
             for (i, x) in [0.3f32, 0.43, 0.56, 0.69].iter().enumerate() {
                 let top = [0.25f32, 0.12, 0.15, 0.25][i];
-                p.rect(Rect::from_min_max(u(*x, top), u(x + 0.12, 0.6)), s * 0.06, fill, thin, egui::StrokeKind::Inside);
+                p.rect(
+                    Rect::from_min_max(u(*x, top), u(x + 0.12, 0.6)),
+                    s * 0.06,
+                    fill,
+                    thin,
+                    egui::StrokeKind::Inside,
+                );
             }
-            let palm = vec![u(0.3, 0.5), u(0.81, 0.5), u(0.78, 0.82), u(0.62, 0.92), u(0.4, 0.92), u(0.28, 0.75)];
+            let palm =
+                vec![u(0.3, 0.5), u(0.81, 0.5), u(0.78, 0.82), u(0.62, 0.92), u(0.4, 0.92), u(0.28, 0.75)];
             p.add(PathShape::convex_polygon(palm, fill, thin));
             let thumb = vec![u(0.3, 0.6), u(0.14, 0.48), u(0.1, 0.55), u(0.28, 0.78)];
             p.add(PathShape::convex_polygon(thumb, fill, thin));
@@ -218,14 +244,21 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
         }
         Icon::Squiggly => {
             text(0.5, 0.4, "W", 0.56, color);
-            let pts: Vec<Pos2> = (0..=8)
-                .map(|i| u(0.12 + i as f32 * 0.095, if i % 2 == 0 { 0.82 } else { 0.92 }))
-                .collect();
+            let pts: Vec<Pos2> =
+                (0..=8).map(|i| u(0.12 + i as f32 * 0.095, if i % 2 == 0 { 0.82 } else { 0.92 })).collect();
             p.add(PathShape::line(pts, Stroke::new(w * 1.2, accent)));
         }
         Icon::Note | Icon::Comments => {
             let fill = if icon == Icon::Note { yellow } else { Color32::WHITE };
-            let pts = vec![u(0.1, 0.12), u(0.9, 0.12), u(0.9, 0.68), u(0.5, 0.68), u(0.28, 0.9), u(0.32, 0.68), u(0.1, 0.68)];
+            let pts = vec![
+                u(0.1, 0.12),
+                u(0.9, 0.12),
+                u(0.9, 0.68),
+                u(0.5, 0.68),
+                u(0.28, 0.9),
+                u(0.32, 0.68),
+                u(0.1, 0.68),
+            ];
             p.add(PathShape::closed_line(pts.clone(), st));
             p.add(PathShape::convex_polygon(vec![pts[0], pts[1], pts[2], pts[6]], fill, Stroke::NONE));
             p.add(PathShape::closed_line(pts, st));
@@ -234,14 +267,28 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
             }
         }
         Icon::TextBox => {
-            p.rect_stroke(Rect::from_min_max(u(0.08, 0.15), u(0.92, 0.85)), 1.0, Stroke::new(w, accent), egui::StrokeKind::Inside);
+            p.rect_stroke(
+                Rect::from_min_max(u(0.08, 0.15), u(0.92, 0.85)),
+                1.0,
+                Stroke::new(w, accent),
+                egui::StrokeKind::Inside,
+            );
             text(0.5, 0.5, "T", 0.55, color);
         }
         Icon::Rectangle => {
-            p.rect_stroke(Rect::from_min_max(u(0.12, 0.22), u(0.88, 0.78)), 0.0, Stroke::new(w * 1.4, red), egui::StrokeKind::Inside);
+            p.rect_stroke(
+                Rect::from_min_max(u(0.12, 0.22), u(0.88, 0.78)),
+                0.0,
+                Stroke::new(w * 1.4, red),
+                egui::StrokeKind::Inside,
+            );
         }
         Icon::Ellipse => {
-            p.add(egui::Shape::ellipse_stroke(u(0.5, 0.5), vec2(s * 0.4, s * 0.28), Stroke::new(w * 1.4, red)));
+            p.add(egui::Shape::ellipse_stroke(
+                u(0.5, 0.5),
+                vec2(s * 0.4, s * 0.28),
+                Stroke::new(w * 1.4, red),
+            ));
         }
         Icon::Line => {
             p.line_segment([u(0.12, 0.85), u(0.88, 0.15)], Stroke::new(w * 1.4, red));
@@ -252,7 +299,11 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
             p.add(PathShape::convex_polygon(body, Color32::from_rgb(250, 190, 60), st));
             let tip = vec![u(0.18, 0.7), u(0.32, 0.84), u(0.1, 0.92)];
             p.add(PathShape::convex_polygon(tip, Color32::from_rgb(240, 220, 190), thin));
-            p.add(PathShape::convex_polygon(vec![u(0.68, 0.2), u(0.74, 0.14), u(0.88, 0.28), u(0.82, 0.34)], red, thin));
+            p.add(PathShape::convex_polygon(
+                vec![u(0.68, 0.2), u(0.74, 0.14), u(0.88, 0.28), u(0.82, 0.34)],
+                red,
+                thin,
+            ));
         }
         Icon::Polygon => {
             let pts = vec![u(0.5, 0.1), u(0.9, 0.42), u(0.74, 0.88), u(0.26, 0.88), u(0.1, 0.42)];
@@ -278,8 +329,14 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
         }
         Icon::InsertPage => {
             page(0.15, 0.08, 0.7, 0.88);
-            p.line_segment([u(0.75, 0.55), u(0.75, 0.97)], Stroke::new(w * 1.6, Color32::from_rgb(40, 160, 60)));
-            p.line_segment([u(0.54, 0.76), u(0.96, 0.76)], Stroke::new(w * 1.6, Color32::from_rgb(40, 160, 60)));
+            p.line_segment(
+                [u(0.75, 0.55), u(0.75, 0.97)],
+                Stroke::new(w * 1.6, Color32::from_rgb(40, 160, 60)),
+            );
+            p.line_segment(
+                [u(0.54, 0.76), u(0.96, 0.76)],
+                Stroke::new(w * 1.6, Color32::from_rgb(40, 160, 60)),
+            );
         }
         Icon::InsertFile => {
             page(0.1, 0.05, 0.55, 0.7);
@@ -308,7 +365,13 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
         }
         Icon::Thumbnails => {
             for (x, y) in [(0.12, 0.1), (0.55, 0.1), (0.12, 0.55), (0.55, 0.55)] {
-                p.rect(Rect::from_min_max(u(x, y), u(x + 0.33, y + 0.35)), 1.0, Color32::WHITE, st, egui::StrokeKind::Inside);
+                p.rect(
+                    Rect::from_min_max(u(x, y), u(x + 0.33, y + 0.35)),
+                    1.0,
+                    Color32::WHITE,
+                    st,
+                    egui::StrokeKind::Inside,
+                );
             }
         }
         Icon::Bookmarks => {
@@ -335,32 +398,91 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
         }
         Icon::SinglePage => page(0.25, 0.1, 0.75, 0.9),
         Icon::Continuous => {
-            p.rect(Rect::from_min_max(u(0.28, -0.05), u(0.72, 0.42)), 1.0, Color32::WHITE, st, egui::StrokeKind::Inside);
-            p.rect(Rect::from_min_max(u(0.28, 0.52), u(0.72, 1.0)), 1.0, Color32::WHITE, st, egui::StrokeKind::Inside);
+            p.rect(
+                Rect::from_min_max(u(0.28, -0.05), u(0.72, 0.42)),
+                1.0,
+                Color32::WHITE,
+                st,
+                egui::StrokeKind::Inside,
+            );
+            p.rect(
+                Rect::from_min_max(u(0.28, 0.52), u(0.72, 1.0)),
+                1.0,
+                Color32::WHITE,
+                st,
+                egui::StrokeKind::Inside,
+            );
         }
         Icon::TwoPages => {
-            p.rect(Rect::from_min_max(u(0.06, 0.15), u(0.47, 0.85)), 1.0, Color32::WHITE, st, egui::StrokeKind::Inside);
-            p.rect(Rect::from_min_max(u(0.53, 0.15), u(0.94, 0.85)), 1.0, Color32::WHITE, st, egui::StrokeKind::Inside);
+            p.rect(
+                Rect::from_min_max(u(0.06, 0.15), u(0.47, 0.85)),
+                1.0,
+                Color32::WHITE,
+                st,
+                egui::StrokeKind::Inside,
+            );
+            p.rect(
+                Rect::from_min_max(u(0.53, 0.15), u(0.94, 0.85)),
+                1.0,
+                Color32::WHITE,
+                st,
+                egui::StrokeKind::Inside,
+            );
         }
         Icon::Flatten => {
             for (i, y) in [0.25f32, 0.45, 0.65].iter().enumerate() {
-                let c = [Color32::from_gray(230), Color32::from_rgb(200, 220, 250), Color32::from_rgb(250, 230, 160)][i];
+                let c = [
+                    Color32::from_gray(230),
+                    Color32::from_rgb(200, 220, 250),
+                    Color32::from_rgb(250, 230, 160),
+                ][i];
                 let pts = vec![u(0.5, y - 0.15), u(0.92, *y), u(0.5, y + 0.15), u(0.08, *y)];
                 p.add(PathShape::convex_polygon(pts, c, thin));
             }
         }
         Icon::Image => {
-            p.rect(Rect::from_min_max(u(0.08, 0.15), u(0.92, 0.85)), 1.0, Color32::from_rgb(220, 235, 250), st, egui::StrokeKind::Inside);
-            p.add(PathShape::convex_polygon(vec![u(0.15, 0.78), u(0.42, 0.42), u(0.62, 0.78)], Color32::from_rgb(60, 150, 70), Stroke::NONE));
-            p.add(PathShape::convex_polygon(vec![u(0.45, 0.78), u(0.65, 0.52), u(0.85, 0.78)], Color32::from_rgb(90, 180, 90), Stroke::NONE));
+            p.rect(
+                Rect::from_min_max(u(0.08, 0.15), u(0.92, 0.85)),
+                1.0,
+                Color32::from_rgb(220, 235, 250),
+                st,
+                egui::StrokeKind::Inside,
+            );
+            p.add(PathShape::convex_polygon(
+                vec![u(0.15, 0.78), u(0.42, 0.42), u(0.62, 0.78)],
+                Color32::from_rgb(60, 150, 70),
+                Stroke::NONE,
+            ));
+            p.add(PathShape::convex_polygon(
+                vec![u(0.45, 0.78), u(0.65, 0.52), u(0.85, 0.78)],
+                Color32::from_rgb(90, 180, 90),
+                Stroke::NONE,
+            ));
             p.circle_filled(u(0.72, 0.32), s * 0.07, Color32::from_rgb(250, 200, 50));
         }
         Icon::Copy => {
-            p.rect(Rect::from_min_max(u(0.12, 0.08), u(0.62, 0.68)), 1.0, Color32::WHITE, st, egui::StrokeKind::Inside);
-            p.rect(Rect::from_min_max(u(0.38, 0.32), u(0.88, 0.92)), 1.0, Color32::WHITE, st, egui::StrokeKind::Inside);
+            p.rect(
+                Rect::from_min_max(u(0.12, 0.08), u(0.62, 0.68)),
+                1.0,
+                Color32::WHITE,
+                st,
+                egui::StrokeKind::Inside,
+            );
+            p.rect(
+                Rect::from_min_max(u(0.38, 0.32), u(0.88, 0.92)),
+                1.0,
+                Color32::WHITE,
+                st,
+                egui::StrokeKind::Inside,
+            );
         }
         Icon::Sidebar => {
-            p.rect_stroke(Rect::from_min_max(u(0.08, 0.15), u(0.92, 0.85)), 1.0, st, egui::StrokeKind::Inside);
+            p.rect_stroke(
+                Rect::from_min_max(u(0.08, 0.15), u(0.92, 0.85)),
+                1.0,
+                st,
+                egui::StrokeKind::Inside,
+            );
             p.rect_filled(Rect::from_min_max(u(0.08, 0.15), u(0.36, 0.85)), 1.0, color.gamma_multiply(0.5));
         }
         Icon::Language => {
@@ -379,6 +501,46 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
             p.line_segment([u(0.12, 0.69), u(0.18, 0.76)], Stroke::new(w * 1.3, accent));
             p.line_segment([u(0.18, 0.76), u(0.27, 0.6)], Stroke::new(w * 1.3, accent));
             p.line_segment([u(0.4, 0.69), u(0.9, 0.69)], thin);
+        }
+        Icon::Lock | Icon::Unlock => {
+            let body = Rect::from_min_max(u(0.2, 0.45), u(0.8, 0.9));
+            let shackle_right = if icon == Icon::Lock { 0.68 } else { 0.9 };
+            let pts = vec![
+                u(0.32, 0.45),
+                u(0.32, 0.25),
+                u(0.5, 0.1),
+                u(shackle_right, 0.25),
+                u(shackle_right, if icon == Icon::Lock { 0.45 } else { 0.35 }),
+            ];
+            p.add(PathShape::line(pts, Stroke::new(w * 1.6, color)));
+            p.rect(body, 2.0, Color32::from_rgb(250, 200, 60), st, egui::StrokeKind::Inside);
+            p.circle_filled(u(0.5, 0.65), s * 0.06, color);
+        }
+        Icon::Attachment => {
+            let pts: Vec<Pos2> = vec![
+                u(0.62, 0.22),
+                u(0.62, 0.72),
+                u(0.5, 0.85),
+                u(0.38, 0.72),
+                u(0.38, 0.18),
+                u(0.5, 0.08),
+                u(0.74, 0.18),
+                u(0.74, 0.7),
+            ];
+            p.add(PathShape::line(pts, Stroke::new(w * 1.4, color)));
+        }
+        Icon::Fullscreen => {
+            for (a, b, c) in [
+                ((0.1, 0.35), (0.1, 0.1), (0.35, 0.1)),
+                ((0.65, 0.1), (0.9, 0.1), (0.9, 0.35)),
+                ((0.9, 0.65), (0.9, 0.9), (0.65, 0.9)),
+                ((0.35, 0.9), (0.1, 0.9), (0.1, 0.65)),
+            ] {
+                p.add(PathShape::line(
+                    vec![u(a.0, a.1), u(b.0, b.1), u(c.0, c.1)],
+                    Stroke::new(w * 1.5, color),
+                ));
+            }
         }
         Icon::Logo => {
             p.rect_filled(Rect::from_min_max(u(0.05, 0.05), u(0.95, 0.95)), s * 0.18, red);

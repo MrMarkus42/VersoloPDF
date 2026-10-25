@@ -243,11 +243,7 @@ fn widgets_of(edit: &Edit, field_id: ObjectId) -> Vec<ObjectId> {
             .unwrap_or_default(),
         Err(_) => Vec::new(),
     };
-    if kids.is_empty() {
-        vec![field_id]
-    } else {
-        kids
-    }
+    if kids.is_empty() { vec![field_id] } else { kids }
 }
 
 /// Sets the value of the field whose widget is annotation `annot_index` on `page`.
@@ -369,7 +365,8 @@ mod tests {
 
     #[test]
     fn appearance_contains_escaped_text() {
-        let style = WidgetStyle { w: 200.0, h: 20.0, background: None, border: Some([0.0; 3]), border_width: 1.0 };
+        let style =
+            WidgetStyle { w: 200.0, h: 20.0, background: None, border: Some([0.0; 3]), border_width: 1.0 };
         let s = text_appearance(&style, "/Helv 0 Tf 0 g", None, "a(b)", false, false, 0);
         let content = String::from_utf8_lossy(&s.content);
         assert!(content.contains("(a\\(b\\)) Tj"), "{content}");

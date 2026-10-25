@@ -81,17 +81,19 @@ def main():
         if not candidates:
             print(f"NO OLDER VERSION: {name}@{current}")
             continue
-        target = max(candidates)[1]
-        print(f"{name}: {current} -> {target}")
-        res = subprocess.run(
-            ["cargo", "update", "-p", f"{name}@{current}", "--precise", target],
-            capture_output=True,
-            text=True,
-        )
-        if res.returncode != 0:
-            print(f"  failed: {res.stderr.strip().splitlines()[-1] if res.stderr else ''}")
+        # Newest first; older ones may violate the requirements of dependents.
+        for _, target in sorted(candidates, reverse=True)[:6]:
+            res = subprocess.run(
+                ["cargo", "update", "-p", f"{name}@{current}", "--precise", target],
+                capture_output=True,
+                text=True,
+            )
+            if res.returncode == 0:
+                print(f"{name}: {current} -> {target}")
+                changed = True
+                break
         else:
-            changed = True
+            print(f"NOT POSSIBLE: {name}@{current} (dependents need a newer version)")
     return 0 if changed else 1
 
 

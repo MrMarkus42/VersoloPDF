@@ -106,6 +106,8 @@ pub struct DocTab {
     pub interaction: Interaction,
     pub field_edit: Option<FieldEdit>,
     pub last_pointer: Option<Pos2>,
+    /// Time of the last page flip by mouse wheel (single page layout).
+    pub last_flip: f64,
 }
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
@@ -137,16 +139,13 @@ impl DocTab {
             interaction: Interaction::None,
             field_edit: None,
             last_pointer: None,
+            last_flip: 0.0,
         }
     }
 
     pub fn title(&self) -> String {
         let name = self.doc.display_name();
-        if self.doc.is_modified() {
-            format!("{name} *")
-        } else {
-            name.to_string()
-        }
+        if self.doc.is_modified() { format!("{name} *") } else { name.to_string() }
     }
 
     pub fn scale(&self) -> f32 {
@@ -221,7 +220,9 @@ impl DocTab {
     /// All annotations of the document that are user comments.
     pub fn all_comments(&mut self) -> Vec<AnnotationInfo> {
         (0..self.doc.page_count())
-            .flat_map(|p| self.annotations(p).iter().filter(|a| a.kind.is_comment()).cloned().collect::<Vec<_>>())
+            .flat_map(|p| {
+                self.annotations(p).iter().filter(|a| a.kind.is_comment()).cloned().collect::<Vec<_>>()
+            })
             .collect()
     }
 

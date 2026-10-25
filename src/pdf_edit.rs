@@ -8,9 +8,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use lopdf::{
-    Dictionary, Document, IncrementalDocument, LoadOptions, Object, ObjectId, Stream, StringFormat,
-};
+use lopdf::{Dictionary, Document, IncrementalDocument, LoadOptions, Object, ObjectId, Stream, StringFormat};
 
 use crate::appearance::{self, ApInput, Appearance};
 use crate::error::{Error, Result};
@@ -116,9 +114,7 @@ impl Edit {
         if doc.is_encrypted() {
             return Err(Error::EncryptedNotSupported);
         }
-        Ok(Self {
-            inc: IncrementalDocument::create_from(bytes.to_vec(), doc),
-        })
+        Ok(Self { inc: IncrementalDocument::create_from(bytes.to_vec(), doc) })
     }
 
     pub(crate) fn prev(&self) -> &Document {
@@ -131,11 +127,7 @@ impl Edit {
 
     pub(crate) fn page_id(&self, page: usize) -> Result<ObjectId> {
         let no = u32::try_from(page + 1).map_err(|_| Error::PageOutOfRange(page))?;
-        self.prev()
-            .get_pages()
-            .get(&no)
-            .copied()
-            .ok_or(Error::PageOutOfRange(page))
+        self.prev().get_pages().get(&no).copied().ok_or(Error::PageOutOfRange(page))
     }
 
     pub(crate) fn object(&self, id: ObjectId) -> Result<&Object> {
@@ -172,10 +164,7 @@ impl Edit {
         let current = self.object(page_id)?.as_dict()?.get(b"Annots").ok().cloned();
         match current {
             Some(Object::Reference(id)) => Ok(self.object_mut(id)?.as_array_mut()?),
-            Some(Object::Array(_)) => Ok(self
-                .dict_mut(page_id)?
-                .get_mut(b"Annots")?
-                .as_array_mut()?),
+            Some(Object::Array(_)) => Ok(self.dict_mut(page_id)?.get_mut(b"Annots")?.as_array_mut()?),
             _ => {
                 let page = self.dict_mut(page_id)?;
                 page.set("Annots", Object::Array(Vec::new()));
@@ -195,11 +184,7 @@ impl Edit {
     /// Returns the annotation entry at `index` as object id (direct
     /// annotation dictionaries are converted into indirect objects).
     pub(crate) fn annotation_id(&mut self, page_id: ObjectId, index: usize) -> Result<ObjectId> {
-        let entry = self
-            .annots(page_id)?
-            .get(index)
-            .cloned()
-            .ok_or(Error::AnnotationOutOfRange(index))?;
+        let entry = self.annots(page_id)?.get(index).cloned().ok_or(Error::AnnotationOutOfRange(index))?;
         match entry {
             Object::Reference(id) => Ok(id),
             Object::Dictionary(dict) => {
@@ -213,9 +198,7 @@ impl Edit {
 
     pub(crate) fn finish(mut self) -> Result<Vec<u8>> {
         let mut out = Vec::new();
-        self.inc
-            .save_to(&mut out)
-            .map_err(|e| Error::Structure(e.to_string()))?;
+        self.inc.save_to(&mut out).map_err(|e| Error::Structure(e.to_string()))?;
         Ok(out)
     }
 }
@@ -239,10 +222,7 @@ pub fn text_string(s: &str) -> Object {
 /// Decodes a PDF text string.
 pub fn decode_text_string(bytes: &[u8]) -> String {
     if bytes.len() >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF {
-        let units: Vec<u16> = bytes[2..]
-            .chunks_exact(2)
-            .map(|c| u16::from_be_bytes([c[0], c[1]]))
-            .collect();
+        let units: Vec<u16> = bytes[2..].as_chunks::<2>().0.iter().map(|c| u16::from_be_bytes(*c)).collect();
         String::from_utf16_lossy(&units)
     } else if bytes.len() >= 3 && bytes[..3] == [0xEF, 0xBB, 0xBF] {
         String::from_utf8_lossy(&bytes[3..]).into_owned()
@@ -254,10 +234,7 @@ pub fn decode_text_string(bytes: &[u8]) -> String {
 
 /// Current time as PDF date string (UTC).
 pub fn pdf_date_now() -> String {
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
+    let secs = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
     pdf_date(secs)
 }
 
@@ -278,12 +255,7 @@ pub fn pdf_date(unix_secs: i64) -> String {
     if month <= 2 {
         year += 1;
     }
-    format!(
-        "D:{year:04}{month:02}{day:02}{:02}{:02}{:02}Z",
-        secs / 3600,
-        (secs / 60) % 60,
-        secs % 60
-    )
+    format!("D:{year:04}{month:02}{day:02}{:02}{:02}{:02}Z", secs / 3600, (secs / 60) % 60, secs % 60)
 }
 
 /// Turns `D:20240131124500+01'00'` into `2024-01-31 12:45`.
@@ -302,10 +274,7 @@ pub fn format_pdf_date(raw: &str) -> String {
 
 fn unique_name() -> String {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
+    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
     format!("mrpdf-{nanos:x}-{}", COUNTER.fetch_add(1, Ordering::Relaxed))
 }
 
@@ -365,15 +334,14 @@ fn read_color(dict: &Dictionary, key: &[u8]) -> Option<Rgba> {
 }
 
 fn read_points(values: &[f32]) -> Vec<PointF> {
-    values
-        .chunks_exact(2)
-        .map(|c| PointF::new(c[0], c[1]))
-        .collect()
+    values.as_chunks::<2>().0.iter().map(|c| PointF::new(c[0], c[1])).collect()
 }
 
 fn read_quads(dict: &Dictionary) -> Vec<RectF> {
     numbers(dict.get(b"QuadPoints").ok())
-        .chunks_exact(8)
+        .as_chunks::<8>()
+        .0
+        .iter()
         .filter_map(|q| RectF::bounding(read_points(q)))
         .collect()
 }
@@ -385,10 +353,7 @@ fn read_paths(dict: &Dictionary, kind: AnnotKind) -> Vec<Vec<PointF>> {
             vec![read_points(&numbers(dict.get(b"Vertices").ok()))]
         }
         AnnotKind::Ink => match dict.get(b"InkList") {
-            Ok(Object::Array(strokes)) => strokes
-                .iter()
-                .map(|s| read_points(&numbers(Some(s))))
-                .collect(),
+            Ok(Object::Array(strokes)) => strokes.iter().map(|s| read_points(&numbers(Some(s)))).collect(),
             _ => Vec::new(),
         },
         _ => Vec::new(),
@@ -405,10 +370,7 @@ fn read_width(dict: &Dictionary) -> f32 {
 }
 
 pub(crate) fn name(dict: &Dictionary, key: &[u8]) -> Option<String> {
-    dict.get(key)
-        .ok()
-        .and_then(|o| o.as_name().ok())
-        .map(|n| String::from_utf8_lossy(n).into_owned())
+    dict.get(key).ok().and_then(|o| o.as_name().ok()).map(|n| String::from_utf8_lossy(n).into_owned())
 }
 
 pub(crate) fn string(dict: &Dictionary, key: &[u8]) -> Option<String> {
@@ -461,10 +423,7 @@ fn text_color_from_da(da: &str) -> Option<Rgba> {
         _ => 4,
     };
     let start = pos.checked_sub(count)?;
-    let values: Vec<f32> = tokens[start..pos]
-        .iter()
-        .filter_map(|t| t.parse().ok())
-        .collect();
+    let values: Vec<f32> = tokens[start..pos].iter().filter_map(|t| t.parse().ok()).collect();
     Rgba::from_pdf(&values)
 }
 
@@ -509,9 +468,7 @@ fn ap_input_from_dict(dict: &Dictionary) -> Option<ApInput> {
     input.font_size = font_size_from_da(&da).unwrap_or(12.0);
     input.text_color = text_color_from_da(&da).unwrap_or(Rgba::BLACK);
     input.text = match kind {
-        AnnotKind::Stamp => string(dict, b"Subj")
-            .or_else(|| name(dict, b"Name"))
-            .unwrap_or_default(),
+        AnnotKind::Stamp => string(dict, b"Subj").or_else(|| name(dict, b"Name")).unwrap_or_default(),
         _ => string(dict, b"Contents").unwrap_or_default(),
     };
     if kind == AnnotKind::FreeText {
@@ -552,10 +509,7 @@ fn appearance_stream(ap: &Appearance) -> Stream {
     dict.set("Subtype", Object::Name(b"Form".to_vec()));
     dict.set("FormType", Object::Integer(1));
     dict.set("BBox", rect_array(&ap.bbox));
-    dict.set(
-        "Matrix",
-        Object::Array(vec![1.into(), 0.into(), 0.into(), 1.into(), 0.into(), 0.into()]),
-    );
+    dict.set("Matrix", Object::Array(vec![1.into(), 0.into(), 0.into(), 1.into(), 0.into(), 0.into()]));
     dict.set("Resources", Object::Dictionary(resources));
     Stream::new(dict, ap.content.clone())
 }
@@ -565,8 +519,7 @@ fn set_appearance(edit: &mut Edit, annot_id: ObjectId, input: &ApInput) -> Resul
     let stream_id = edit.add(appearance_stream(&ap));
     let mut ap_dict = Dictionary::new();
     ap_dict.set("N", Object::Reference(stream_id));
-    edit.dict_mut(annot_id)?
-        .set("AP", Object::Dictionary(ap_dict));
+    edit.dict_mut(annot_id)?.set("AP", Object::Dictionary(ap_dict));
     Ok(())
 }
 
@@ -660,9 +613,7 @@ pub fn add_annotation(
             bs.set("S", Object::Name(b"S".to_vec()));
             d.set("BS", Object::Dictionary(bs));
         }
-        if let (AnnotKind::Square | AnnotKind::Circle | AnnotKind::Polygon, Some(fill)) =
-            (kind, style.fill)
-        {
+        if let (AnnotKind::Square | AnnotKind::Circle | AnnotKind::Polygon, Some(fill)) = (kind, style.fill) {
             d.set("IC", color_array(fill));
         }
         match kind {
@@ -673,27 +624,20 @@ pub fn add_annotation(
                 d.set("QuadPoints", quad_points(&annot.quads));
             }
             AnnotKind::Line => {
-                let path = annot.paths.first().filter(|p| p.len() >= 2).ok_or_else(|| {
-                    Error::Invalid("a line needs two points".into())
-                })?;
+                let path = annot
+                    .paths
+                    .first()
+                    .filter(|p| p.len() >= 2)
+                    .ok_or_else(|| Error::Invalid("a line needs two points".into()))?;
                 d.set("L", points_array(&[path[0], path[path.len() - 1]]));
                 let end: &[u8] = if annot.arrow_end { b"OpenArrow" } else { b"None" };
-                d.set(
-                    "LE",
-                    Object::Array(vec![
-                        Object::Name(b"None".to_vec()),
-                        Object::Name(end.to_vec()),
-                    ]),
-                );
+                d.set("LE", Object::Array(vec![Object::Name(b"None".to_vec()), Object::Name(end.to_vec())]));
             }
             AnnotKind::Ink => {
                 if annot.paths.iter().all(Vec::is_empty) {
                     return Err(Error::Invalid("ink needs at least one point".into()));
                 }
-                d.set(
-                    "InkList",
-                    Object::Array(annot.paths.iter().map(|p| points_array(p)).collect()),
-                );
+                d.set("InkList", Object::Array(annot.paths.iter().map(|p| points_array(p)).collect()));
             }
             AnnotKind::Polygon | AnnotKind::Polyline => {
                 d.set("Vertices", points_array(annot.paths.first().map_or(&[][..], Vec::as_slice)));
@@ -727,11 +671,7 @@ pub fn annotation_details(
     guarded(|| {
         let edit = Edit::open(bytes, password)?;
         let page_id = edit.page_id(page)?;
-        let entry = edit
-            .annots(page_id)?
-            .get(index)
-            .cloned()
-            .ok_or(Error::AnnotationOutOfRange(index))?;
+        let entry = edit.annots(page_id)?.get(index).cloned().ok_or(Error::AnnotationOutOfRange(index))?;
         let dict = edit.resolve(&entry)?.as_dict()?;
         let kind = name(dict, b"Subtype").map(|s| kind_from_subtype(&s));
         let da = string(dict, b"DA").unwrap_or_default();
@@ -796,18 +736,10 @@ pub fn update_annotation(
             if let Some(opacity) = update.opacity {
                 d.set("CA", real(opacity.clamp(0.05, 1.0)));
             }
-            if kind == Some(AnnotKind::FreeText)
-                && (update.font_size.is_some() || update.color.is_some())
-            {
+            if kind == Some(AnnotKind::FreeText) && (update.font_size.is_some() || update.color.is_some()) {
                 let da = string(d, b"DA").unwrap_or_default();
-                let size = update
-                    .font_size
-                    .or_else(|| font_size_from_da(&da))
-                    .unwrap_or(12.0);
-                let color = update
-                    .color
-                    .or_else(|| text_color_from_da(&da))
-                    .unwrap_or(Rgba::BLACK);
+                let size = update.font_size.or_else(|| font_size_from_da(&da)).unwrap_or(12.0);
+                let color = update.color.or_else(|| text_color_from_da(&da)).unwrap_or(Rgba::BLACK);
                 let [r, g, b] = color.to_pdf();
                 d.set(
                     "DA",
@@ -863,12 +795,7 @@ fn translate_annotation(d: &mut Dictionary, dx: f32, dy: f32) {
 }
 
 /// Removes an annotation (and its pop-up) from a page.
-pub fn delete_annotation(
-    bytes: &[u8],
-    password: Option<&str>,
-    page: usize,
-    index: usize,
-) -> Result<Vec<u8>> {
+pub fn delete_annotation(bytes: &[u8], password: Option<&str>, page: usize, index: usize) -> Result<Vec<u8>> {
     guarded(|| {
         let mut edit = Edit::open(bytes, password)?;
         let page_id = edit.page_id(page)?;
@@ -891,13 +818,9 @@ pub fn delete_annotation(
                 continue;
             }
             // Pop-ups and replies that belong to the removed annotation.
-            if let (Some(target), Ok(dict)) = (target_id, edit.resolve(&obj).and_then(|o| Ok(o.as_dict()?)))
-            {
+            if let (Some(target), Ok(dict)) = (target_id, edit.resolve(&obj).and_then(|o| Ok(o.as_dict()?))) {
                 let refers = |key: &[u8]| {
-                    dict.get(key)
-                        .ok()
-                        .and_then(|p| p.as_reference().ok())
-                        .is_some_and(|p| p == target)
+                    dict.get(key).ok().and_then(|p| p.as_reference().ok()).is_some_and(|p| p == target)
                 };
                 if refers(b"Parent") || refers(b"IRT") {
                     continue;
@@ -924,11 +847,7 @@ pub fn reorder_pages(bytes: &[u8], password: Option<&str>, order: &[usize]) -> R
         {
             return Err(Error::Invalid("invalid page order".into()));
         }
-        let root_pages = edit
-            .prev()
-            .catalog()?
-            .get(b"Pages")?
-            .as_reference()?;
+        let root_pages = edit.prev().catalog()?.get(b"Pages")?.as_reference()?;
 
         for &page_id in &ids {
             // Copy inherited attributes down so the page no longer depends on
@@ -1029,9 +948,7 @@ mod tests {
     fn text_strings_round_trip() {
         for s in ["Hello", "Grüße aus Köln", "日本語", ""] {
             let obj = text_string(s);
-            let Object::String(bytes, _) = obj else {
-                panic!("not a string")
-            };
+            let Object::String(bytes, _) = obj else { panic!("not a string") };
             assert_eq!(decode_text_string(&bytes), s);
         }
     }
@@ -1065,7 +982,15 @@ mod tests {
 
     #[test]
     fn invalid_input_is_rejected() {
-        assert!(add_annotation(b"not a pdf", None, 0, &NewAnnotation::new(AnnotKind::Square, AnnotStyle::default())).is_err());
+        assert!(
+            add_annotation(
+                b"not a pdf",
+                None,
+                0,
+                &NewAnnotation::new(AnnotKind::Square, AnnotStyle::default())
+            )
+            .is_err()
+        );
         assert!(reorder_pages(b"%PDF-1.4 garbage", None, &[0]).is_err());
     }
 }

@@ -11,8 +11,8 @@ pub const MIN_ZOOM: f32 = 0.05;
 pub const MAX_ZOOM: f32 = 64.0;
 
 pub const ZOOM_STEPS: [f32; 20] = [
-    0.05, 0.1, 0.25, 0.33, 0.5, 0.67, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0, 16.0,
-    24.0, 32.0, 64.0,
+    0.05, 0.1, 0.25, 0.33, 0.5, 0.67, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0, 16.0, 24.0, 32.0,
+    64.0,
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -57,10 +57,7 @@ impl Layout {
             PageLayout::Single => {
                 if let Some(i) = (current < sizes.len()).then_some(current) {
                     let s = size_of(i);
-                    slots.push(Slot {
-                        page: i,
-                        rect: Rect::from_min_size(pos2(0.0, y), s),
-                    });
+                    slots.push(Slot { page: i, rect: Rect::from_min_size(pos2(0.0, y), s) });
                     width = s.x;
                     y += s.y + MARGIN;
                 }
@@ -68,10 +65,7 @@ impl Layout {
             PageLayout::Continuous => {
                 for i in 0..sizes.len() {
                     let s = size_of(i);
-                    slots.push(Slot {
-                        page: i,
-                        rect: Rect::from_min_size(pos2(0.0, y), s),
-                    });
+                    slots.push(Slot { page: i, rect: Rect::from_min_size(pos2(0.0, y), s) });
                     width = width.max(s.x);
                     y += s.y + PAGE_GAP;
                 }
@@ -83,10 +77,7 @@ impl Layout {
                     let a = size_of(i);
                     let b = (i + 1 < sizes.len()).then(|| size_of(i + 1));
                     let row_h = a.y.max(b.map_or(0.0, |b| b.y));
-                    slots.push(Slot {
-                        page: i,
-                        rect: Rect::from_min_size(pos2(0.0, y), a),
-                    });
+                    slots.push(Slot { page: i, rect: Rect::from_min_size(pos2(0.0, y), a) });
                     let mut row_w = a.x;
                     if let Some(b) = b {
                         slots.push(Slot {
@@ -118,10 +109,7 @@ impl Layout {
             }
             row_start = row_end + 1;
         }
-        Layout {
-            slots,
-            size: vec2(total_w, y.max(MARGIN * 2.0)),
-        }
+        Layout { slots, size: vec2(total_w, y.max(MARGIN * 2.0)) }
     }
 
     pub fn slot(&self, page: usize) -> Option<&Slot> {
@@ -164,20 +152,11 @@ pub fn fit_page_zoom(page: (f32, f32), viewport: Vec2, two_up: bool) -> f32 {
 }
 
 pub fn zoom_in(z: f32) -> f32 {
-    ZOOM_STEPS
-        .iter()
-        .copied()
-        .find(|&s| s > z * 1.001)
-        .unwrap_or(MAX_ZOOM)
+    ZOOM_STEPS.iter().copied().find(|&s| s > z * 1.001).unwrap_or(MAX_ZOOM)
 }
 
 pub fn zoom_out(z: f32) -> f32 {
-    ZOOM_STEPS
-        .iter()
-        .rev()
-        .copied()
-        .find(|&s| s < z * 0.999)
-        .unwrap_or(MIN_ZOOM)
+    ZOOM_STEPS.iter().rev().copied().find(|&s| s < z * 0.999).unwrap_or(MIN_ZOOM)
 }
 
 #[cfg(test)]

@@ -7,6 +7,9 @@ use super::{Dialog, InsertPosition, MrPdfApp, PaperChoice, RangePurpose};
 use crate::model::AnnotKind;
 use crate::ui::i18n::Strings;
 
+/// Work to do after the modal closed (needs `&mut MrPdfApp`).
+type Action = Box<dyn FnOnce(&mut MrPdfApp, &Context)>;
+
 enum Outcome {
     Keep,
     Close,
@@ -41,7 +44,7 @@ impl MrPdfApp {
         let t = self.t();
         let mut outcome = Outcome::Keep;
         // Deferred actions that need `&mut self` after the modal closed.
-        let mut action: Option<Box<dyn FnOnce(&mut MrPdfApp, &Context)>> = None;
+        let mut action: Option<Action> = None;
 
         Modal::new(Id::new("mrpdf-dialog")).show(ctx, |ui| {
             ui.set_max_width(460.0);
@@ -50,7 +53,9 @@ impl MrPdfApp {
                     ui.heading(title.as_str());
                     ui.label(text.as_str());
                     ui.add_space(8.0);
-                    if ui.button(t.ok).clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::Escape)) {
+                    if ui.button(t.ok).clicked()
+                        || ui.input(|i| i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::Escape))
+                    {
                         outcome = Outcome::Close;
                     }
                 }
@@ -60,7 +65,8 @@ impl MrPdfApp {
                     if *wrong {
                         ui.colored_label(egui::Color32::from_rgb(200, 40, 40), t.err_wrong_password);
                     }
-                    let edit = ui.add(egui::TextEdit::singleline(password).password(true).hint_text(t.password));
+                    let edit =
+                        ui.add(egui::TextEdit::singleline(password).password(true).hint_text(t.password));
                     edit.request_focus();
                     let (ok, cancel) = buttons(ui, t.open, t.cancel);
                     if ok {
@@ -113,7 +119,9 @@ impl MrPdfApp {
                     if ok {
                         let (page, rect, kind, edit) = (*page, *rect, *kind, *edit);
                         let text = text.trim_end_matches('\n').to_string();
-                        action = Some(Box::new(move |app, ctx| app.finish_text_input(ctx, page, rect, kind, text, edit)));
+                        action = Some(Box::new(move |app, ctx| {
+                            app.finish_text_input(ctx, page, rect, kind, text, edit)
+                        }));
                         outcome = Outcome::Close;
                     } else if cancel {
                         outcome = Outcome::Close;
@@ -206,18 +214,21 @@ impl MrPdfApp {
                         ui.add(egui::DragValue::new(count).range(1..=500));
                         ui.end_row();
                         ui.label(t.paper_size);
-                        egui::ComboBox::from_id_salt("paper").selected_text(paper_name(t, *paper)).show_ui(ui, |ui| {
-                            for p in [
-                                PaperChoice::SameAsCurrent,
-                                PaperChoice::A4,
-                                PaperChoice::A3,
-                                PaperChoice::A5,
-                                PaperChoice::Letter,
-                                PaperChoice::Legal,
-                            ] {
-                                ui.selectable_value(paper, p, paper_name(t, p));
-                            }
-                        });
+                        egui::ComboBox::from_id_salt("paper").selected_text(paper_name(t, *paper)).show_ui(
+                            ui,
+                            |ui| {
+                                for p in [
+                                    PaperChoice::SameAsCurrent,
+                                    PaperChoice::A4,
+                                    PaperChoice::A3,
+                                    PaperChoice::A5,
+                                    PaperChoice::Letter,
+                                    PaperChoice::Legal,
+                                ] {
+                                    ui.selectable_value(paper, p, paper_name(t, p));
+                                }
+                            },
+                        );
                         ui.end_row();
                         ui.label(t.orientation);
                         ui.horizontal(|ui| {
@@ -305,7 +316,8 @@ impl MrPdfApp {
                         match parse_page_range(range, count) {
                             Some(pages) => {
                                 let (dpi, jpeg) = (*dpi, *jpeg);
-                                action = Some(Box::new(move |app, ctx| app.export_images(ctx, pages, dpi, jpeg)));
+                                action =
+                                    Some(Box::new(move |app, ctx| app.export_images(ctx, pages, dpi, jpeg)));
                                 outcome = Outcome::Close;
                             }
                             None => *error = true,
@@ -366,8 +378,52 @@ impl MrPdfApp {
                     let (ok, cancel) = buttons(ui, t.ok, t.cancel);
                     if ok {
                         let (page, index, value) = (*page, *annot_index, selected.clone());
-                        action = Some(Box::new(move |app, ctx| app.edit(ctx, |tab| tab.doc.set_choice(page, index, &value))));
+                        action = Some(Box::new(move |app, ctx| {
+                            app.edit(ctx, |tab| tab.doc.set_choice(page, index, &value))
+                        }));
                         outcome = Outcome::Close;
+                    } else if cancel {
+                        outcome = Outcome::Close;
+                    }
+                }
+                Dialog::Protect { opts, repeat, error } => {
+                    ui.heading(t.password_protect);
+                    egui::Grid::new("protect").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
+                        ui.label(t.user_password);
+                        ui.add(egui::TextEdit::singleline(&mut opts.user_password).password(true));
+                        ui.end_row();
+                        ui.label(t.repeat_password);
+                        ui.add(egui::TextEdit::singleline(repeat).password(true));
+                        ui.end_row();
+                        ui.label(t.owner_password);
+                        ui.add(egui::TextEdit::singleline(&mut opts.owner_password).password(true));
+                        ui.end_row();
+                    });
+                    ui.checkbox(&mut opts.allow_print, t.allow_print);
+                    ui.checkbox(&mut opts.allow_copy, t.allow_copy);
+                    ui.checkbox(&mut opts.allow_modify, t.allow_modify);
+                    ui.checkbox(&mut opts.allow_annotate, t.allow_annotate);
+                    ui.checkbox(&mut opts.allow_fill_forms, t.allow_fill);
+                    ui.checkbox(&mut opts.allow_assemble, t.allow_assemble);
+                    ui.label(RichText::new(t.protect_hint).small().weak());
+                    if let Some(msg) = error {
+                        ui.colored_label(egui::Color32::from_rgb(200, 40, 40), *msg);
+                    }
+                    let (ok, cancel) = buttons(ui, t.ok, t.cancel);
+                    if ok {
+                        if opts.user_password != *repeat {
+                            *error = Some(t.passwords_differ);
+                        } else if opts.user_password.is_empty() && opts.owner_password.is_empty() {
+                            *error = Some(t.password_needed);
+                        } else {
+                            let opts = opts.clone();
+                            action = Some(Box::new(move |app, ctx| {
+                                app.edit(ctx, |tab| tab.doc.protect(&opts));
+                                let t = app.t();
+                                app.set_status(ctx, t.protected_msg);
+                            }));
+                            outcome = Outcome::Close;
+                        }
                     } else if cancel {
                         outcome = Outcome::Close;
                     }
@@ -375,7 +431,12 @@ impl MrPdfApp {
                 Dialog::About => {
                     ui.horizontal(|ui| {
                         let (rect, _) = ui.allocate_exact_size(egui::vec2(48.0, 48.0), egui::Sense::hover());
-                        crate::ui::icons::paint(ui.painter(), rect, crate::ui::icons::Icon::Logo, crate::ui::theme::BRAND);
+                        crate::ui::icons::paint(
+                            ui.painter(),
+                            rect,
+                            crate::ui::icons::Icon::Logo,
+                            crate::ui::theme::BRAND,
+                        );
                         ui.vertical(|ui| {
                             ui.heading(format!("MrPDF {}", env!("CARGO_PKG_VERSION")));
                             ui.label(t.about_text);

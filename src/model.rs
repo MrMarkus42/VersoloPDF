@@ -27,11 +27,7 @@ impl Rgba {
 
     /// Components as PDF colour operands (0.0..=1.0).
     pub fn to_pdf(self) -> [f32; 3] {
-        [
-            f32::from(self.r) / 255.0,
-            f32::from(self.g) / 255.0,
-            f32::from(self.b) / 255.0,
-        ]
+        [f32::from(self.r) / 255.0, f32::from(self.g) / 255.0, f32::from(self.b) / 255.0]
     }
 
     pub fn from_pdf(c: &[f32]) -> Option<Self> {
@@ -81,10 +77,7 @@ pub enum AnnotKind {
 impl AnnotKind {
     /// Whether the annotation is a user comment shown in the comments list.
     pub fn is_comment(self) -> bool {
-        !matches!(
-            self,
-            AnnotKind::Popup | AnnotKind::Link | AnnotKind::Widget | AnnotKind::Other
-        )
+        !matches!(self, AnnotKind::Popup | AnnotKind::Link | AnnotKind::Widget | AnnotKind::Other)
     }
 
     /// Whether the annotation's rectangle may be moved by dragging.
@@ -183,11 +176,7 @@ impl Default for AnnotStyle {
 pub enum ShapeGeometry {
     Rectangle(RectF),
     Ellipse(RectF),
-    Line {
-        from: PointF,
-        to: PointF,
-        arrow_end: bool,
-    },
+    Line { from: PointF, to: PointF, arrow_end: bool },
     Ink(Vec<Vec<PointF>>),
     Polygon(Vec<PointF>),
     Polyline(Vec<PointF>),

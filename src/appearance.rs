@@ -35,20 +35,18 @@ impl StdFont {
     /// Advance width of a WinAnsi byte in 1/1000 em.
     pub fn width(self, byte: u8) -> u16 {
         const HELV: [u16; 95] = [
-            278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278, 556,
-            556, 556, 556, 556, 556, 556, 556, 556, 556, 278, 278, 584, 584, 584, 556, 1015, 667,
-            667, 722, 722, 667, 611, 778, 722, 278, 500, 667, 556, 833, 722, 778, 667, 778, 722,
-            667, 611, 722, 667, 944, 667, 667, 611, 278, 278, 278, 469, 556, 333, 556, 556, 500,
-            556, 556, 278, 556, 556, 222, 222, 500, 222, 833, 556, 556, 556, 556, 333, 500, 278,
-            556, 500, 722, 500, 500, 500, 334, 260, 334, 584,
+            278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278, 556, 556, 556,
+            556, 556, 556, 556, 556, 556, 556, 278, 278, 584, 584, 584, 556, 1015, 667, 667, 722, 722, 667,
+            611, 778, 722, 278, 500, 667, 556, 833, 722, 778, 667, 778, 722, 667, 611, 722, 667, 944, 667,
+            667, 611, 278, 278, 278, 469, 556, 333, 556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500,
+            222, 833, 556, 556, 556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500, 334, 260, 334, 584,
         ];
         const BOLD: [u16; 95] = [
-            278, 333, 474, 556, 556, 889, 722, 238, 333, 333, 389, 584, 278, 333, 278, 278, 556,
-            556, 556, 556, 556, 556, 556, 556, 556, 556, 333, 333, 584, 584, 584, 611, 975, 722,
-            722, 722, 722, 667, 611, 778, 722, 278, 556, 722, 611, 833, 722, 778, 667, 778, 722,
-            667, 611, 722, 667, 944, 667, 667, 611, 333, 278, 333, 584, 556, 333, 556, 611, 556,
-            611, 556, 333, 611, 611, 278, 278, 556, 278, 889, 611, 611, 611, 611, 389, 556, 333,
-            611, 556, 778, 556, 556, 500, 389, 280, 389, 584,
+            278, 333, 474, 556, 556, 889, 722, 238, 333, 333, 389, 584, 278, 333, 278, 278, 556, 556, 556,
+            556, 556, 556, 556, 556, 556, 556, 333, 333, 584, 584, 584, 611, 975, 722, 722, 722, 722, 667,
+            611, 778, 722, 278, 556, 722, 611, 833, 722, 778, 667, 778, 722, 667, 611, 722, 667, 944, 667,
+            667, 611, 333, 278, 333, 584, 556, 333, 556, 611, 556, 611, 556, 333, 611, 611, 278, 278, 556,
+            278, 889, 611, 611, 611, 611, 389, 556, 333, 611, 556, 778, 556, 556, 500, 389, 280, 389, 584,
         ];
         let table = match self {
             StdFont::Helvetica => &HELV,
@@ -169,10 +167,7 @@ struct Builder {
 
 impl Builder {
     fn new() -> Self {
-        Self {
-            out: String::new(),
-            bytes: Vec::new(),
-        }
+        Self { out: String::new(), bytes: Vec::new() }
     }
 
     fn op(&mut self, s: &str) {
@@ -213,14 +208,7 @@ impl Builder {
 
     fn rect(&mut self, r: &RectF) {
         let r = r.normalized();
-        let _ = writeln!(
-            self.out,
-            "{} {} {} {} re",
-            num(r.x0),
-            num(r.y0),
-            num(r.width()),
-            num(r.height())
-        );
+        let _ = writeln!(self.out, "{} {} {} {} re", num(r.x0), num(r.y0), num(r.width()), num(r.height()));
     }
 
     fn ellipse(&mut self, r: &RectF) {
@@ -230,26 +218,10 @@ impl Builder {
         let (rx, ry) = (r.width() / 2.0, r.height() / 2.0);
         let (kx, ky) = (rx * K, ry * K);
         self.move_to(PointF::new(cx + rx, cy));
-        self.curve_to(
-            PointF::new(cx + rx, cy + ky),
-            PointF::new(cx + kx, cy + ry),
-            PointF::new(cx, cy + ry),
-        );
-        self.curve_to(
-            PointF::new(cx - kx, cy + ry),
-            PointF::new(cx - rx, cy + ky),
-            PointF::new(cx - rx, cy),
-        );
-        self.curve_to(
-            PointF::new(cx - rx, cy - ky),
-            PointF::new(cx - kx, cy - ry),
-            PointF::new(cx, cy - ry),
-        );
-        self.curve_to(
-            PointF::new(cx + kx, cy - ry),
-            PointF::new(cx + rx, cy - ky),
-            PointF::new(cx + rx, cy),
-        );
+        self.curve_to(PointF::new(cx + rx, cy + ky), PointF::new(cx + kx, cy + ry), PointF::new(cx, cy + ry));
+        self.curve_to(PointF::new(cx - kx, cy + ry), PointF::new(cx - rx, cy + ky), PointF::new(cx - rx, cy));
+        self.curve_to(PointF::new(cx - rx, cy - ky), PointF::new(cx - kx, cy - ry), PointF::new(cx, cy - ry));
+        self.curve_to(PointF::new(cx + kx, cy - ry), PointF::new(cx + rx, cy - ky), PointF::new(cx + rx, cy));
         self.op("h");
     }
 
@@ -268,14 +240,7 @@ impl Builder {
 
     /// Writes a text show operation for already encoded bytes.
     fn show_text(&mut self, font: StdFont, size: f32, x: f32, y: f32, text: &[u8]) {
-        let _ = write!(
-            self.out,
-            "BT /{} {} Tf {} {} Td (",
-            font.resource_name(),
-            num(size),
-            num(x),
-            num(y)
-        );
+        let _ = write!(self.out, "BT /{} {} Tf {} {} Td (", font.resource_name(), num(size), num(x), num(y));
         self.flush_out();
         for &b in text {
             match b {
@@ -359,11 +324,8 @@ pub fn build(input: &ApInput) -> Appearance {
             for q in &input.quads {
                 let q = q.normalized();
                 let lw = (q.height() / 14.0).max(0.6);
-                let y = if input.kind == AnnotKind::Underline {
-                    q.y0 + lw * 1.5
-                } else {
-                    (q.y0 + q.y1) / 2.0
-                };
+                let y =
+                    if input.kind == AnnotKind::Underline { q.y0 + lw * 1.5 } else { (q.y0 + q.y1) / 2.0 };
                 b.op(&format!("{} w", num(lw)));
                 b.move_to(PointF::new(q.x0, y));
                 b.line_to(PointF::new(q.x1, y));
@@ -462,7 +424,13 @@ pub fn build(input: &ApInput) -> Appearance {
             let size = input.font_size.max(1.0);
             let pad = 2.0 + w;
             let lines = wrap_text(&input.text, font, size, (rect.width() - 2.0 * pad).max(size));
-            b.op(&format!("{} {} {} {} re W n", num(rect.x0), num(rect.y0), num(rect.width()), num(rect.height())));
+            b.op(&format!(
+                "{} {} {} {} re W n",
+                num(rect.x0),
+                num(rect.y0),
+                num(rect.width()),
+                num(rect.height())
+            ));
             b.fill_color(input.text_color);
             let mut y = rect.y1 - pad - size * 0.85;
             for line in &lines {
@@ -490,13 +458,7 @@ pub fn build(input: &ApInput) -> Appearance {
             };
             let tw = font.text_width(&label, fitted);
             b.fill_color(input.color);
-            b.show_text(
-                font,
-                fitted,
-                inner.center().x - tw / 2.0,
-                inner.center().y - fitted * 0.35,
-                &label,
-            );
+            b.show_text(font, fitted, inner.center().x - tw / 2.0, inner.center().y - fitted * 0.35, &label);
         }
         AnnotKind::Note => {
             // A speech bubble icon filling the rectangle.
@@ -525,11 +487,7 @@ pub fn build(input: &ApInput) -> Appearance {
         _ => {}
     }
 
-    Appearance {
-        bbox: rect,
-        content: b.finish(),
-        resources: res,
-    }
+    Appearance { bbox: rect, content: b.finish(), resources: res }
 }
 
 fn rounded_rect(b: &mut Builder, r: &RectF, radius: f32) {
@@ -568,14 +526,8 @@ pub fn arrow_head(from: PointF, to: PointF, width: f32) -> (PointF, PointF) {
     let len = (width * 4.0).max(8.0);
     let angle = (to.y - from.y).atan2(to.x - from.x);
     let spread = std::f32::consts::PI / 7.0;
-    let a = PointF::new(
-        to.x - len * (angle - spread).cos(),
-        to.y - len * (angle - spread).sin(),
-    );
-    let c = PointF::new(
-        to.x - len * (angle + spread).cos(),
-        to.y - len * (angle + spread).sin(),
-    );
+    let a = PointF::new(to.x - len * (angle - spread).cos(), to.y - len * (angle - spread).sin());
+    let c = PointF::new(to.x - len * (angle + spread).cos(), to.y - len * (angle + spread).sin());
     (a, c)
 }
 
@@ -594,17 +546,10 @@ pub fn required_rect(input: &ApInput) -> RectF {
                 points.push(a);
                 points.push(c);
             }
-            RectF::bounding(points)
-                .unwrap_or(input.rect)
-                .inflate(w / 2.0 + 1.0)
+            RectF::bounding(points).unwrap_or(input.rect).inflate(w / 2.0 + 1.0)
         }
         AnnotKind::Highlight | AnnotKind::Underline | AnnotKind::StrikeOut | AnnotKind::Squiggly => {
-            input
-                .quads
-                .iter()
-                .copied()
-                .reduce(|a, b| a.union(&b))
-                .unwrap_or(input.rect)
+            input.quads.iter().copied().reduce(|a, b| a.union(&b)).unwrap_or(input.rect)
         }
         _ => input.rect.normalized(),
     }

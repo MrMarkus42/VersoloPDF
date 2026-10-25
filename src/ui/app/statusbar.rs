@@ -34,7 +34,11 @@ impl MrPdfApp {
                                 })
                                 .stroke(egui::Stroke::new(
                                     1.0,
-                                    if selected { theme::ACCENT } else { ui.visuals().widgets.noninteractive.bg_stroke.color },
+                                    if selected {
+                                        theme::ACCENT
+                                    } else {
+                                        ui.visuals().widgets.noninteractive.bg_stroke.color
+                                    },
                                 ));
                             frame.show(ui, |ui| {
                                 ui.horizontal(|ui| {
@@ -108,10 +112,14 @@ impl MrPdfApp {
                         tab.zoom = view::zoom_out(tab.zoom);
                         tab.zoom_mode = ZoomMode::Custom;
                     }
-                    if icon_button(ui, Icon::FitPage, t.fit_page, tab.zoom_mode == ZoomMode::FitPage, true).clicked() {
+                    if icon_button(ui, Icon::FitPage, t.fit_page, tab.zoom_mode == ZoomMode::FitPage, true)
+                        .clicked()
+                    {
                         tab.zoom_mode = ZoomMode::FitPage;
                     }
-                    if icon_button(ui, Icon::FitWidth, t.fit_width, tab.zoom_mode == ZoomMode::FitWidth, true).clicked() {
+                    if icon_button(ui, Icon::FitWidth, t.fit_width, tab.zoom_mode == ZoomMode::FitWidth, true)
+                        .clicked()
+                    {
                         tab.zoom_mode = ZoomMode::FitWidth;
                     }
                     ui.separator();
@@ -128,7 +136,8 @@ impl MrPdfApp {
                     if !editing {
                         self.goto_text = (cur + 1).to_string();
                     }
-                    let resp = ui.add(egui::TextEdit::singleline(&mut self.goto_text).id(goto_id).desired_width(42.0));
+                    let resp = ui
+                        .add(egui::TextEdit::singleline(&mut self.goto_text).id(goto_id).desired_width(42.0));
                     if resp.lost_focus()
                         && ui.input(|i| i.key_pressed(egui::Key::Enter))
                         && let Ok(n) = self.goto_text.trim().parse::<usize>()
@@ -145,7 +154,10 @@ impl MrPdfApp {
                     ui.separator();
                     if let Some(geo) = tab.doc.geometry(cur) {
                         let (w, h) = geo.view_size();
-                        ui.label(RichText::new(format!("{:.0} × {:.0} mm", w / 72.0 * 25.4, h / 72.0 * 25.4)).weak());
+                        ui.label(
+                            RichText::new(format!("{:.0} × {:.0} mm", w / 72.0 * 25.4, h / 72.0 * 25.4))
+                                .weak(),
+                        );
                     }
                     ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                         ui.label(message);

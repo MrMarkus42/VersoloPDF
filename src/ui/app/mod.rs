@@ -31,6 +31,7 @@ pub enum RibbonTab {
     Comment,
     Organize,
     Form,
+    Protect,
     View,
     Help,
 }
@@ -40,6 +41,7 @@ pub enum SidePanel {
     Thumbnails,
     Bookmarks,
     Comments,
+    Attachments,
     Search,
 }
 
@@ -93,6 +95,7 @@ pub enum Dialog {
     Settings { author: String },
     Print { range: String, copies: u32, error: bool },
     Choice { page: usize, annot_index: usize, options: Vec<String>, selected: String },
+    Protect { opts: crate::security::ProtectOptions, repeat: String, error: Option<&'static str> },
     About,
 }
 
@@ -129,10 +132,8 @@ pub struct MrPdfApp {
 
 impl MrPdfApp {
     pub fn new(cc: &eframe::CreationContext<'_>, files: Vec<PathBuf>) -> Self {
-        let settings: Settings = cc
-            .storage
-            .and_then(|s| eframe::get_value(s, SETTINGS_KEY))
-            .unwrap_or_default();
+        let settings: Settings =
+            cc.storage.and_then(|s| eframe::get_value(s, SETTINGS_KEY)).unwrap_or_default();
         Self::with_settings(&cc.egui_ctx, settings, files)
     }
 
@@ -207,7 +208,8 @@ impl MrPdfApp {
             return;
         }
         let cmd = Modifiers::COMMAND;
-        let pressed = |m: Modifiers, k: Key| ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(m, k)));
+        let pressed =
+            |m: Modifiers, k: Key| ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(m, k)));
         if pressed(cmd, Key::O) {
             self.open_dialog();
         }
@@ -225,12 +227,7 @@ impl MrPdfApp {
         if pressed(cmd, Key::P) {
             self.open_print_dialog(ctx);
         }
-        if pressed(cmd, Key::Z) {
-            self.undo(ctx);
-        }
-        if pressed(cmd, Key::Y) || pressed(cmd | Modifiers::SHIFT, Key::Z) {
-            self.redo(ctx);
-        }
+
         if pressed(cmd, Key::F) {
             self.settings.show_sidebar = true;
             self.side = SidePanel::Search;
@@ -257,16 +254,21 @@ impl MrPdfApp {
         if pressed(cmd, Key::Tab) && !self.tabs.is_empty() {
             self.active = (self.active + 1) % self.tabs.len();
         }
+        // The remaining shortcuts belong to text fields while one has focus.
+        if ctx.egui_wants_keyboard_input() {
+            return;
+        }
+        if pressed(cmd, Key::Z) {
+            self.undo(ctx);
+        }
+        if pressed(cmd, Key::Y) || pressed(cmd | Modifiers::SHIFT, Key::Z) {
+            self.redo(ctx);
+        }
         if pressed(cmd, Key::C) {
             self.copy_selection(ctx);
         }
         if pressed(cmd, Key::A) {
             self.select_all_text();
-        }
-
-        // Keys without modifiers only apply while no text field has focus.
-        if ctx.memory(|m| m.focused().is_some()) {
-            return;
         }
         let key = |k: Key| ctx.input(|i| i.key_pressed(k) && i.modifiers.is_none());
         if key(Key::Delete) || key(Key::Backspace) {
@@ -309,24 +311,20 @@ impl MrPdfApp {
                 tab.next_hit(!back);
             }
         }
+        if ctx.input(|i| i.key_pressed(Key::F11)) {
+            let full = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
+            ctx.send_viewport_cmd(ViewportCommand::Fullscreen(!full));
+        }
         if ctx.input(|i| i.key_pressed(Key::F4)) {
             self.settings.show_sidebar = !self.settings.show_sidebar;
         }
     }
 
     fn handle_dropped_files(&mut self, ctx: &Context) {
-        let dropped: Vec<PathBuf> = ctx.input(|i| {
-            i.raw
-                .dropped_files
-                .iter()
-                .map(|f| f.path().to_path_buf())
-                .collect()
-        });
+        let dropped: Vec<PathBuf> =
+            ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).collect());
         for path in dropped {
-            if path
-                .extension()
-                .is_some_and(|e| e.eq_ignore_ascii_case("pdf"))
-            {
+            if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("pdf")) {
                 self.pending_open.push_back(path);
             } else {
                 let t = self.t();
@@ -356,10 +354,7 @@ impl MrPdfApp {
             if let Some(i) = self.tabs.iter().position(|t| t.id == tab_id) {
                 self.active = i;
             }
-            self.dialog = Some(Dialog::Unsaved {
-                tab_id,
-                then: AfterSave::Exit,
-            });
+            self.dialog = Some(Dialog::Unsaved { tab_id, then: AfterSave::Exit });
         }
     }
 
@@ -414,7 +409,8 @@ impl MrPdfApp {
                 ui.add_space(16.0);
                 ui.strong(t.recent_files);
                 for path in self.settings.recent_files.clone() {
-                    let label = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    let label =
+                        path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                     if ui.link(label).on_hover_text(path.display().to_string()).clicked() {
                         self.pending_open.push_back(path);
                     }

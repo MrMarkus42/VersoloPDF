@@ -1,8 +1,8 @@
 //! The document view: draws pages and handles the interactive tools.
 
 use egui::{
-    Color32, CursorIcon, Key, PointerButton, Pos2, Rect, ScrollArea, Sense, Stroke, StrokeKind,
-    Ui, Vec2, pos2, vec2,
+    Color32, CursorIcon, Key, PointerButton, Pos2, Rect, ScrollArea, Sense, Stroke, StrokeKind, Ui, Vec2,
+    pos2, vec2,
 };
 
 use crate::appearance::{StdFont, win_ansi};
@@ -16,7 +16,7 @@ use crate::ui::tab::{AnnotRef, DocTab, FieldEdit, Interaction, ScrollRequest, Te
 use crate::ui::theme;
 use crate::ui::tools::Tool;
 use crate::ui::view::{
-    Layout, MARGIN, PageLayout, ZoomMode, fit_page_zoom, fit_width_zoom, MAX_ZOOM, MIN_ZOOM,
+    Layout, MARGIN, MAX_ZOOM, MIN_ZOOM, PageLayout, ZoomMode, fit_page_zoom, fit_width_zoom,
 };
 
 /// Requests from the canvas that the application has to carry out.
@@ -58,12 +58,12 @@ struct PageOnScreen {
 }
 
 impl PageOnScreen {
-    fn to_view(&self, p: Pos2) -> PointF {
+    fn view_at(&self, p: Pos2) -> PointF {
         PointF::new((p.x - self.rect.min.x) / self.scale, (p.y - self.rect.min.y) / self.scale)
     }
 
-    fn to_pdf(&self, p: Pos2) -> PointF {
-        self.geo.view_to_pdf(self.to_view(p))
+    fn pdf_at(&self, p: Pos2) -> PointF {
+        self.geo.view_to_pdf(self.view_at(p))
     }
 
     fn view_to_screen(&self, v: PointF) -> Pos2 {
@@ -77,7 +77,6 @@ impl PageOnScreen {
             self.view_to_screen(PointF::new(v.x1, v.y1)),
         )
     }
-
 }
 
 fn scroll_offset_for(tab: &DocTab, req: &ScrollRequest, viewport: Vec2) -> Option<Vec2> {
@@ -134,9 +133,7 @@ pub fn show(ui: &mut Ui, tab: &mut DocTab, cx: &mut CanvasCtx) {
 
     tab.layout = Layout::compute(&sizes, tab.zoom, tab.layout_mode, tab.current_page);
 
-    let mut area = ScrollArea::both()
-        .id_salt(("doc", tab.id))
-        .auto_shrink([false, false]);
+    let mut area = ScrollArea::both().id_salt(("doc", tab.id)).auto_shrink([false, false]);
     if let Some(req) = tab.pending_scroll.take() {
         let viewport_size = avail - vec2(scrollbar, scrollbar);
         if let Some(off) = scroll_offset_for(tab, &req, viewport_size) {
@@ -148,6 +145,25 @@ pub fn show(ui: &mut Ui, tab: &mut DocTab, cx: &mut CanvasCtx) {
         draw_and_interact(ui, tab, cx, viewport, &ctx);
     });
     tab.scroll_offset = output.state.offset;
+
+    // Single page layout: the mouse wheel flips pages at the top/bottom edge.
+    if tab.layout_mode == PageLayout::Single
+        && let Some(pointer) = ui.input(|i| i.pointer.hover_pos())
+        && output.inner_rect.contains(pointer)
+    {
+        let (dy, now) = ui.input(|i| (i.smooth_scroll_delta.y, i.time));
+        let max_y = (output.content_size.y - output.inner_rect.height()).max(0.0);
+        let count = tab.doc.page_count();
+        if now - tab.last_flip > 0.35 {
+            if dy < 0.0 && output.state.offset.y >= max_y - 1.0 && tab.current_page + 1 < count {
+                tab.go_to_page(tab.current_page + 1);
+                tab.last_flip = now;
+            } else if dy > 0.0 && output.state.offset.y <= 1.0 && tab.current_page > 0 {
+                tab.go_to_page(tab.current_page - 1);
+                tab.last_flip = now;
+            }
+        }
+    }
 }
 
 fn draw_and_interact(ui: &mut Ui, tab: &mut DocTab, cx: &mut CanvasCtx, viewport: Rect, ctx: &egui::Context) {
@@ -156,11 +172,7 @@ fn draw_and_interact(ui: &mut Ui, tab: &mut DocTab, cx: &mut CanvasCtx, viewport
     let (rect, response) = ui.allocate_exact_size(size, Sense::click_and_drag());
     let shift = vec2(
         ((size.x - layout_size.x) / 2.0).max(0.0),
-        if tab.layout_mode == PageLayout::Single {
-            ((size.y - layout_size.y) / 2.0).max(0.0)
-        } else {
-            0.0
-        },
+        if tab.layout_mode == PageLayout::Single { ((size.y - layout_size.y) / 2.0).max(0.0) } else { 0.0 },
     );
     tab.content_shift = shift;
     tab.viewport = viewport;
@@ -188,12 +200,7 @@ fn draw_and_interact(ui: &mut Ui, tab: &mut DocTab, cx: &mut CanvasCtx, viewport
         let Some(geo) = tab.doc.geometry(slot.page).copied() else {
             continue;
         };
-        let pos = PageOnScreen {
-            page: slot.page,
-            rect: screen,
-            geo,
-            scale,
-        };
+        let pos = PageOnScreen { page: slot.page, rect: screen, geo, scale };
         on_screen.push(pos);
         if !screen.intersects(visible_screen.expand(200.0)) {
             continue;
@@ -220,7 +227,15 @@ fn draw_and_interact(ui: &mut Ui, tab: &mut DocTab, cx: &mut CanvasCtx, viewport
                 let ah = ((vis.height() * ppp).ceil() as u32).min(max_side.saturating_sub(512)).max(1);
                 let aw = aw.min(px_w.saturating_sub(ax)).max(1);
                 let ah = ah.min(px_h.saturating_sub(ay)).max(1);
-                if let Some(tile) = tab.textures.tile(ctx, &tab.doc, slot.page, [px_w, px_h], [ax, ay, aw, ah], cx.budget, tab.id) {
+                if let Some(tile) = tab.textures.tile(
+                    ctx,
+                    &tab.doc,
+                    slot.page,
+                    [px_w, px_h],
+                    [ax, ay, aw, ah],
+                    cx.budget,
+                    tab.id,
+                ) {
                     let [tx, ty, tw, th] = tile.area;
                     let r = Rect::from_min_size(
                         screen.min + vec2(tx as f32 / ppp, ty as f32 / ppp),
@@ -244,7 +259,11 @@ fn draw_overlays(painter: &egui::Painter, tab: &mut DocTab, pos: &PageOnScreen, 
     if cx.highlight_fields {
         for f in tab.fields(page).iter() {
             if !f.read_only && f.kind != FieldKind::PushButton {
-                painter.rect_filled(pos.pdf_rect_to_screen(&f.rect), 0.0, Color32::from_rgba_unmultiplied(120, 160, 255, 50));
+                painter.rect_filled(
+                    pos.pdf_rect_to_screen(&f.rect),
+                    0.0,
+                    Color32::from_rgba_unmultiplied(120, 160, 255, 50),
+                );
             }
         }
     }
@@ -263,16 +282,18 @@ fn draw_overlays(painter: &egui::Painter, tab: &mut DocTab, pos: &PageOnScreen, 
     // Text selection (also previewed while using a markup tool).
     let interaction = tab.interaction.clone();
     let selection = match &interaction {
-        Interaction::Markup { page: p, anchor: Some(a), current, .. } if *p == page => {
-            tab.page_text(page).and_then(|t| {
-                t.hit_test(pos.geo.view_to_pdf(*current), 8.0).map(|c| TextRange::new(*a, c))
-            })
-        }
+        Interaction::Markup { page: p, anchor: Some(a), current, .. } if *p == page => tab
+            .page_text(page)
+            .and_then(|t| t.hit_test(pos.geo.view_to_pdf(*current), 8.0).map(|c| TextRange::new(*a, c))),
         _ => tab.selection.filter(|s| s.page == page).map(|s| s.range),
     };
     if let (Some(range), Some(text)) = (selection, tab.page_text(page)) {
         for r in text.line_rects(range) {
-            painter.rect_filled(pos.pdf_rect_to_screen(&r), 0.0, Color32::from_rgba_unmultiplied(40, 110, 230, 70));
+            painter.rect_filled(
+                pos.pdf_rect_to_screen(&r),
+                0.0,
+                Color32::from_rgba_unmultiplied(40, 110, 230, 70),
+            );
         }
     }
     // Selected annotation.
@@ -358,7 +379,7 @@ fn handle_input(
     if let Some(h) = hover
         && let Some(pos) = find_page(on_screen, h)
     {
-        let pdf = pos.to_pdf(h);
+        let pdf = pos.pdf_at(h);
         let cursor = match cx.tool {
             Tool::Hand => {
                 let over_link = tab.links(pos.page).iter().any(|l| l.rect.contains(pdf));
@@ -396,7 +417,7 @@ fn handle_input(
         let page = find_page(on_screen, start);
         tab.interaction = match (cx.tool, page) {
             (Tool::Hand, Some(pos)) => {
-                let pdf = pos.to_pdf(start);
+                let pdf = pos.pdf_at(start);
                 let selected = tab.selected_annot;
                 match selected {
                     Some(sel)
@@ -414,13 +435,11 @@ fn handle_input(
             }
             (Tool::Hand, None) => Interaction::Pan,
             (Tool::SelectText, Some(pos)) => {
-                let pdf = pos.to_pdf(start);
+                let pdf = pos.pdf_at(start);
                 match tab.page_text(pos.page).and_then(|t| t.hit_test(pdf, 10.0 / tab.scale())) {
                     Some(anchor) => {
-                        tab.selection = Some(TextSelection {
-                            page: pos.page,
-                            range: TextRange::new(anchor, anchor),
-                        });
+                        tab.selection =
+                            Some(TextSelection { page: pos.page, range: TextRange::new(anchor, anchor) });
                         Interaction::SelectText { page: pos.page, anchor }
                     }
                     None => {
@@ -430,13 +449,13 @@ fn handle_input(
                 }
             }
             (t, Some(pos)) if t.is_markup() => {
-                let pdf = pos.to_pdf(start);
+                let pdf = pos.pdf_at(start);
                 let anchor = tab.page_text(pos.page).and_then(|t| t.hit_test(pdf, 10.0 / tab.scale()));
-                let v = pos.to_view(start);
+                let v = pos.view_at(start);
                 Interaction::Markup { page: pos.page, anchor, start: v, current: v }
             }
             (t, Some(pos)) if t.is_shape() => {
-                let v = pos.to_view(start);
+                let v = pos.view_at(start);
                 Interaction::Shape { page: pos.page, start: v, current: v, points: vec![v] }
             }
             _ => Interaction::None,
@@ -456,29 +475,28 @@ fn handle_input(
             }
             Interaction::SelectText { page, anchor } => {
                 if let Some(pos) = on_screen.iter().find(|p| p.page == *page) {
-                    let pdf = pos.to_pdf(cur);
+                    let pdf = pos.pdf_at(cur);
                     if let Some(c) = tab.page_text(*page).and_then(|t| t.hit_test(pdf, 40.0 / scale)) {
-                        tab.selection = Some(TextSelection { page: *page, range: TextRange::new(*anchor, c) });
+                        tab.selection =
+                            Some(TextSelection { page: *page, range: TextRange::new(*anchor, c) });
                     }
                 }
             }
             Interaction::Markup { page, current, .. } => {
                 if let Some(pos) = on_screen.iter().find(|p| p.page == *page) {
                     let clamped = cur.clamp(pos.rect.min, pos.rect.max);
-                    *current = pos.to_view(clamped);
+                    *current = pos.view_at(clamped);
                 }
             }
             Interaction::Shape { page, start, current, points } => {
                 if let Some(pos) = on_screen.iter().find(|p| p.page == *page) {
                     let clamped = cur.clamp(pos.rect.min, pos.rect.max);
-                    let mut v = pos.to_view(clamped);
+                    let mut v = pos.view_at(clamped);
                     if shift_down && matches!(cx.tool, Tool::Line | Tool::Arrow) {
                         v = snap_45(*start, v);
                     }
                     *current = v;
-                    if cx.tool == Tool::Pencil
-                        && points.last().is_none_or(|l| l.distance(v) * scale > 1.5)
-                    {
+                    if cx.tool == Tool::Pencil && points.last().is_none_or(|l| l.distance(v) * scale > 1.5) {
                         points.push(v);
                     }
                 }
@@ -506,7 +524,7 @@ fn handle_input(
         && let Some(p) = response.interact_pointer_pos()
         && let Some(pos) = find_page(on_screen, p)
     {
-        let pdf = pos.to_pdf(p);
+        let pdf = pos.pdf_at(p);
         match cx.tool {
             Tool::SelectText => {
                 if let Some(text) = tab.page_text(pos.page)
@@ -536,7 +554,7 @@ fn handle_input(
         && let Some(p) = response.interact_pointer_pos()
         && let Some(pos) = find_page(on_screen, p)
     {
-        let pdf = pos.to_pdf(p);
+        let pdf = pos.pdf_at(p);
         if let Some(index) = annotation_at(tab, pos.page, pdf, tol) {
             tab.selected_annot = Some(AnnotRef { page: pos.page, index });
         }
@@ -581,7 +599,6 @@ fn handle_input(
             ui.label(t.no_selection);
         }
     });
-
 }
 
 fn finish_drag(tab: &mut DocTab, cx: &mut CanvasCtx, interaction: Interaction, on_screen: &[PageOnScreen]) {
@@ -591,9 +608,7 @@ fn finish_drag(tab: &mut DocTab, cx: &mut CanvasCtx, interaction: Interaction, o
             let Some(pos) = on_screen.iter().find(|p| p.page == page) else {
                 return;
             };
-            let end_char = tab
-                .page_text(page)
-                .and_then(|t| t.hit_test(pos.geo.view_to_pdf(current), 8.0));
+            let end_char = tab.page_text(page).and_then(|t| t.hit_test(pos.geo.view_to_pdf(current), 8.0));
             let quads = match (anchor, end_char, tab.page_text(page)) {
                 (Some(a), Some(b), Some(text)) => text.line_rects(TextRange::new(a, b)),
                 _ if cx.tool == Tool::Highlight && start.distance(current) * scale > 4.0 => {
@@ -621,7 +636,8 @@ fn finish_drag(tab: &mut DocTab, cx: &mut CanvasCtx, interaction: Interaction, o
             };
             let geo = pos.geo;
             let big_enough = start.distance(current) * scale > 3.0;
-            let mut annot = NewAnnotation::new(cx.tool.annot_kind().unwrap_or(AnnotKind::Square), cx.style.clone());
+            let mut annot =
+                NewAnnotation::new(cx.tool.annot_kind().unwrap_or(AnnotKind::Square), cx.style.clone());
             match cx.tool {
                 Tool::Rectangle | Tool::Ellipse if big_enough => {
                     annot.rect = geo.view_rect_to_pdf(&RectF::from_points(start, current));
@@ -669,8 +685,8 @@ fn handle_click(tab: &mut DocTab, cx: &mut CanvasCtx, on_screen: &[PageOnScreen]
         tab.selection = None;
         return;
     };
-    let pdf = pos.to_pdf(p);
-    let view = pos.to_view(p);
+    let pdf = pos.pdf_at(p);
+    let view = pos.view_at(p);
     let tol = 4.0 / tab.scale();
     match cx.tool {
         Tool::Hand => {
@@ -721,7 +737,8 @@ fn handle_click(tab: &mut DocTab, cx: &mut CanvasCtx, on_screen: &[PageOnScreen]
                 }
                 return;
             }
-            tab.selected_annot = annotation_at(tab, pos.page, pdf, tol).map(|index| AnnotRef { page: pos.page, index });
+            tab.selected_annot =
+                annotation_at(tab, pos.page, pdf, tol).map(|index| AnnotRef { page: pos.page, index });
         }
         Tool::SelectText => {
             tab.selection = None;
@@ -744,7 +761,8 @@ fn handle_click(tab: &mut DocTab, cx: &mut CanvasCtx, on_screen: &[PageOnScreen]
         }
         Tool::Rectangle | Tool::Ellipse => {
             let rect = RectF::new(view.x, view.y, view.x + 100.0, view.y + 60.0);
-            let mut annot = NewAnnotation::new(cx.tool.annot_kind().unwrap_or(AnnotKind::Square), cx.style.clone());
+            let mut annot =
+                NewAnnotation::new(cx.tool.annot_kind().unwrap_or(AnnotKind::Square), cx.style.clone());
             annot.rect = pos.geo.view_rect_to_pdf(&rect);
             cx.events.push(CanvasEvent::Create { page: pos.page, annot: Box::new(annot) });
         }

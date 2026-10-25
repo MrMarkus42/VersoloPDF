@@ -102,6 +102,7 @@ strings! {
     tab_organize: "Organisieren", "Organize";
     tab_form: "Formular", "Form";
     tab_view: "Ansicht", "View";
+    tab_protect: "Schützen", "Protect";
     tab_help: "Hilfe", "Help";
 
     // Groups
@@ -121,6 +122,33 @@ strings! {
     group_layout: "Seitenlayout", "Page layout";
     group_panels: "Bereiche", "Panes";
     group_appearance: "Darstellung", "Appearance";
+    group_security: "Sicherheit", "Security";
+    group_attachments: "Anhänge", "Attachments";
+    password_protect: "Kennwortschutz", "Password protection";
+    remove_protection: "Schutz entfernen", "Remove protection";
+    protection_removed: "Kennwortschutz entfernt", "Password protection removed";
+    protected_msg: "Kennwortschutz gesetzt – wirksam nach dem Speichern", "Password protection set – effective after saving";
+    status_encrypted: "Dieses Dokument ist verschlüsselt.", "This document is encrypted.";
+    status_not_encrypted: "Dieses Dokument ist nicht verschlüsselt.", "This document is not encrypted.";
+    user_password: "Kennwort zum Öffnen", "Password to open";
+    owner_password: "Berechtigungskennwort", "Permissions password";
+    repeat_password: "Kennwort wiederholen", "Repeat password";
+    passwords_differ: "Die Kennwörter stimmen nicht überein.", "The passwords do not match.";
+    password_needed: "Bitte mindestens ein Kennwort eingeben.", "Please enter at least one password.";
+    protect_hint: "Verschlüsselung mit AES-256. Ohne Berechtigungskennwort wird ein zufälliges erzeugt; die Einschränkungen gelten dann für alle.", "Encryption with AES-256. Without a permissions password a random one is generated; the restrictions then apply to everyone.";
+    allow_print: "Drucken erlauben", "Allow printing";
+    allow_copy: "Kopieren von Text erlauben", "Allow copying text";
+    allow_modify: "Ändern erlauben", "Allow changes";
+    allow_annotate: "Kommentieren erlauben", "Allow comments";
+    allow_fill: "Formulare ausfüllen erlauben", "Allow filling forms";
+    allow_assemble: "Seiten organisieren erlauben", "Allow organizing pages";
+    attachments: "Anhänge", "Attachments";
+    no_attachments: "Keine Dateianhänge", "No file attachments";
+    save_attachment: "Speichern…", "Save…";
+    add_attachment: "Datei anhängen…", "Attach file…";
+    delete_attachment: "Anhang löschen", "Delete attachment";
+    attachment_hint: "Anhänge werden aus Sicherheitsgründen nie direkt geöffnet, nur gespeichert.", "For security reasons attachments are never opened directly, only saved.";
+    fullscreen: "Vollbild", "Full screen";
 
     // Tools
     tool_hand: "Hand", "Hand";

@@ -1,8 +1,8 @@
 //! Ribbon style buttons and small helpers.
 
 use egui::{
-    Align2, Color32, FontId, Rect, Response, Sense, Stroke, StrokeKind, TextWrapMode, Ui, Vec2,
-    WidgetInfo, WidgetType, vec2,
+    Align2, Color32, FontId, Rect, Response, Sense, Stroke, StrokeKind, TextWrapMode, Ui, Vec2, WidgetInfo,
+    WidgetType, vec2,
 };
 
 use crate::model::Rgba;
@@ -34,12 +34,7 @@ pub fn big_button(ui: &mut Ui, icon: Icon, label: &str, selected: bool, enabled:
     let font = FontId::proportional(11.5);
     let widest_word = label
         .split_whitespace()
-        .map(|w| {
-            ui.painter()
-                .layout_no_wrap(w.to_string(), font.clone(), Color32::WHITE)
-                .size()
-                .x
-        })
+        .map(|w| ui.painter().layout_no_wrap(w.to_string(), font.clone(), Color32::WHITE).size().x)
         .fold(0.0, f32::max);
     let size = vec2((widest_word + 10.0).max(54.0), 62.0);
     let sense = if enabled { Sense::click() } else { Sense::hover() };
@@ -54,11 +49,7 @@ pub fn big_button(ui: &mut Ui, icon: Icon, label: &str, selected: bool, enabled:
             alpha_painter.multiply_opacity(0.4);
         }
         icons::paint(&alpha_painter, icon_rect, icon, icon_tint(ui, enabled));
-        let text_color = if enabled {
-            ui.visuals().text_color()
-        } else {
-            ui.visuals().weak_text_color()
-        };
+        let text_color = if enabled { ui.visuals().text_color() } else { ui.visuals().weak_text_color() };
         let galley = ui.painter().layout(label.to_string(), font, text_color, size.x - 4.0);
         let pos = rect.center_top() + vec2(-galley.size().x / 2.0, 35.0);
         ui.painter().galley(pos, galley, text_color);
@@ -69,11 +60,7 @@ pub fn big_button(ui: &mut Ui, icon: Icon, label: &str, selected: bool, enabled:
 /// Small ribbon button with icon and label in one row.
 pub fn small_button(ui: &mut Ui, icon: Icon, label: &str, selected: bool, enabled: bool) -> Response {
     let font = FontId::proportional(12.5);
-    let text_w = ui
-        .painter()
-        .layout_no_wrap(label.to_string(), font.clone(), Color32::WHITE)
-        .size()
-        .x;
+    let text_w = ui.painter().layout_no_wrap(label.to_string(), font.clone(), Color32::WHITE).size().x;
     let size = vec2(text_w + 30.0, 21.0);
     let sense = if enabled { Sense::click() } else { Sense::hover() };
     let (rect, response) = ui.allocate_exact_size(size, sense);
@@ -87,11 +74,7 @@ pub fn small_button(ui: &mut Ui, icon: Icon, label: &str, selected: bool, enable
             painter.multiply_opacity(0.4);
         }
         icons::paint(&painter, icon_rect, icon, icon_tint(ui, enabled));
-        let color = if enabled {
-            ui.visuals().text_color()
-        } else {
-            ui.visuals().weak_text_color()
-        };
+        let color = if enabled { ui.visuals().text_color() } else { ui.visuals().weak_text_color() };
         ui.painter().text(rect.left_center() + vec2(24.0, 0.0), Align2::LEFT_CENTER, label, font, color);
     }
     response
@@ -124,8 +107,7 @@ pub fn group(ui: &mut Ui, caption: &str, add: impl FnOnce(&mut Ui)) {
             add(ui);
         });
         ui.add(
-            egui::Label::new(egui::RichText::new(caption).size(10.5).weak())
-                .wrap_mode(TextWrapMode::Extend),
+            egui::Label::new(egui::RichText::new(caption).size(10.5).weak()).wrap_mode(TextWrapMode::Extend),
         );
     });
     ui.add(egui::Separator::default().vertical().spacing(10.0));
@@ -136,11 +118,8 @@ pub fn swatch(ui: &mut Ui, color: Rgba, selected: bool) -> Response {
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::click());
     let c = Color32::from_rgb(color.r, color.g, color.b);
     ui.painter().rect_filled(rect.shrink(2.0), 2.0, c);
-    let stroke = if selected {
-        Stroke::new(2.0, theme::ACCENT)
-    } else {
-        Stroke::new(1.0, Color32::from_gray(140))
-    };
+    let stroke =
+        if selected { Stroke::new(2.0, theme::ACCENT) } else { Stroke::new(1.0, Color32::from_gray(140)) };
     ui.painter().rect_stroke(rect.shrink(1.0), 2.0, stroke, StrokeKind::Inside);
     response.on_hover_text(color.to_hex())
 }

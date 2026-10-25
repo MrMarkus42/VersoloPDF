@@ -19,10 +19,7 @@ pub fn text_pdf(pages: usize) -> Vec<u8> {
     let mut doc = pdfium.create_new_pdf().unwrap();
     let font = doc.fonts_mut().helvetica();
     for i in 0..pages {
-        let mut page = doc
-            .pages_mut()
-            .create_page_at_end(PdfPagePaperSize::a4())
-            .unwrap();
+        let mut page = doc.pages_mut().create_page_at_end(PdfPagePaperSize::a4()).unwrap();
         page.objects_mut()
             .create_text_object(
                 PdfPoints::new(72.0),
@@ -43,6 +40,24 @@ pub fn text_pdf(pages: usize) -> Vec<u8> {
             .unwrap();
     }
     doc.save_to_bytes().unwrap()
+}
+
+/// A one page text PDF encrypted with RC4-128 (lopdf).
+pub fn encrypted_pdf(user: &str, owner: &str, permissions: lopdf::Permissions) -> Vec<u8> {
+    let bytes = text_pdf(1);
+    let mut doc = lopdf::Document::load_mem(&bytes).unwrap();
+    let version = lopdf::EncryptionVersion::V2 {
+        document: &doc,
+        owner_password: owner,
+        user_password: user,
+        key_length: 128,
+        permissions,
+    };
+    let state = lopdf::EncryptionState::try_from(version).unwrap();
+    doc.encrypt(&state).unwrap();
+    let mut out = Vec::new();
+    doc.save_to(&mut out).unwrap();
+    out
 }
 
 /// A one page PDF with a text field `name` and a check box `agree`.
@@ -129,8 +144,8 @@ pub fn average(img: &mrpdf::document::RenderedImage, x0: u32, y0: u32, x1: u32, 
     for y in y0..y1.min(img.height) {
         for x in x0..x1.min(img.width) {
             let i = ((y * img.width + x) * 4) as usize;
-            for c in 0..3 {
-                sum[c] += f64::from(img.rgba[i + c]);
+            for (c, s) in sum.iter_mut().enumerate() {
+                *s += f64::from(img.rgba[i + c]);
             }
             n += 1.0;
         }

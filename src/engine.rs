@@ -41,10 +41,7 @@ pub fn library_search_dirs() -> Vec<PathBuf> {
         }
     }
 
-    if let Some(exe_dir) = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(Path::to_path_buf))
-    {
+    if let Some(exe_dir) = std::env::current_exe().ok().and_then(|exe| exe.parent().map(Path::to_path_buf)) {
         dirs.push(exe_dir.clone());
         // Linux packages (`/usr/lib/mrpdf`) and macOS app bundles.
         dirs.push(exe_dir.join("../lib/mrpdf"));

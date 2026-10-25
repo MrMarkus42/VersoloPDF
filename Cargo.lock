@@ -745,9 +745,9 @@ dependencies = [
 
 [[package]]
 name = "clipboard-win"
-version = "5.4.3"
+version = "5.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "052af7878466feccda12ba7a6a67d019d712f296809559b47c12c8cc196d3a9a"
+checksum = "bde03770d3df201d4fb868f2c9c59e66a3e4e2bd06692a0fe701e7103c7e84d4"
 dependencies = [
  "error-code",
 ]
@@ -2235,16 +2235,21 @@ dependencies = [
 name = "mrpdf"
 version = "0.1.0"
 dependencies = [
+ "aes",
+ "cbc",
  "eframe",
  "egui",
  "egui_kittest",
  "env_logger",
+ "getrandom 0.4.3",
  "image",
  "log",
  "lopdf",
  "pdfium-render",
  "rfd",
  "serde",
+ "sha2",
+ "stringprep",
  "tempfile",
  "thiserror 2.0.21",
  "windows-sys 0.61.2",
@@ -4776,9 +4781,9 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 
 [[package]]
 name = "yoke"
-version = "0.8.4"
+version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "417ef3fcf6c300b7dbd25c85531a746931c02ad536f3cf4786ed1e88223340b3"
+checksum = "709fe23a0424b6a435d82152b1bd3fdfb0833487d5fa90d05d42762a9891fef5"
 dependencies = [
  "stable_deref_trait",
  "yoke-derive",

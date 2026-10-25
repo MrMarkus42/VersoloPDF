@@ -47,6 +47,7 @@ impl MrPdfApp {
                         (RibbonTab::Comment, t.tab_comment),
                         (RibbonTab::Organize, t.tab_organize),
                         (RibbonTab::Form, t.tab_form),
+                        (RibbonTab::Protect, t.tab_protect),
                         (RibbonTab::View, t.tab_view),
                         (RibbonTab::Help, t.tab_help),
                     ] {
@@ -68,6 +69,7 @@ impl MrPdfApp {
                                 RibbonTab::Comment => self.ribbon_comment(ui),
                                 RibbonTab::Organize => self.ribbon_organize(ui),
                                 RibbonTab::Form => self.ribbon_form(ui),
+                                RibbonTab::Protect => self.ribbon_protect(ui),
                                 RibbonTab::View => self.ribbon_view(ui),
                                 RibbonTab::Help => self.ribbon_help(ui),
                             }
@@ -166,7 +168,9 @@ impl MrPdfApp {
         let has_doc = !self.tabs.is_empty();
         let mode = self.active_tab().map(|t| t.zoom_mode);
         group(ui, t.group_zoom, |ui| {
-            if big_button(ui, Icon::FitWidth, t.fit_width, mode == Some(ZoomMode::FitWidth), has_doc).clicked() {
+            if big_button(ui, Icon::FitWidth, t.fit_width, mode == Some(ZoomMode::FitWidth), has_doc)
+                .clicked()
+            {
                 self.set_zoom_mode(ZoomMode::FitWidth);
             }
             if big_button(ui, Icon::FitPage, t.fit_page, mode == Some(ZoomMode::FitPage), has_doc).clicked() {
@@ -373,6 +377,37 @@ impl MrPdfApp {
         ui.label(RichText::new(t.forms_hint).weak());
     }
 
+    fn ribbon_protect(&mut self, ui: &mut Ui) {
+        let t = self.t();
+        let ctx = ui.ctx().clone();
+        let (has_doc, encrypted, full) = self
+            .active_tab()
+            .map_or((false, false, false), |tab| (true, tab.doc.is_encrypted(), tab.doc.has_full_access()));
+        group(ui, t.group_security, |ui| {
+            if big_button(ui, Icon::Lock, t.password_protect, false, has_doc && full).clicked() {
+                self.dialog = Some(Dialog::Protect {
+                    opts: crate::security::ProtectOptions::default(),
+                    repeat: String::new(),
+                    error: None,
+                });
+            }
+            if big_button(ui, Icon::Unlock, t.remove_protection, false, encrypted && full).clicked() {
+                self.edit(&ctx, |tab| tab.doc.unprotect());
+                self.set_status(&ctx, t.protection_removed);
+            }
+            if big_button(ui, Icon::Info, t.properties, false, has_doc).clicked() {
+                self.open_properties();
+            }
+        });
+        group(ui, t.group_attachments, |ui| {
+            if big_button(ui, Icon::Attachment, t.attachments, false, has_doc).clicked() {
+                self.settings.show_sidebar = true;
+                self.side = super::SidePanel::Attachments;
+            }
+        });
+        ui.label(RichText::new(if encrypted { t.status_encrypted } else { t.status_not_encrypted }).weak());
+    }
+
     fn ribbon_view(&mut self, ui: &mut Ui) {
         let t = self.t();
         let has_doc = !self.tabs.is_empty();
@@ -394,6 +429,10 @@ impl MrPdfApp {
             if big_button(ui, Icon::Sidebar, t.sidebar, side, true).clicked() {
                 self.settings.show_sidebar = !side;
             }
+            let full = ui.input(|i| i.viewport().fullscreen.unwrap_or(false));
+            if big_button(ui, Icon::Fullscreen, t.fullscreen, full, true).clicked() {
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(!full));
+            }
             let props = self.settings.show_properties;
             if big_button(ui, Icon::Properties, t.properties, props, true).clicked() {
                 self.settings.show_properties = !props;
@@ -407,15 +446,13 @@ impl MrPdfApp {
             ui.vertical(|ui| {
                 ui.label(t.language);
                 let current = self.settings.language;
-                egui::ComboBox::from_id_salt("language")
-                    .selected_text(current.name())
-                    .show_ui(ui, |ui| {
-                        for lang in Language::ALL {
-                            if ui.selectable_label(current == lang, lang.name()).clicked() {
-                                self.settings.language = lang;
-                            }
+                egui::ComboBox::from_id_salt("language").selected_text(current.name()).show_ui(ui, |ui| {
+                    for lang in Language::ALL {
+                        if ui.selectable_label(current == lang, lang.name()).clicked() {
+                            self.settings.language = lang;
                         }
-                    });
+                    }
+                });
             });
         });
     }

@@ -50,9 +50,8 @@ fn style_editor(ui: &mut Ui, t: &Strings, tool: Tool, style: &mut AnnotStyle) ->
     }
     if tool.has_width() {
         ui.label(t.line_width);
-        changed |= ui
-            .add(egui::Slider::new(&mut style.width, 0.0..=20.0).step_by(0.5).suffix(" pt"))
-            .changed();
+        changed |=
+            ui.add(egui::Slider::new(&mut style.width, 0.0..=20.0).step_by(0.5).suffix(" pt")).changed();
     }
     ui.label(t.opacity);
     let mut pct = (style.opacity * 100.0).round();
@@ -62,9 +61,7 @@ fn style_editor(ui: &mut Ui, t: &Strings, tool: Tool, style: &mut AnnotStyle) ->
     }
     if tool == Tool::TextBox {
         ui.label(t.font_size);
-        changed |= ui
-            .add(egui::Slider::new(&mut style.font_size, 6.0..=72.0).suffix(" pt"))
-            .changed();
+        changed |= ui.add(egui::Slider::new(&mut style.font_size, 6.0..=72.0).suffix(" pt")).changed();
     }
     changed
 }
@@ -72,11 +69,9 @@ fn style_editor(ui: &mut Ui, t: &Strings, tool: Tool, style: &mut AnnotStyle) ->
 impl MrPdfApp {
     pub(super) fn properties_panel(&mut self, ui: &mut Ui) {
         let t = self.t();
-        Panel::right("properties")
-            .resizable(true)
-            .default_size(230.0)
-            .size_range(180.0..=420.0)
-            .show(ui, |ui| {
+        Panel::right("properties").resizable(true).default_size(230.0).size_range(180.0..=420.0).show(
+            ui,
+            |ui| {
                 ui.horizontal(|ui| {
                     ui.strong(t.properties);
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -94,7 +89,8 @@ impl MrPdfApp {
                         self.tool_properties(ui);
                     }
                 });
-            });
+            },
+        );
     }
 
     fn tool_properties(&mut self, ui: &mut Ui) {
@@ -148,10 +144,7 @@ impl MrPdfApp {
         {
             ui.label(if info.kind == AnnotKind::FreeText { t.text } else { t.comment_text });
             ui.add(egui::TextEdit::multiline(text).desired_rows(4).desired_width(f32::INFINITY));
-            if ui
-                .add_enabled(*text != info.contents, egui::Button::new(t.apply))
-                .clicked()
-            {
+            if ui.add_enabled(*text != info.contents, egui::Button::new(t.apply)).clicked() {
                 update.contents = Some(text.clone());
             }
             ui.separator();

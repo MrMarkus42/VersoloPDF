@@ -36,32 +36,29 @@ pub fn kind_icon(kind: AnnotKind) -> Icon {
 impl MrPdfApp {
     pub(super) fn sidebar(&mut self, ui: &mut Ui) {
         let t = self.t();
-        Panel::left("side-strip")
-            .resizable(false)
-            .exact_size(34.0)
-            .show(ui, |ui| {
-                ui.add_space(4.0);
-                for (panel, icon, label) in [
-                    (SidePanel::Thumbnails, Icon::Thumbnails, t.thumbnails),
-                    (SidePanel::Bookmarks, Icon::Bookmarks, t.bookmarks),
-                    (SidePanel::Comments, Icon::Comments, t.comments),
-                    (SidePanel::Search, Icon::Search, t.search),
-                ] {
-                    if icon_button(ui, icon, label, self.side == panel, true).clicked() {
-                        self.side = panel;
-                    }
+        Panel::left("side-strip").resizable(false).exact_size(34.0).show(ui, |ui| {
+            ui.add_space(4.0);
+            for (panel, icon, label) in [
+                (SidePanel::Thumbnails, Icon::Thumbnails, t.thumbnails),
+                (SidePanel::Bookmarks, Icon::Bookmarks, t.bookmarks),
+                (SidePanel::Comments, Icon::Comments, t.comments),
+                (SidePanel::Attachments, Icon::Attachment, t.attachments),
+                (SidePanel::Search, Icon::Search, t.search),
+            ] {
+                if icon_button(ui, icon, label, self.side == panel, true).clicked() {
+                    self.side = panel;
                 }
-            });
-        Panel::left("side-panel")
-            .resizable(true)
-            .default_size(200.0)
-            .size_range(150.0..=480.0)
-            .show(ui, |ui| {
+            }
+        });
+        Panel::left("side-panel").resizable(true).default_size(200.0).size_range(150.0..=480.0).show(
+            ui,
+            |ui| {
                 ui.horizontal(|ui| {
                     let title = match self.side {
                         SidePanel::Thumbnails => t.thumbnails,
                         SidePanel::Bookmarks => t.bookmarks,
                         SidePanel::Comments => t.comments,
+                        SidePanel::Attachments => t.attachments,
                         SidePanel::Search => t.search,
                     };
                     ui.strong(title);
@@ -76,9 +73,11 @@ impl MrPdfApp {
                     SidePanel::Thumbnails => self.thumbnails(ui),
                     SidePanel::Bookmarks => self.bookmarks_panel(ui),
                     SidePanel::Comments => self.comments_panel(ui),
+                    SidePanel::Attachments => self.attachments_panel(ui),
                     SidePanel::Search => self.search_panel(ui),
                 }
-            });
+            },
+        );
     }
 
     fn thumbnails(&mut self, ui: &mut Ui) {
@@ -94,92 +93,92 @@ impl MrPdfApp {
         let mut rotate: Option<(usize, i32)> = None;
         let mut delete: Option<usize> = None;
         let mut extract: Option<usize> = None;
-        let row_heights: Vec<f32> = sizes
-            .iter()
-            .map(|(w, h)| THUMB_WIDTH * h / w.max(1.0) + 26.0)
-            .collect();
+        let row_heights: Vec<f32> = sizes.iter().map(|(w, h)| THUMB_WIDTH * h / w.max(1.0) + 26.0).collect();
         let current = tab.current_page;
-        ScrollArea::vertical().id_salt(("thumbs", tab.id)).auto_shrink([false, false]).show_viewport(ui, |ui, viewport| {
-            let full_w = ui.available_width();
-            let mut y = 0.0;
-            for page in 0..count {
-                let h = row_heights[page];
-                let visible = y + h >= viewport.min.y - 200.0 && y <= viewport.max.y + 200.0;
-                let (rect, response) = ui.allocate_exact_size(vec2(full_w, h), Sense::click_and_drag());
-                y += h + ui.spacing().item_spacing.y;
-                if !visible {
-                    continue;
-                }
-                let thumb_h = h - 26.0;
-                let thumb = egui::Rect::from_min_size(
-                    rect.center_top() + vec2(-THUMB_WIDTH / 2.0, 4.0),
-                    vec2(THUMB_WIDTH, thumb_h),
-                );
-                let painter = ui.painter();
-                if page == current {
-                    painter.rect_filled(rect, 3.0, theme::ACCENT.gamma_multiply(0.2));
-                } else if response.hovered() {
-                    painter.rect_filled(rect, 3.0, ui.visuals().widgets.hovered.weak_bg_fill);
-                }
-                painter.rect_filled(thumb, 0.0, Color32::WHITE);
-                let px = [((THUMB_WIDTH * ppp) as u32).max(1), ((thumb_h * ppp) as u32).max(1)];
-                if let Some(img) = tab.textures.thumbnail(&ctx, &tab.doc, page, px, &mut budget, tab.id) {
-                    painter.image(
-                        img.tex.id(),
-                        thumb,
-                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                        Color32::WHITE,
+        ScrollArea::vertical().id_salt(("thumbs", tab.id)).auto_shrink([false, false]).show_viewport(
+            ui,
+            |ui, viewport| {
+                let full_w = ui.available_width();
+                let mut y = 0.0;
+                for (page, &h) in row_heights.iter().enumerate() {
+                    let visible = y + h >= viewport.min.y - 200.0 && y <= viewport.max.y + 200.0;
+                    let (rect, response) = ui.allocate_exact_size(vec2(full_w, h), Sense::click_and_drag());
+                    y += h + ui.spacing().item_spacing.y;
+                    if !visible {
+                        continue;
+                    }
+                    let thumb_h = h - 26.0;
+                    let thumb = egui::Rect::from_min_size(
+                        rect.center_top() + vec2(-THUMB_WIDTH / 2.0, 4.0),
+                        vec2(THUMB_WIDTH, thumb_h),
                     );
-                }
-                let border = if page == current {
-                    Stroke::new(2.0, theme::ACCENT)
-                } else {
-                    Stroke::new(1.0, Color32::from_gray(150))
-                };
-                painter.rect_stroke(thumb, 0.0, border, StrokeKind::Outside);
-                let label = tab.doc.page_label(page).unwrap_or_else(|| (page + 1).to_string());
-                painter.text(
-                    egui::pos2(rect.center().x, rect.max.y - 10.0),
-                    egui::Align2::CENTER_CENTER,
-                    label,
-                    egui::FontId::proportional(12.0),
-                    ui.visuals().text_color(),
-                );
-                if response.clicked() {
-                    go_to = Some(page);
-                }
-                // Drag & drop to reorder pages.
-                response.dnd_set_drag_payload(page);
-                if let Some(from) = response.dnd_release_payload::<usize>() {
-                    let pointer_y = ui.input(|i| i.pointer.interact_pos()).map_or(rect.center().y, |p| p.y);
-                    let to = if pointer_y > rect.center().y { page + 1 } else { page };
-                    move_req = Some((*from, to));
-                }
-                if response.dnd_hover_payload::<usize>().is_some() {
-                    let pointer_y = ui.input(|i| i.pointer.hover_pos()).map_or(rect.center().y, |p| p.y);
-                    let line_y = if pointer_y > rect.center().y { rect.max.y } else { rect.min.y };
-                    ui.painter().hline(rect.x_range(), line_y, Stroke::new(3.0, theme::ACCENT));
-                }
-                response.context_menu(|ui| {
-                    if ui.button(t.rotate_left).clicked() {
-                        rotate = Some((page, -90));
-                        ui.close();
+                    let painter = ui.painter();
+                    if page == current {
+                        painter.rect_filled(rect, 3.0, theme::ACCENT.gamma_multiply(0.2));
+                    } else if response.hovered() {
+                        painter.rect_filled(rect, 3.0, ui.visuals().widgets.hovered.weak_bg_fill);
                     }
-                    if ui.button(t.rotate_right).clicked() {
-                        rotate = Some((page, 90));
-                        ui.close();
+                    painter.rect_filled(thumb, 0.0, Color32::WHITE);
+                    let px = [((THUMB_WIDTH * ppp) as u32).max(1), ((thumb_h * ppp) as u32).max(1)];
+                    if let Some(img) = tab.textures.thumbnail(&ctx, &tab.doc, page, px, &mut budget, tab.id) {
+                        painter.image(
+                            img.tex.id(),
+                            thumb,
+                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                            Color32::WHITE,
+                        );
                     }
-                    if ui.button(t.extract_pages).clicked() {
-                        extract = Some(page);
-                        ui.close();
+                    let border = if page == current {
+                        Stroke::new(2.0, theme::ACCENT)
+                    } else {
+                        Stroke::new(1.0, Color32::from_gray(150))
+                    };
+                    painter.rect_stroke(thumb, 0.0, border, StrokeKind::Outside);
+                    let label = tab.doc.page_label(page).unwrap_or_else(|| (page + 1).to_string());
+                    painter.text(
+                        egui::pos2(rect.center().x, rect.max.y - 10.0),
+                        egui::Align2::CENTER_CENTER,
+                        label,
+                        egui::FontId::proportional(12.0),
+                        ui.visuals().text_color(),
+                    );
+                    if response.clicked() {
+                        go_to = Some(page);
                     }
-                    if ui.add_enabled(count > 1, egui::Button::new(t.delete_pages)).clicked() {
-                        delete = Some(page);
-                        ui.close();
+                    // Drag & drop to reorder pages.
+                    response.dnd_set_drag_payload(page);
+                    if let Some(from) = response.dnd_release_payload::<usize>() {
+                        let pointer_y =
+                            ui.input(|i| i.pointer.interact_pos()).map_or(rect.center().y, |p| p.y);
+                        let to = if pointer_y > rect.center().y { page + 1 } else { page };
+                        move_req = Some((*from, to));
                     }
-                });
-            }
-        });
+                    if response.dnd_hover_payload::<usize>().is_some() {
+                        let pointer_y = ui.input(|i| i.pointer.hover_pos()).map_or(rect.center().y, |p| p.y);
+                        let line_y = if pointer_y > rect.center().y { rect.max.y } else { rect.min.y };
+                        ui.painter().hline(rect.x_range(), line_y, Stroke::new(3.0, theme::ACCENT));
+                    }
+                    response.context_menu(|ui| {
+                        if ui.button(t.rotate_left).clicked() {
+                            rotate = Some((page, -90));
+                            ui.close();
+                        }
+                        if ui.button(t.rotate_right).clicked() {
+                            rotate = Some((page, 90));
+                            ui.close();
+                        }
+                        if ui.button(t.extract_pages).clicked() {
+                            extract = Some(page);
+                            ui.close();
+                        }
+                        if ui.add_enabled(count > 1, egui::Button::new(t.delete_pages)).clicked() {
+                            delete = Some(page);
+                            ui.close();
+                        }
+                    });
+                }
+            },
+        );
         if budget.pending {
             ctx.request_repaint();
         }
@@ -278,10 +277,11 @@ impl MrPdfApp {
                 }
                 let r = AnnotRef { page: c.page, index: c.index };
                 let is_sel = selected == Some(r);
-                let frame = egui::Frame::new()
-                    .inner_margin(4)
-                    .corner_radius(3)
-                    .fill(if is_sel { theme::ACCENT.gamma_multiply(0.2) } else { Color32::TRANSPARENT });
+                let frame = egui::Frame::new().inner_margin(4).corner_radius(3).fill(if is_sel {
+                    theme::ACCENT.gamma_multiply(0.2)
+                } else {
+                    Color32::TRANSPARENT
+                });
                 let resp = frame
                     .show(ui, |ui| {
                         ui.set_width(ui.available_width());
@@ -313,11 +313,77 @@ impl MrPdfApp {
         });
         if let Some(r) = clicked {
             tab.selected_annot = Some(r);
-            if let (Some(geo), Some(info)) = (tab.doc.geometry(r.page).copied(), comments.iter().find(|c| c.page == r.page && c.index == r.index)) {
+            if let (Some(geo), Some(info)) = (
+                tab.doc.geometry(r.page).copied(),
+                comments.iter().find(|c| c.page == r.page && c.index == r.index),
+            ) {
                 let v = geo.pdf_rect_to_view(&info.rect).center();
                 tab.current_page = r.page;
                 tab.pending_scroll = Some(ScrollRequest::Point(r.page, v));
             }
+        }
+    }
+
+    fn attachments_panel(&mut self, ui: &mut Ui) {
+        let t = self.t();
+        let ctx = ui.ctx().clone();
+        let Some(tab) = self.tabs.get(self.active) else { return };
+        let list = tab.doc.attachments();
+        let mut save: Option<usize> = None;
+        let mut delete: Option<usize> = None;
+        if list.is_empty() {
+            ui.label(RichText::new(t.no_attachments).weak());
+        }
+        for (i, (name, size)) in list.iter().enumerate() {
+            ui.horizontal(|ui| {
+                let (rect, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
+                icons::paint(ui.painter(), rect, Icon::Attachment, theme::icon_color(ui.visuals().dark_mode));
+                ui.label(name).on_hover_text(format!("{:.1} KB", *size as f64 / 1024.0));
+            });
+            ui.horizontal(|ui| {
+                if ui.small_button(t.save_attachment).clicked() {
+                    save = Some(i);
+                }
+                if ui.small_button(t.delete_attachment).clicked() {
+                    delete = Some(i);
+                }
+            });
+            ui.separator();
+        }
+        if ui.button(t.add_attachment).clicked()
+            && let Some(path) = rfd::FileDialog::new().set_title(t.add_attachment).pick_file()
+        {
+            self.edit_pages(&ctx, |tab| tab.doc.add_attachment(&path));
+        }
+        ui.add_space(6.0);
+        ui.label(RichText::new(t.attachment_hint).small().weak());
+        if let Some(i) = save
+            && let Some((name, _)) = list.get(i)
+        {
+            // Only the file name part of the stored name is used (no paths).
+            let safe_name: String = std::path::Path::new(name)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "attachment".into())
+                .chars()
+                .filter(|c| {
+                    !c.is_control() && !matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*')
+                })
+                .collect();
+            if let Some(dest) =
+                rfd::FileDialog::new().set_title(t.save_attachment).set_file_name(safe_name).save_file()
+            {
+                let result = self.tabs.get(self.active).map(|tab| tab.doc.save_attachment(i, &dest));
+                if let Some(Err(err)) = result {
+                    self.dialog = Some(super::Dialog::Message {
+                        title: t.error.to_string(),
+                        text: super::actions::error_text(t, &err),
+                    });
+                }
+            }
+        }
+        if let Some(i) = delete {
+            self.edit_pages(&ctx, |tab| tab.doc.delete_attachment(i));
         }
     }
 
@@ -344,10 +410,7 @@ impl MrPdfApp {
         ui.checkbox(&mut self.search_case, t.match_case);
         ui.checkbox(&mut self.search_word, t.whole_words);
         let query = self.search_query.clone();
-        let opts = SearchOptions {
-            match_case: self.search_case,
-            whole_word: self.search_word,
-        };
+        let opts = SearchOptions { match_case: self.search_case, whole_word: self.search_word };
         let Some(tab) = self.tabs.get_mut(self.active) else { return };
         if start {
             if tab.search.query == query && tab.search.options == Some(opts) && !tab.search.hits.is_empty() {

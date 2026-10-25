@@ -4,7 +4,9 @@
 //!   PDFium and sent to the printer through GDI.
 //! * Linux / macOS: the PDF is handed to the CUPS `lp` command.
 
+#[cfg(unix)]
 use crate::document::Document;
+#[cfg(unix)]
 use crate::error::{Error, Result};
 
 /// Formats zero-based page indices as a 1-based range list (`1-3,5`).
@@ -58,13 +60,9 @@ pub fn print_pages(doc: &mut Document, pages: &[usize], copies: u32) -> Result<S
         .spawn()
         .map_err(|e| Error::Invalid(format!("lp: {e}")))?;
     if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(&bytes)
-            .map_err(|e| Error::Invalid(format!("lp: {e}")))?;
+        stdin.write_all(&bytes).map_err(|e| Error::Invalid(format!("lp: {e}")))?;
     }
-    let out = child
-        .wait_with_output()
-        .map_err(|e| Error::Invalid(format!("lp: {e}")))?;
+    let out = child.wait_with_output().map_err(|e| Error::Invalid(format!("lp: {e}")))?;
     if out.status.success() {
         Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
     } else {
@@ -74,10 +72,7 @@ pub fn print_pages(doc: &mut Document, pages: &[usize], copies: u32) -> Result<S
 
 #[cfg(unix)]
 fn sanitize_title(name: &str) -> String {
-    name.chars()
-        .filter(|c| !c.is_control())
-        .take(100)
-        .collect::<String>()
+    name.chars().filter(|c| !c.is_control()).take(100).collect::<String>()
 }
 
 #[cfg(windows)]
@@ -91,13 +86,13 @@ mod windows_print {
 
     use windows_sys::Win32::Foundation::{GlobalFree, HGLOBAL};
     use windows_sys::Win32::Graphics::Gdi::{
-        BI_RGB, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, DeleteDC, GetDeviceCaps, HDC,
-        HORZRES, LOGPIXELSX, LOGPIXELSY, SRCCOPY, StretchDIBits, VERTRES,
+        BI_RGB, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, DeleteDC, GetDeviceCaps, HDC, HORZRES,
+        LOGPIXELSX, LOGPIXELSY, SRCCOPY, StretchDIBits, VERTRES,
     };
-    use windows_sys::Win32::Storage::Xps::{DOCINFOW, EndDoc, EndPage, StartDocW, StartPage, AbortDoc};
+    use windows_sys::Win32::Storage::Xps::{AbortDoc, DOCINFOW, EndDoc, EndPage, StartDocW, StartPage};
     use windows_sys::Win32::UI::Controls::Dialogs::{
-        PD_ALLPAGES, PD_NOSELECTION, PD_PAGENUMS, PD_RETURNDC, PD_USEDEVMODECOPIESANDCOLLATE,
-        PRINTDLGW, PrintDlgW,
+        PD_ALLPAGES, PD_NOSELECTION, PD_PAGENUMS, PD_RETURNDC, PD_USEDEVMODECOPIESANDCOLLATE, PRINTDLGW,
+        PrintDlgW,
     };
 
     use crate::document::Document;
@@ -166,11 +161,7 @@ mod windows_print {
     }
 
     fn print_range(doc: &Document, dc: &Dc, from: usize, to: usize) -> Result<()> {
-        let title: Vec<u16> = doc
-            .display_name()
-            .encode_utf16()
-            .chain(std::iter::once(0))
-            .collect();
+        let title: Vec<u16> = doc.display_name().encode_utf16().chain(std::iter::once(0)).collect();
         // SAFETY: DOCINFOW is a plain C struct; zero is a valid initial state.
         let mut info: DOCINFOW = unsafe { std::mem::zeroed() };
         info.cbSize = std::mem::size_of::<DOCINFOW>() as i32;
@@ -207,7 +198,7 @@ mod windows_print {
                 let bh = ((dev_h * bmp_scale).round() as u32).clamp(1, crate::document::MAX_BITMAP_EDGE);
                 let img = doc.render_page(page, bw, bh)?;
                 let mut bgra = img.rgba;
-                for px in bgra.chunks_exact_mut(4) {
+                for px in bgra.as_chunks_mut::<4>().0 {
                     px.swap(0, 2);
                 }
                 // SAFETY: plain C struct, zero initialised and then filled in.
