@@ -210,6 +210,11 @@ pub enum Dialog {
         cmd: commands::Cmd,
     },
     NewField(Box<formdata::FieldForm>),
+    SearchRedact {
+        query: String,
+        match_case: bool,
+        whole_word: bool,
+    },
     About,
 }
 

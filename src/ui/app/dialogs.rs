@@ -505,7 +505,7 @@ impl MrPdfApp {
                     outcome = o;
                     action = a;
                 }
-                other @ (Dialog::Confirm { .. } | Dialog::NewField(_)) => {
+                other @ (Dialog::Confirm { .. } | Dialog::NewField(_) | Dialog::SearchRedact { .. }) => {
                     let (o, a) = self.forms_dialog(ui, other);
                     outcome = o;
                     action = a;

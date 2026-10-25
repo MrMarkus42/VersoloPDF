@@ -1,5 +1,6 @@
-//! Form fields and document-wide comment commands: creating fields, reset,
-//! XFDF import/export, comment summary and "delete all comments".
+//! Form fields, document-wide comment commands and redaction: creating
+//! fields, reset, XFDF import/export, comment summary, "delete all comments",
+//! search-and-redact and applying redactions.
 
 use egui::{Context, Ui};
 
@@ -12,6 +13,9 @@ use crate::pdf_edit::format_pdf_date;
 use crate::report::Line;
 use crate::ui::i18n::Language;
 use crate::ui::tools::Tool;
+
+/// Resolution of pages that are turned into images by redaction.
+const REDACTION_DPI: f32 = 200.0;
 
 /// Input of the dialog for new radio buttons, list and combo boxes.
 #[derive(Debug, Clone, PartialEq)]
@@ -49,6 +53,18 @@ impl MrPdfApp {
                 };
                 self.dialog = Some(Dialog::Confirm { title: cmd.label(lang).into(), text: text.into(), cmd });
             }
+            Cmd::ApplyRedactions => {
+                let text = if de {
+                    "Alle zum Schwärzen markierten Bereiche endgültig entfernen?\n\nBetroffene Seiten werden dabei in Bilder umgewandelt (ihr Text ist danach nicht mehr auswählbar). Die Datei wird ohne ältere Versionen neu geschrieben."
+                } else {
+                    "Permanently remove all areas marked for redaction?\n\nAffected pages are turned into images (their text can no longer be selected). The file is rewritten without older revisions."
+                };
+                self.dialog = Some(Dialog::Confirm { title: cmd.label(lang).into(), text: text.into(), cmd });
+            }
+            Cmd::SearchRedact => {
+                let query = self.search_query.clone();
+                self.dialog = Some(Dialog::SearchRedact { query, match_case: false, whole_word: false });
+            }
             Cmd::ResetForm => {
                 let text = if de {
                     "Alle Formularfelder auf ihre Standardwerte zurücksetzen?"
@@ -78,6 +94,17 @@ impl MrPdfApp {
                 );
             }
             Cmd::ResetForm => self.edit(ctx, |tab| tab.doc.reset_form()),
+            Cmd::ApplyRedactions => {
+                let result = self.tab().map(|t| {
+                    t.selected_annot = None;
+                    t.doc.apply_redactions(REDACTION_DPI)
+                });
+                self.after_count_status(
+                    ctx,
+                    result,
+                    if de { "Geschwärzte Seiten" } else { "Redacted pages" },
+                );
+            }
             _ => self.run(ctx, cmd),
         }
     }
@@ -334,6 +361,38 @@ impl MrPdfApp {
                             app.last_radio = (f.group.clone(), n);
                         }
                         app.add_field(ctx, f.page, f.rect, kind, f.name.trim().to_string());
+                    }));
+                    outcome = Outcome::Close;
+                } else if cancel {
+                    outcome = Outcome::Close;
+                }
+            }
+            Dialog::SearchRedact { query, match_case, whole_word } => {
+                ui.heading(Cmd::SearchRedact.label(lang));
+                ui.label(if de { "Suchbegriff:" } else { "Search for:" });
+                ui.text_edit_singleline(query).request_focus();
+                ui.checkbox(match_case, if de { "Groß-/Kleinschreibung beachten" } else { "Match case" });
+                ui.checkbox(whole_word, if de { "Nur ganze Wörter" } else { "Whole words only" });
+                ui.label(
+                    egui::RichText::new(if de {
+                        "Alle Fundstellen werden zum Schwärzen markiert. Erst „Übernehmen“ entfernt sie endgültig."
+                    } else {
+                        "All hits are marked for redaction. Only \"Apply\" removes them for good."
+                    })
+                    .weak()
+                    .small(),
+                );
+                let (ok, cancel) = buttons(ui, t.ok, t.cancel);
+                if ok && !query.trim().is_empty() {
+                    let query = query.clone();
+                    let opts =
+                        crate::model::SearchOptions { match_case: *match_case, whole_word: *whole_word };
+                    action = Some(Box::new(move |app, ctx| {
+                        let style = app.settings.style(Tool::Redact);
+                        let result = app.tab().map(|t| t.doc.mark_for_redaction(&query, opts, &style));
+                        let label =
+                            if app.lang_de() { "Zum Schwärzen markiert" } else { "Marked for redaction" };
+                        app.after_count_status(ctx, result, label);
                     }));
                     outcome = Outcome::Close;
                 } else if cancel {

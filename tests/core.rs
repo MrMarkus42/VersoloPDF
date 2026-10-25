@@ -808,3 +808,58 @@ fn table_of_contents_pages_link_to_targets() {
     assert_eq!(links.len(), 3, "{links:?}");
     assert!(links.iter().any(|l| matches!(l.target, mrpdf::model::LinkTarget::Page(3))), "{links:?}");
 }
+
+#[test]
+fn redaction_removes_content_for_good() {
+    let _guard = common::lock();
+    let mut doc = open(3);
+    // Looks for the text in all (decompressed) streams, literal or hex-encoded.
+    let contains = |pdf: &[u8], text: &str| {
+        let doc = lopdf::Document::load_mem(pdf).unwrap();
+        let hex: String = text.bytes().map(|b| format!("{b:02x}")).collect();
+        doc.objects.values().any(|o| match o {
+            lopdf::Object::Stream(s) => {
+                let data = s.decompressed_content().unwrap_or_else(|_| s.content.clone());
+                let lower = String::from_utf8_lossy(&data).to_lowercase();
+                lower.contains(&text.to_lowercase()) || lower.replace(char::is_whitespace, "").contains(&hex)
+            }
+            _ => false,
+        })
+    };
+    assert!(contains(&doc.to_bytes().unwrap(), "Page 2"), "test PDF should contain the text");
+
+    let style = AnnotStyle { color: Rgba::RED, fill: Some(Rgba::BLACK), width: 1.0, ..AnnotStyle::default() };
+    let opts = SearchOptions { match_case: true, whole_word: false };
+    assert_eq!(doc.mark_for_redaction("Page 2", opts, &style).unwrap(), 1);
+    let marked = doc.annotations(1).unwrap();
+    assert_eq!(marked.iter().filter(|a| a.kind == AnnotKind::Redact).count(), 1);
+    let rect = marked.iter().find(|a| a.kind == AnnotKind::Redact).unwrap().rect;
+
+    assert_eq!(doc.apply_redactions(100.0).unwrap(), 1);
+    // Page 2 has no text left, the other pages are untouched.
+    assert!(doc.page_text(1).unwrap().all_text().trim().is_empty());
+    assert!(doc.page_text(0).unwrap().all_text().contains("Page 1"));
+    assert!(doc.page_text(2).unwrap().all_text().contains("Page 3"));
+    assert!(doc.annotations(1).unwrap().iter().all(|a| a.kind != AnnotKind::Redact));
+    let bytes = doc.to_bytes().unwrap();
+    assert!(!contains(&bytes, "Page 2"), "redacted text must not remain in the file");
+    assert!(!bytes.windows(5).any(|w| w == b"/Prev"), "no older revisions");
+
+    // The area is black, the rest of the line is still visible as image.
+    let img = doc.render_page(1, 595, 842).unwrap();
+    let c = rect.center();
+    let px =
+        common::average(&img, c.x as u32 - 2, 842 - c.y as u32 - 2, c.x as u32 + 2, 842 - c.y as u32 + 2);
+    assert!(px.iter().all(|v| *v < 30.0), "{px:?}");
+    // "World" (x 200..280, baseline 700) is still there at its old place.
+    let dark = (842 - 724..842 - 700)
+        .flat_map(|y| (200..280).map(move |x| (x, y)))
+        .filter(|&(x, y)| img.rgba[((y * 595 + x) * 4) as usize] < 100)
+        .count();
+    assert!(dark > 100, "text outside the redaction must stay visible ({dark})");
+    let re = Document::from_bytes(bytes, "r.pdf", None).unwrap();
+    assert_eq!(re.page_count(), 3);
+
+    assert!(doc.undo().unwrap());
+    assert!(doc.page_text(1).unwrap().all_text().contains("Page 2"));
+}

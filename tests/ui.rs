@@ -558,3 +558,29 @@ fn form_designer_and_comment_commands() {
     assert!(!kinds(&mut h).contains(&AnnotKind::Note));
     assert_eq!(fields(&mut h).len(), 3, "form fields are kept");
 }
+
+#[test]
+fn search_and_redact() {
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let file = sample_file(&dir, 1);
+    let mut h = harness(vec![file], false);
+    h.run_steps(10);
+    tab(&mut h, "Schützen");
+    quick(&mut h, "Suchen und schwärzen");
+    assert!(h.state().dialog().is_some());
+    h.input_mut().events.push(Event::Text("Hello".into()));
+    h.run_steps(2);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(4);
+    assert_eq!(kinds(&mut h), vec![AnnotKind::Redact]);
+    save(&mut h, "25-redaction-marked");
+    quick(&mut h, "Übernehmen");
+    assert!(h.state().dialog().is_some(), "confirmation");
+    h.get_by_label("OK").click();
+    h.run_steps(6);
+    assert!(kinds(&mut h).is_empty());
+    let tab = h.state_mut().active_tab_mut().unwrap();
+    assert!(!tab.doc.page_text(0).unwrap().all_text().contains("Hello"));
+    save(&mut h, "26-redacted");
+}

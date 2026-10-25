@@ -16,10 +16,10 @@ use pdfium_render::prelude::*;
 use crate::engine;
 use crate::error::{Error, Result};
 use crate::forms::{self, FieldValue};
-use crate::geometry::{PageGeometry, RectF, Rotation};
+use crate::geometry::{PageGeometry, PointF, RectF, Rotation};
 use crate::model::{
     AnnotKind, AnnotStyle, AnnotationInfo, Bookmark, FieldKind, FormFieldInfo, LinkInfo, LinkTarget,
-    Metadata, Permissions,
+    Metadata, Permissions, SearchOptions,
 };
 use crate::outline;
 use crate::pages;
@@ -379,7 +379,10 @@ impl Document {
         let config = PdfRenderConfig::new()
             .set_fixed_size(to_px(full_w)?, to_px(full_h)?)
             .set_origin(-to_px(x)?, -to_px(y)?)
-            .render_form_data(opts.annotations)
+            // Form data must stay on: without it pdfium-render 0.9 takes a matrix
+            // path that ignores the requested size. Form fields are therefore
+            // always drawn; nnotations only hides comments.
+            .render_form_data(true)
             .render_annotations(opts.annotations)
             .rotate(to_pdf_rotation(opts.rotation), false)
             .set_clear_color(PdfColor::WHITE);
@@ -1118,6 +1121,85 @@ impl Document {
             count = n;
             Ok(bytes)
         })?;
+        Ok(count)
+    }
+
+    // -----------------------------------------------------------------
+    // Redaction
+
+    /// Marks every occurrence of `query` for redaction. Returns the number
+    /// of hits.
+    pub fn mark_for_redaction(
+        &mut self,
+        query: &str,
+        opts: SearchOptions,
+        style: &AnnotStyle,
+    ) -> Result<usize> {
+        self.require(self.permissions().annotate)?;
+        let mut items = Vec::new();
+        for page in 0..self.page_count() {
+            let text = self.page_text(page)?;
+            for hit in crate::search::search_page(page, &text, query, opts) {
+                for rect in hit.rects {
+                    let mut annot = NewAnnotation::new(AnnotKind::Redact, style.clone());
+                    annot.rect = rect.inflate(1.0);
+                    items.push((page, annot));
+                }
+            }
+        }
+        if items.is_empty() {
+            return Ok(0);
+        }
+        self.edit_bytes("mark for redaction", |b, pw| pdf_edit::add_annotations(b, pw, &items))?;
+        Ok(items.len())
+    }
+
+    /// Applies all redaction marks: affected pages become images with the
+    /// marked areas blacked out (`dpi` sets their resolution) and the file is
+    /// rewritten without history. Returns the number of affected pages.
+    pub fn apply_redactions(&mut self, dpi: f32) -> Result<usize> {
+        self.require(self.has_full_access())?;
+        self.sync_bytes()?;
+        let marks = crate::redact::redaction_marks(&self.bytes, self.password.as_deref())?;
+        if marks.is_empty() {
+            return Ok(0);
+        }
+        let mut images = Vec::new();
+        for (&page, rects) in &marks {
+            let geo = *self.geometry(page).ok_or(Error::PageOutOfRange(page))?;
+            let (vw, vh) = geo.view_size();
+            let edge = MAX_BITMAP_EDGE as f32;
+            let scale = (dpi.clamp(50.0, 600.0) / 72.0).min(edge / vw.max(1.0)).min(edge / vh.max(1.0));
+            let (w, h) = (((vw * scale).round() as u32).max(1), ((vh * scale).round() as u32).max(1));
+            let opts = RenderOptions { annotations: false, ..RenderOptions::default() };
+            let img = self.render_tile(page, w, h, 0, 0, w, h, opts)?;
+            let mut rgb: Vec<u8> =
+                img.rgba.as_chunks::<4>().0.iter().flat_map(|p| [p[0], p[1], p[2]]).collect();
+            for rect in rects {
+                let v = geo.pdf_rect_to_view(rect);
+                let x0 = ((v.x0 * scale).floor().max(0.0) as u32).min(w);
+                let x1 = ((v.x1 * scale).ceil().max(0.0) as u32).min(w);
+                let y0 = ((v.y0 * scale).floor().max(0.0) as u32).min(h);
+                let y1 = ((v.y1 * scale).ceil().max(0.0) as u32).min(h);
+                for y in y0..y1 {
+                    let row = (y * w) as usize * 3;
+                    rgb[row + x0 as usize * 3..row + x1 as usize * 3].fill(0);
+                }
+            }
+            // Image unit square -> PDF space: bottom-left, bottom-right, top-left.
+            let o = geo.view_to_pdf(PointF::new(0.0, vh));
+            let px = geo.view_to_pdf(PointF::new(vw, vh));
+            let py = geo.view_to_pdf(PointF::new(0.0, 0.0));
+            images.push(crate::redact::PageImage {
+                page,
+                width: w,
+                height: h,
+                rgb,
+                matrix: [px.x - o.x, px.y - o.y, py.x - o.x, py.y - o.y, o.x, o.y],
+            });
+        }
+        let count = images.len();
+        self.edit_bytes("apply redactions", |b, pw| crate::redact::apply(b, pw, &images))?;
         Ok(count)
     }
 

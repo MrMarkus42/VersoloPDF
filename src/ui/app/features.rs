@@ -14,9 +14,6 @@ use crate::ui::tools::Tool;
 
 /// Commands that are not implemented yet; they are shown greyed out.
 pub const PENDING: &[Cmd] = &[
-    Cmd::ApplyRedactions,
-    Cmd::SearchRedact,
-    Cmd::Tool(Tool::Redact),
     Cmd::FromFiles,
     Cmd::ContentsToImages,
     Cmd::ExportText,

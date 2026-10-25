@@ -16,7 +16,7 @@ use crate::geometry::{PointF, RectF};
 use crate::model::{AnnotKind, AnnotStyle, Metadata, Rgba};
 
 /// Upper limit for a single decompressed stream.
-const MAX_DECOMPRESSED_STREAM: usize = 256 * 1024 * 1024;
+pub(crate) const MAX_DECOMPRESSED_STREAM: usize = 256 * 1024 * 1024;
 
 /// Parameters of a new annotation.
 #[derive(Debug, Clone, PartialEq)]
@@ -1222,7 +1222,7 @@ pub struct RgbaImage {
     pub rgba: Vec<u8>,
 }
 
-fn image_xobject(
+pub(crate) fn image_xobject(
     rgb: Vec<u8>,
     width: u32,
     height: u32,
