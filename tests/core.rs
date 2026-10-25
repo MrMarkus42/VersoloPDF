@@ -863,3 +863,50 @@ fn redaction_removes_content_for_good() {
     assert!(doc.undo().unwrap());
     assert!(doc.page_text(1).unwrap().all_text().contains("Page 2"));
 }
+
+#[test]
+fn bookmark_tools() {
+    use mrpdf::outline::NewBookmark;
+    let _guard = common::lock();
+    let mut doc = open(3);
+    let nb = |title: &str, page: usize, level: usize| NewBookmark { title: title.into(), page, level };
+
+    // Headings (24 pt lines) become bookmarks.
+    let headings = doc.heading_bookmarks().unwrap();
+    assert_eq!(
+        headings.iter().map(|b| b.title.as_str()).collect::<Vec<_>>(),
+        ["Page 1 Hello World", "Page 2 Hello World", "Page 3 Hello World"]
+    );
+
+    let items =
+        [nb("kapitel 10", 2, 0), nb("unterpunkt", 2, 1), nb("kapitel 2", 1, 0), nb("kapitel 2", 1, 0)];
+    assert_eq!(doc.append_bookmarks(&items).unwrap(), 4);
+    let titles = |doc: &Document| doc.bookmarks().iter().map(|b| b.title.clone()).collect::<Vec<_>>();
+    assert_eq!(titles(&doc), ["kapitel 10", "kapitel 2", "kapitel 2"]);
+    assert_eq!(doc.bookmarks()[0].children[0].title, "unterpunkt");
+
+    assert_eq!(doc.remove_duplicate_bookmarks().unwrap(), 1);
+    assert_eq!(doc.map_bookmark_titles(mrpdf::outline::title_case).unwrap(), 3);
+    doc.sort_bookmarks(false).unwrap();
+    assert_eq!(titles(&doc), ["Kapitel 2", "Kapitel 10"]);
+    assert_eq!(doc.bookmarks()[1].children[0].title, "Unterpunkt", "children move with their parent");
+
+    // Text export can be read back as a bookmark list.
+    let text = doc.export_bookmarks(false);
+    assert_eq!(text, "Kapitel 2\t2\nKapitel 10\t3\n\tUnterpunkt\t3\n");
+    let parsed = mrpdf::outline::parse_bookmark_list(&text, 3);
+    assert_eq!(parsed[2], nb("Unterpunkt", 2, 1));
+    assert!(doc.export_bookmarks(true).contains("<li>Kapitel 10 <span class=\"page\">3</span>"));
+
+    // Table of contents in front, with working links.
+    assert_eq!(doc.insert_toc("Inhalt").unwrap(), 1);
+    assert_eq!(doc.page_count(), 4);
+    let toc = doc.page_text(0).unwrap().all_text();
+    assert!(toc.contains("Inhalt") && toc.contains("Kapitel 10"), "{toc}");
+    assert!(toc.contains('4'), "page numbers include the new page: {toc}");
+    assert_eq!(doc.links(0).unwrap().len(), 3);
+    assert_eq!(doc.bookmarks()[1].page, Some(3), "bookmarks still point to their pages");
+
+    doc.delete_all_bookmarks().unwrap();
+    assert!(doc.bookmarks().is_empty());
+}

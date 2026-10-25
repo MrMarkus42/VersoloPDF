@@ -97,6 +97,56 @@ impl PageText {
         }
     }
 
+    /// Text of all characters whose centre lies in one of `rects` (e.g. the
+    /// areas of a highlight), with whitespace collapsed.
+    pub fn text_in_rects(&self, rects: &[RectF]) -> String {
+        let mut out = String::new();
+        let mut inside = false;
+        for c in &self.chars {
+            if c.generated {
+                if inside && !out.ends_with(' ') {
+                    out.push(' ');
+                }
+                continue;
+            }
+            inside = rects.iter().any(|r| r.contains(c.rect.center()));
+            if inside && !c.ch.is_control() {
+                out.push(c.ch);
+            }
+        }
+        out.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    /// The text lines of the page with their average character height.
+    pub fn lines(&self) -> Vec<(String, f32)> {
+        let mut out = Vec::new();
+        let mut text = String::new();
+        let mut heights = Vec::new();
+        let mut flush = |text: &mut String, heights: &mut Vec<f32>| {
+            let t = text.split_whitespace().collect::<Vec<_>>().join(" ");
+            if !t.is_empty() && !heights.is_empty() {
+                out.push((t, heights.iter().sum::<f32>() / heights.len() as f32));
+            }
+            text.clear();
+            heights.clear();
+        };
+        for c in &self.chars {
+            if c.ch == '\n' || c.ch == '\r' {
+                flush(&mut text, &mut heights);
+                continue;
+            }
+            if c.ch.is_control() {
+                continue;
+            }
+            text.push(c.ch);
+            if !c.generated && !c.ch.is_whitespace() {
+                heights.push(c.rect.height());
+            }
+        }
+        flush(&mut text, &mut heights);
+        out
+    }
+
     /// Range of the word containing character `index`.
     pub fn word_at(&self, index: usize) -> Option<TextRange> {
         let is_word = |i: usize| {

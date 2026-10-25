@@ -22,20 +22,6 @@ pub const PENDING: &[Cmd] = &[
     Cmd::WordCount,
     Cmd::CompareDocuments,
     Cmd::AccessibilityCheck,
-    Cmd::BookmarkFromSelection,
-    Cmd::BookmarkEveryNth,
-    Cmd::BookmarkFromHighlights,
-    Cmd::BookmarkFromTextFile,
-    Cmd::BookmarkUpper,
-    Cmd::BookmarkLower,
-    Cmd::BookmarkTitleCase,
-    Cmd::BookmarkReplace,
-    Cmd::BookmarkSort,
-    Cmd::BookmarkDedupe,
-    Cmd::BookmarkDeleteAll,
-    Cmd::BookmarkToc,
-    Cmd::BookmarkExportHtml,
-    Cmd::BookmarkExportText,
 ];
 
 /// Files above this size are refused as attachments.
@@ -94,7 +80,7 @@ impl MrPdfApp {
                 self.info(Cmd::FileAssociation.label(self.settings.language), text.to_string());
             }
             other => {
-                if !self.run_forms(ctx, other) {
+                if !self.run_forms(ctx, other) && !self.run_outline(ctx, other) {
                     self.run_structure(ctx, other);
                 }
             }

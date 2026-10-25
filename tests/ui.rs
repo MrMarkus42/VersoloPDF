@@ -584,3 +584,20 @@ fn search_and_redact() {
     assert!(!tab.doc.page_text(0).unwrap().all_text().contains("Hello"));
     save(&mut h, "26-redacted");
 }
+
+#[test]
+fn bookmark_tools_ui() {
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let file = sample_file(&dir, 3);
+    let mut h = harness(vec![file], false);
+    h.run_steps(10);
+    tab(&mut h, "Lesezeichen");
+    quick(&mut h, "Aus Seitentext");
+    assert_eq!(h.state().active_tab().unwrap().doc.bookmarks().len(), 3);
+    quick(&mut h, "Inhaltsverzeichnis erstellen");
+    h.run_steps(6);
+    let tab = h.state().active_tab().unwrap();
+    assert_eq!(tab.doc.page_count(), 4);
+    save(&mut h, "27-table-of-contents");
+}

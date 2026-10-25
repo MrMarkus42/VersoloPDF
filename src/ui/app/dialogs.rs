@@ -510,6 +510,13 @@ impl MrPdfApp {
                     outcome = o;
                     action = a;
                 }
+                other @ (Dialog::BookmarkEveryNth { .. }
+                | Dialog::BookmarkReplace { .. }
+                | Dialog::BookmarkSort { .. }) => {
+                    let (o, a) = self.outline_dialog(ui, other);
+                    outcome = o;
+                    action = a;
+                }
                 Dialog::About => {
                     ui.horizontal(|ui| {
                         let (rect, _) = ui.allocate_exact_size(egui::vec2(48.0, 48.0), egui::Sense::hover());

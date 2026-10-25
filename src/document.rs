@@ -1053,6 +1053,193 @@ impl Document {
         self.edit_bytes("delete bookmark", |b, pw| outline::delete_bookmark(b, pw, path))
     }
 
+    /// Rewrites all bookmark titles; returns the number of changed titles.
+    pub fn map_bookmark_titles(&mut self, f: impl Fn(&str) -> String) -> Result<usize> {
+        self.require(self.permissions().modify)?;
+        let mut changed = 0;
+        self.edit_bytes("edit bookmarks", |b, pw| {
+            let (bytes, n) = outline::map_titles(b, pw, f)?;
+            changed = n;
+            Ok(bytes)
+        })?;
+        Ok(changed)
+    }
+
+    pub fn sort_bookmarks(&mut self, by_page: bool) -> Result<()> {
+        self.require(self.permissions().modify)?;
+        self.edit_bytes("sort bookmarks", |b, pw| outline::sort(b, pw, by_page))
+    }
+
+    pub fn remove_duplicate_bookmarks(&mut self) -> Result<usize> {
+        self.require(self.permissions().modify)?;
+        let mut removed = 0;
+        self.edit_bytes("remove duplicate bookmarks", |b, pw| {
+            let (bytes, n) = outline::remove_duplicates(b, pw)?;
+            removed = n;
+            Ok(bytes)
+        })?;
+        Ok(removed)
+    }
+
+    pub fn delete_all_bookmarks(&mut self) -> Result<()> {
+        self.require(self.permissions().modify)?;
+        self.edit_bytes("delete bookmarks", outline::delete_all)
+    }
+
+    pub fn append_bookmarks(&mut self, items: &[outline::NewBookmark]) -> Result<usize> {
+        self.require(self.permissions().modify)?;
+        if items.is_empty() {
+            return Ok(0);
+        }
+        self.edit_bytes("add bookmarks", |b, pw| outline::append(b, pw, items))?;
+        Ok(items.len())
+    }
+
+    /// Suggests bookmarks from headings: lines set clearly larger than the
+    /// body text. Larger sizes give higher levels (at most three).
+    pub fn heading_bookmarks(&self) -> Result<Vec<outline::NewBookmark>> {
+        let mut lines = Vec::new();
+        for page in 0..self.page_count() {
+            for (text, height) in self.page_text(page)?.lines() {
+                lines.push((page, text, height));
+            }
+        }
+        // Body size = the most frequent (rounded) line height.
+        let mut counts: BTreeMap<i32, usize> = BTreeMap::new();
+        for (_, text, h) in &lines {
+            *counts.entry((h * 2.0).round() as i32).or_default() += text.chars().count();
+        }
+        let Some((&body, _)) = counts.iter().max_by_key(|(_, n)| **n) else { return Ok(Vec::new()) };
+        let body = body as f32 / 2.0;
+        let mut sizes: Vec<i32> = lines
+            .iter()
+            .filter(|(_, _, h)| *h >= body * 1.25)
+            .map(|(_, _, h)| (h * 2.0).round() as i32)
+            .collect();
+        sizes.sort_unstable_by(|a, b| b.cmp(a));
+        sizes.dedup();
+        Ok(lines
+            .into_iter()
+            .filter(|(_, text, h)| *h >= body * 1.25 && (2..=120).contains(&text.chars().count()))
+            .map(|(page, title, h)| {
+                let rank = sizes.iter().position(|s| *s == (h * 2.0).round() as i32).unwrap_or(0);
+                outline::NewBookmark { title, page, level: rank.min(2) }
+            })
+            .collect())
+    }
+
+    /// Bookmarks from the text of all highlight comments.
+    pub fn bookmarks_from_highlights(&mut self) -> Result<usize> {
+        let mut items = Vec::new();
+        for c in self.comments()? {
+            if c.kind != AnnotKind::Highlight {
+                continue;
+            }
+            let areas = if c.quads.is_empty() { vec![c.rect] } else { c.quads.clone() };
+            let mut title = self.page_text(c.page)?.text_in_rects(&areas);
+            if title.is_empty() {
+                title = c.contents.trim().to_string();
+            }
+            if !title.is_empty() {
+                items.push(outline::NewBookmark {
+                    title: title.chars().take(200).collect(),
+                    page: c.page,
+                    level: 0,
+                });
+            }
+        }
+        self.append_bookmarks(&items)
+    }
+
+    /// Inserts a table of contents built from the bookmarks in front of the
+    /// first page. Returns the number of inserted pages.
+    pub fn insert_toc(&mut self, heading: &str) -> Result<usize> {
+        use crate::report::Line;
+        self.require(self.permissions().modify && self.permissions().assemble)?;
+        fn walk(items: &[Bookmark], depth: usize, out: &mut Vec<(String, Option<usize>, usize)>) {
+            for b in items {
+                out.push((b.title.clone(), b.page, depth));
+                walk(&b.children, depth + 1, out);
+            }
+        }
+        let mut entries = Vec::new();
+        walk(&self.bookmarks(), 0, &mut entries);
+        if entries.is_empty() {
+            return Err(Error::Invalid("the document has no bookmarks".into()));
+        }
+        let size = self.geometry(0).map_or(crate::report::A4, |g| g.view_size());
+        let make = |offset: usize| {
+            let mut lines = vec![Line::title(heading)];
+            for (title, page, depth) in &entries {
+                lines.push(Line {
+                    bold: *depth == 0,
+                    indent: *depth as f32 * 14.0,
+                    space_before: if *depth == 0 { 4.0 } else { 0.0 },
+                    link: *page,
+                    right: page.map(|p| (p + offset + 1).to_string()).unwrap_or_default(),
+                    ..Line::new(title.clone())
+                });
+            }
+            lines
+        };
+        // The page numbers shown include the inserted pages themselves.
+        let count = crate::report::layout(&make(0), size).len();
+        let lines = make(count);
+        let mut inserted = 0;
+        self.edit_bytes("insert table of contents", |b, pw| {
+            let (bytes, n) = crate::report::insert_front(b, pw, &lines)?;
+            inserted = n;
+            Ok(bytes)
+        })?;
+        Ok(inserted)
+    }
+
+    /// The bookmarks as indented plain text or as an HTML list.
+    pub fn export_bookmarks(&self, html: bool) -> String {
+        fn esc(s: &str) -> String {
+            s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+        }
+        fn walk(items: &[Bookmark], depth: usize, html: bool, out: &mut String) {
+            if html {
+                out.push_str(&format!("{}<ul>\n", "  ".repeat(depth)));
+            }
+            for b in items {
+                let page = b.page.map(|p| (p + 1).to_string()).unwrap_or_default();
+                if html {
+                    out.push_str(&format!(
+                        "{}  <li>{} <span class=\"page\">{}</span>",
+                        "  ".repeat(depth),
+                        esc(&b.title),
+                        page
+                    ));
+                    if !b.children.is_empty() {
+                        out.push('\n');
+                        walk(&b.children, depth + 2, html, out);
+                        out.push_str(&"  ".repeat(depth + 1));
+                    }
+                    out.push_str("</li>\n");
+                } else {
+                    out.push_str(&format!("{}{}\t{}\n", "\t".repeat(depth), b.title, page));
+                    walk(&b.children, depth + 1, html, out);
+                }
+            }
+            if html {
+                out.push_str(&format!("{}</ul>\n", "  ".repeat(depth)));
+            }
+        }
+        let mut body = String::new();
+        walk(&self.bookmarks(), 0, html, &mut body);
+        if html {
+            format!(
+                "<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\"><title>{}</title>\n<style>body{{font-family:sans-serif}} .page{{color:#777;margin-left:1em}}</style></head>\n<body>\n<h1>{}</h1>\n{body}</body></html>\n",
+                esc(&self.display_name),
+                esc(&self.display_name)
+            )
+        } else {
+            body
+        }
+    }
+
     // -----------------------------------------------------------------
     // Forms
 

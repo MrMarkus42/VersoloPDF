@@ -710,7 +710,6 @@ impl MrPdfApp {
             MovePageDown => tab.is_some_and(|t| t.current_page + 1 < t.doc.page_count()),
             DeletePages | SwapPages => tab.is_some_and(|t| t.doc.page_count() > 1),
             Email | OpenFolder => tab.is_some_and(|t| t.doc.path().is_some()),
-            BookmarkFromSelection => tab.is_some_and(|t| t.selection.is_some()),
             _ => has_doc,
         }
     }

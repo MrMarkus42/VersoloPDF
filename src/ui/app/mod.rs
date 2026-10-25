@@ -5,6 +5,7 @@ pub mod commands;
 mod dialogs;
 mod features;
 mod formdata;
+mod outline_tools;
 mod properties;
 mod ribbon;
 mod sidebar;
@@ -214,6 +215,18 @@ pub enum Dialog {
         query: String,
         match_case: bool,
         whole_word: bool,
+    },
+    BookmarkEveryNth {
+        every: u32,
+        prefix: String,
+    },
+    BookmarkReplace {
+        find: String,
+        replace: String,
+        match_case: bool,
+    },
+    BookmarkSort {
+        by_page: bool,
     },
     About,
 }
