@@ -14,3 +14,15 @@ First version:
 * Security: AES-256 password protection, permissions, attachments
 * Document properties, image export, printing, undo/redo
 * German and English user interface
+* Ribbon with 13 tabs in the familiar layout, quick command search (Ctrl+.)
+* More comment tools: typewriter, callout, polygon, cloud, eraser,
+  measurements, file attachment, area highlight, replace/insert text;
+  comment summary, XFDF import/export, delete all comments
+* Form designer: create, move and delete fields; reset; XFDF form data
+* Document structure: merge, split, duplicate, replace, swap, reverse,
+  find duplicates, crop, resize, margins, watermark, background,
+  header/footer, Bates numbering, page labels
+* Secure redaction (mark, search and redact, apply)
+* Bookmark tools and table of contents
+* Review and convert: word count, document comparison, accessibility report,
+  new document from files, contents to images, grayscale, text/Word export
