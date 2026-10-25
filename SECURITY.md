@@ -31,3 +31,12 @@ MrPDF opens files from untrusted sources, so it is built defensively:
   older than 14 days are accepted (`scripts/check-release-age.py`), licences
   are checked (`scripts/check-licenses.py`), and the PDFium download is
   verified against pinned SHA-256 checksums (`scripts/fetch-pdfium.sh`).
+* **Imported files** – XFDF (comments, form data) is parsed with `quick-xml`,
+  which never loads external entities or DTDs; files are size-limited. Images
+  are decoded with size and memory limits; bookmark lists are size-limited.
+* **Redaction** – applying redactions replaces every affected page by an
+  image with the marked areas painted black, removes the redaction marks and
+  rewrites the whole file without its revision history, dropping objects that
+  are no longer used. Removed text therefore cannot be recovered from the
+  saved file. (Text in other places, e.g. comments, bookmarks or metadata, is
+  not touched and should be checked separately.)

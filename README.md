@@ -16,18 +16,29 @@ desktop PDF editors.
 * **Text** – select and copy text, full-text search with match case / whole
   words and a result list
 * **Comments** – highlight, underline, strike-out, squiggly, sticky notes,
-  text boxes, rectangles, ellipses, lines, arrows, freehand drawing, stamps
-  and image stamps (e.g. a scanned signature); colours, fill, line width, opacity and font size; moving, editing
-  and deleting; comment list; flattening
+  text boxes, typewriter, callouts, rectangles, ellipses, lines, arrows,
+  polygons, clouds, freehand drawing, eraser, measurements (distance,
+  perimeter, area), file attachments, stamps and image stamps (e.g. a scanned
+  signature); colours, fill, line width, opacity and font size; moving,
+  editing and deleting; comment list; comment summary as PDF; XFDF import and
+  export; flattening
 * **Forms** – fill in text fields, check boxes, radio buttons and choice fields
-  (with proper appearance streams)
+  (with proper appearance streams); create text, check box, radio, list,
+  combo, reset button and signature fields; reset; XFDF form data
 * **Security** – open protected files, password protection with AES-256 and
-  permissions, removing protection, file attachments (save / add / delete)
-* **Pages** – rotate, delete, insert blank pages, insert / append other PDFs,
-  extract pages, reorder (buttons or drag & drop in the thumbnails)
+  permissions, removing protection, file attachments (save / add / delete),
+  secure redaction (marked areas, search and redact)
+* **Pages** – rotate, delete, insert, extract, reorder, merge files, split,
+  duplicate, replace, swap, reverse, find duplicates, crop, resize, margins,
+  watermarks, backgrounds, headers and footers, Bates numbering, page labels
+* **Bookmarks** – edit, create from headings / highlights / text files /
+  every n-th page, sort, find and replace, table of contents, HTML / text export
+* **Review and convert** – word count, document comparison, accessibility
+  report, new document from PDFs and images, contents to images, grayscale,
+  text and Word (DOCX) export
 * **Documents** – document properties (title, author, …), export pages as
-  PNG/JPEG, printing, unlimited undo/redo (up to 50 steps), safe saving
-* **German and English** user interface
+  PNG/JPEG, printing, undo/redo (up to 50 steps), safe saving
+* **German and English** user interface, quick command search (Ctrl+.)
 
 All annotations are written with their own appearance streams, so they look
 the same in every PDF viewer. Edits are stored as incremental updates and keep
@@ -91,11 +102,14 @@ PDF-Editoren.
 Zoom, Miniaturansichten, Lesezeichen, Links, Text markieren und kopieren,
 Volltextsuche, Kommentare (Hervorheben, Unterstreichen, Durchstreichen,
 Wellenlinie, Notizen, Textfelder, Rechtecke, Ellipsen, Linien, Pfeile,
-Freihand, Stempel, Bilder), Formulare ausfüllen, Seiten drehen/löschen/einfügen/
-extrahieren/umsortieren, Dokumente zusammenfügen, Lesezeichen bearbeiten,
-Kennwortschutz (AES-256) setzen/entfernen, Dateianhänge, Dokumenteigenschaften,
-Export als Bild, Drucken, Rückgängig/Wiederholen, Vollbild, deutsche und
-englische Oberfläche.
+Freihand, Wolken, Messungen, Stempel, Bilder), Kommentarübersicht und
+XFDF-Austausch, Formulare ausfüllen und gestalten, Seiten drehen/löschen/
+einfügen/extrahieren/umsortieren/zuschneiden, Dokumente zusammenfügen und
+aufteilen, Wasserzeichen, Kopf- und Fußzeilen, Bates-Nummern, Lesezeichen-
+Werkzeuge mit Inhaltsverzeichnis, sicheres Schwärzen, Kennwortschutz (AES-256)
+setzen/entfernen, Dateianhänge, Dokumentvergleich, Prüfbericht zur
+Barrierefreiheit, Graustufen, Export als Bild, Text und Word, Drucken,
+Rückgängig/Wiederholen, Vollbild, deutsche und englische Oberfläche.
 
 **Bauen:** `scripts/fetch-pdfium.sh` lädt die PDF-Bibliothek (mit
 Prüfsummenkontrolle), danach `cargo run --release`.
