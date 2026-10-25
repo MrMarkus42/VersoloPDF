@@ -96,7 +96,7 @@ impl MrPdfApp {
     fn tool_properties(&mut self, ui: &mut Ui) {
         let t = self.t();
         let tool = self.tool;
-        ui.label(RichText::new(super::sidebar::kind_name_for_tool(t, tool)).strong());
+        ui.label(RichText::new(super::sidebar::kind_name_for_tool(self.settings.language, tool)).strong());
         if tool.annot_kind().is_none() {
             ui.label(RichText::new(t.tool_hint(tool)).weak());
             return;

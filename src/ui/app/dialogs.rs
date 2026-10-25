@@ -4,7 +4,6 @@ use egui::{Context, Id, Modal, RichText, Ui};
 
 use super::actions::parse_page_range;
 use super::{Dialog, InsertPosition, MrPdfApp, PaperChoice, RangePurpose};
-use crate::model::AnnotKind;
 use crate::ui::i18n::Strings;
 
 /// Work to do after the modal closed (needs `&mut MrPdfApp`).
@@ -103,8 +102,14 @@ impl MrPdfApp {
                         }
                     });
                 }
-                Dialog::TextInput { page, rect, kind, text, edit } => {
-                    ui.heading(if *kind == AnnotKind::Note { t.tool_note } else { t.tool_textbox });
+                Dialog::TextInput { page, tool, template, text, edit } => {
+                    ui.heading(super::commands::Cmd::Tool(*tool).label(self.settings.language));
+                    if *tool == crate::ui::tools::Tool::Replace
+                        && let Some(original) =
+                            template.as_ref().map(|t| t.label.clone()).filter(|s| !s.is_empty())
+                    {
+                        ui.label(RichText::new(format!("{}: „{original}“", t.replace_original)).weak());
+                    }
                     let resp = ui.add(
                         egui::TextEdit::multiline(text)
                             .desired_rows(5)
@@ -117,11 +122,45 @@ impl MrPdfApp {
                     ui.label(RichText::new(t.shift_enter_hint).small().weak());
                     let (ok, cancel) = buttons(ui, t.ok, t.cancel);
                     if ok {
-                        let (page, rect, kind, edit) = (*page, *rect, *kind, *edit);
                         let text = text.trim_end_matches('\n').to_string();
-                        action = Some(Box::new(move |app, ctx| {
-                            app.finish_text_input(ctx, page, rect, kind, text, edit)
-                        }));
+                        let (page, tool) = (*page, *tool);
+                        match (edit.take(), template.take()) {
+                            (Some(annot), _) => {
+                                action =
+                                    Some(Box::new(move |app, ctx| app.finish_text_edit(ctx, annot, text)));
+                            }
+                            (None, Some(template)) => {
+                                action = Some(Box::new(move |app, ctx| {
+                                    app.finish_text_template(ctx, page, tool, template, text)
+                                }));
+                            }
+                            (None, None) => {}
+                        }
+                        outcome = Outcome::Close;
+                    } else if cancel {
+                        outcome = Outcome::Close;
+                    }
+                }
+                Dialog::Link { page, rect, url, target_page, to_page } => {
+                    ui.heading(t.create_link);
+                    ui.radio_value(to_page, false, t.link_to_url);
+                    ui.add_enabled(!*to_page, egui::TextEdit::singleline(url).desired_width(360.0));
+                    ui.radio_value(to_page, true, t.link_to_page);
+                    let count = self.active_tab().map_or(1, |tab| tab.doc.page_count()) as u32;
+                    ui.add_enabled(*to_page, egui::DragValue::new(target_page).range(1..=count.max(1)));
+                    let valid = *to_page || super::actions::is_safe_uri(url);
+                    if !valid {
+                        ui.colored_label(egui::Color32::from_rgb(200, 40, 40), t.link_blocked);
+                    }
+                    let (ok, cancel) = buttons(ui, t.ok, t.cancel);
+                    if ok && valid {
+                        let spec = if *to_page {
+                            crate::pdf_edit::LinkSpec::Page(target_page.saturating_sub(1) as usize)
+                        } else {
+                            crate::pdf_edit::LinkSpec::Uri(url.trim().to_string())
+                        };
+                        let (page, rect) = (*page, *rect);
+                        action = Some(Box::new(move |app, ctx| app.create_link(ctx, page, rect, spec)));
                         outcome = Outcome::Close;
                     } else if cancel {
                         outcome = Outcome::Close;

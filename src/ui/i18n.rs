@@ -98,8 +98,13 @@ strings! {
 
     // Ribbon tabs
     tab_home: "Start", "Home";
-    tab_comment: "Kommentar", "Comment";
-    tab_organize: "Organisieren", "Organize";
+    tab_comment: "Anmerkungen", "Comments";
+    tab_organize: "Dokumentaufbau", "Document";
+    tab_convert: "Umwandeln", "Convert";
+    tab_share: "Teilen", "Share";
+    tab_review: "Überprüfen", "Review";
+    tab_accessibility: "Barrierefreiheit", "Accessibility";
+    tab_bookmarks: "Lesezeichen", "Bookmarks";
     tab_form: "Formular", "Form";
     tab_view: "Ansicht", "View";
     tab_protect: "Schützen", "Protect";
@@ -149,6 +154,18 @@ strings! {
     delete_attachment: "Anhang löschen", "Delete attachment";
     attachment_hint: "Anhänge werden aus Sicherheitsgründen nie direkt geöffnet, nur gespeichert.", "For security reasons attachments are never opened directly, only saved.";
     fullscreen: "Vollbild", "Full screen";
+    replace_original: "Ersetzt wird", "Replacing";
+    create_link: "Verweis erstellen", "Create link";
+    link_to_url: "Web-Adresse öffnen", "Open web address";
+    link_to_page: "Zu Seite springen", "Go to page";
+    quick_start: "Schnellstart (Strg+.)", "Quick start (Ctrl+.)";
+    hint_vertices: "Eckpunkte nacheinander anklicken; Doppelklick oder Eingabe beendet, Esc bricht ab.", "Click the corners one after another; double click or Enter finishes, Esc cancels.";
+    hint_eraser: "Über Freihand-Zeichnungen ziehen, um sie zu löschen.", "Drag over freehand drawings to erase them.";
+    hint_zoom: "Klicken vergrößert, Umschalt+Klick oder Rechtsklick verkleinert, Aufziehen zoomt auf den Bereich.", "Click zooms in, Shift+click or right click zooms out, dragging zooms to the area.";
+    hint_select_objects: "Objekt anklicken zum Auswählen, ziehen zum Verschieben, Entf löscht.", "Click an object to select it, drag to move it, Del deletes it.";
+    format_tab: "Format", "Format";
+    no_command: "Kein passender Befehl", "No matching command";
+    manual_text: "MrPDF ist ein freier PDF-Editor. Wählen Sie oben eine Registerkarte und darin ein Werkzeug. Die meisten Werkzeuge werden durch Klicken oder Aufziehen auf der Seite benutzt, Polygone durch Klicken der Eckpunkte (Doppelklick oder Eingabe beendet). Ausgewählte Kommentare ändern Sie in der Registerkarte Format oder rechts in den Eigenschaften. Strg+. öffnet die Befehlssuche.", "MrPDF is a free PDF editor. Choose a tab at the top and a tool in it. Most tools are used by clicking or dragging on the page, polygons by clicking the corners (double click or Enter finishes). Change selected comments in the Format tab or in the properties on the right. Ctrl+. opens the command search.";
     add_bookmark: "Lesezeichen hinzufügen", "Add bookmark";
     add_child_bookmark: "Unterlesezeichen hinzufügen", "Add child bookmark";
     rename: "Umbenennen", "Rename";
@@ -341,12 +358,19 @@ impl Strings {
     }
 
     pub fn tool_hint(&self, tool: Tool) -> &'static str {
+        use crate::ui::tools::Gesture;
         match tool {
             Tool::Hand => self.hint_hand,
             Tool::SelectText => self.hint_select,
-            t if t.is_markup() => self.hint_markup,
-            Tool::Note | Tool::Stamp => self.hint_click,
-            _ => self.hint_drag,
+            Tool::Eraser => self.hint_eraser,
+            Tool::Zoom => self.hint_zoom,
+            t => match t.gesture() {
+                Gesture::TextMarkup => self.hint_markup,
+                Gesture::Click => self.hint_click,
+                Gesture::Vertices => self.hint_vertices,
+                Gesture::None => self.hint_select_objects,
+                _ => self.hint_drag,
+            },
         }
     }
 }

@@ -1,7 +1,9 @@
 //! The main window.
 
 mod actions;
+pub mod commands;
 mod dialogs;
+mod features;
 mod properties;
 mod ribbon;
 mod sidebar;
@@ -14,7 +16,7 @@ use std::time::Duration;
 use egui::{Context, Key, KeyboardShortcut, Modifiers, Ui, ViewportCommand};
 
 use crate::geometry::RectF;
-use crate::model::{AnnotKind, Metadata};
+use crate::model::Metadata;
 use crate::ui::cache::Budget;
 use crate::ui::canvas::{self, CanvasCtx, CanvasEvent};
 use crate::ui::i18n::Strings;
@@ -28,15 +30,22 @@ const SETTINGS_KEY: &str = "mrpdf-settings";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RibbonTab {
     Home,
-    Comment,
-    Organize,
-    Form,
-    Protect,
     View,
+    Comment,
+    Protect,
+    Form,
+    Organize,
+    Convert,
+    Share,
+    Review,
+    Accessibility,
+    Bookmarks,
     Help,
+    /// Contextual tab shown while a comment is selected.
+    Format,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SidePanel {
     Thumbnails,
     Bookmarks,
@@ -83,20 +92,81 @@ impl PaperChoice {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Dialog {
-    Password { path: PathBuf, password: String, wrong: bool },
-    Message { title: String, text: String },
-    Unsaved { tab_id: u64, then: AfterSave },
-    TextInput { page: usize, rect: RectF, kind: AnnotKind, text: String, edit: Option<AnnotRef> },
-    ConfirmLink { uri: String },
-    Properties { meta: Metadata },
-    InsertBlank { count: u32, paper: PaperChoice, landscape: bool, position: InsertPosition },
-    PageRange { purpose: RangePurpose, text: String, error: bool },
-    ExportImage { range: String, dpi: u32, jpeg: bool, error: bool },
-    Settings { author: String },
-    Print { range: String, copies: u32, error: bool },
-    Choice { page: usize, annot_index: usize, options: Vec<String>, selected: String },
-    Protect { opts: crate::security::ProtectOptions, repeat: String, error: Option<&'static str> },
-    BookmarkTitle { parent: Option<Vec<usize>>, path: Option<Vec<usize>>, page: usize, title: String },
+    Password {
+        path: PathBuf,
+        password: String,
+        wrong: bool,
+    },
+    Message {
+        title: String,
+        text: String,
+    },
+    Unsaved {
+        tab_id: u64,
+        then: AfterSave,
+    },
+    TextInput {
+        page: usize,
+        tool: Tool,
+        template: Option<Box<crate::pdf_edit::NewAnnotation>>,
+        text: String,
+        edit: Option<AnnotRef>,
+    },
+    Link {
+        page: usize,
+        rect: RectF,
+        url: String,
+        target_page: u32,
+        to_page: bool,
+    },
+    ConfirmLink {
+        uri: String,
+    },
+    Properties {
+        meta: Metadata,
+    },
+    InsertBlank {
+        count: u32,
+        paper: PaperChoice,
+        landscape: bool,
+        position: InsertPosition,
+    },
+    PageRange {
+        purpose: RangePurpose,
+        text: String,
+        error: bool,
+    },
+    ExportImage {
+        range: String,
+        dpi: u32,
+        jpeg: bool,
+        error: bool,
+    },
+    Settings {
+        author: String,
+    },
+    Print {
+        range: String,
+        copies: u32,
+        error: bool,
+    },
+    Choice {
+        page: usize,
+        annot_index: usize,
+        options: Vec<String>,
+        selected: String,
+    },
+    Protect {
+        opts: crate::security::ProtectOptions,
+        repeat: String,
+        error: Option<&'static str>,
+    },
+    BookmarkTitle {
+        parent: Option<Vec<usize>>,
+        path: Option<Vec<usize>>,
+        page: usize,
+        title: String,
+    },
     About,
 }
 
@@ -129,6 +199,8 @@ pub struct MrPdfApp {
     applied_dark: Option<bool>,
     props_contents: Option<(AnnotRef, u64, String)>,
     props_style: Option<(AnnotRef, u64, crate::model::AnnotStyle)>,
+    quick_query: String,
+    quick_focus: bool,
 }
 
 impl MrPdfApp {
@@ -162,6 +234,8 @@ impl MrPdfApp {
             applied_dark: None,
             props_contents: None,
             props_style: None,
+            quick_query: String::new(),
+            quick_focus: false,
         }
     }
 
@@ -201,6 +275,7 @@ impl MrPdfApp {
         self.tool = tool;
         if let Some(tab) = self.tab() {
             tab.interaction = crate::ui::tab::Interaction::None;
+            tab.polygon.clear();
         }
     }
 
@@ -251,6 +326,15 @@ impl MrPdfApp {
         }
         if pressed(cmd, Key::Num2) {
             self.set_zoom_mode(crate::ui::view::ZoomMode::FitWidth);
+        }
+        if pressed(cmd, Key::Period) {
+            self.quick_focus = true;
+        }
+        if pressed(Modifiers::ALT, Key::ArrowLeft) {
+            self.run(ctx, commands::Cmd::ViewBack);
+        }
+        if pressed(Modifiers::ALT, Key::ArrowRight) {
+            self.run(ctx, commands::Cmd::ViewForward);
         }
         if pressed(cmd, Key::Tab) && !self.tabs.is_empty() {
             self.active = (self.active + 1) % self.tabs.len();
@@ -374,6 +458,7 @@ impl MrPdfApp {
                 stamp_label: t.stamp_label(stamp).to_string(),
                 stamp_icon: stamp.pdf_name(),
                 highlight_fields,
+                decimal_comma: self.settings.language == crate::ui::i18n::Language::German,
                 budget: &mut budget,
                 events: &mut self.events,
                 t,

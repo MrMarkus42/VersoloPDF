@@ -50,6 +50,12 @@ fn sample_file(dir: &tempfile::TempDir, pages: usize) -> PathBuf {
     path
 }
 
+/// Clicks a ribbon tab (tabs come before groups with the same caption).
+fn tab(harness: &mut Harness<'_, MrPdfApp>, label: &str) {
+    harness.get_all_by_label(label).next().unwrap().click();
+    harness.run_steps(3);
+}
+
 fn drag(harness: &mut Harness<'_, MrPdfApp>, from: Pos2, to: Pos2) {
     let input = |h: &mut Harness<'_, MrPdfApp>, e: Event| h.input_mut().events.push(e);
     input(harness, Event::PointerMoved(from));
@@ -130,7 +136,7 @@ fn open_view_and_annotate() {
     save(&mut h, "02-document-open");
 
     // Comment ribbon and rectangle tool.
-    h.get_by_label("Kommentar").click();
+    tab(&mut h, "Anmerkungen");
     h.run_steps(3);
     save(&mut h, "03-comment-ribbon");
     h.get_by_label("Rechteck").click();
@@ -145,7 +151,7 @@ fn open_view_and_annotate() {
     save(&mut h, "04-rectangle");
 
     // A note via the text dialog.
-    h.get_by_label("Notiz").click();
+    h.get_by_label("Kommentar").click();
     h.run_steps(3);
     click(&mut h, pos2(640.0, 520.0));
     assert!(h.state().dialog().is_some(), "note dialog expected");
@@ -185,7 +191,7 @@ fn search_and_sidebar_panels() {
     assert_eq!(hits, 4, "one hit per page expected");
     save(&mut h, "07-search");
 
-    h.get_by_label("Organisieren").click();
+    tab(&mut h, "Dokumentaufbau");
     h.run_steps(3);
     save(&mut h, "08-organize-ribbon");
     h.get_by_label("Rechts drehen").click();
@@ -203,7 +209,7 @@ fn dark_mode_and_view_ribbon() {
     let file = sample_file(&dir, 2);
     let mut h = harness(vec![file], true);
     h.run_steps(10);
-    h.get_by_label("Ansicht").click();
+    tab(&mut h, "Ansicht");
     h.run_steps(3);
     h.get_by_label("Doppelseite").click();
     h.run_steps(8);
@@ -222,8 +228,11 @@ fn form_filling() {
     let tab = h.state().active_tab().unwrap();
     assert_eq!(tab.doc.form_fields(0).unwrap().len(), 2);
 
-    // The layout is deterministic: the text field is drawn at about (515, 347).
-    click(&mut h, pos2(515.0, 347.0));
+    let at = |h: &Harness<'_, MrPdfApp>, x: f32, y: f32| {
+        h.state().active_tab().unwrap().screen_pos(0, mrpdf::geometry::PointF::new(x, y)).unwrap()
+    };
+    let field = at(&h, 200.0, 710.0);
+    click(&mut h, field);
     h.run_steps(3);
     assert!(h.state().active_tab().unwrap().field_edit.is_some(), "field editor expected");
     h.input_mut().events.push(Event::Text("Erika Musterfrau".into()));
@@ -231,7 +240,8 @@ fn form_filling() {
     save(&mut h, "12-form-editing");
     h.key_press(egui::Key::Enter);
     h.run_steps(5);
-    click(&mut h, pos2(394.0, 417.0));
+    let check = at(&h, 106.0, 656.0);
+    click(&mut h, check);
     h.run_steps(5);
     let tab = h.state().active_tab().unwrap();
     let fields = tab.doc.form_fields(0).unwrap();
@@ -247,7 +257,7 @@ fn delete_key_removes_selected_annotation() {
     let file = sample_file(&dir, 1);
     let mut h = harness(vec![file], false);
     h.run_steps(10);
-    h.get_by_label("Kommentar").click();
+    tab(&mut h, "Anmerkungen");
     h.run_steps(2);
     h.get_by_label("Ellipse").click();
     h.run_steps(2);
@@ -271,10 +281,10 @@ fn protect_ribbon_and_attachments() {
     let file = sample_file(&dir, 1);
     let mut h = harness(vec![file], false);
     h.run_steps(10);
-    h.get_by_label("Schützen").click();
+    tab(&mut h, "Schützen");
     h.run_steps(3);
     save(&mut h, "14-protect-ribbon");
-    h.get_by_label("Kennwortschutz").click();
+    h.get_by_label("Sicherheitseinstellungen").click();
     h.run_steps(3);
     assert!(h.state().dialog().is_some());
     save(&mut h, "15-protect-dialog");
@@ -296,9 +306,9 @@ fn real_world_sample() {
     let mut h = harness(vec![path], false);
     h.run_steps(15);
     save(&mut h, &format!("sample-{name}-1"));
-    h.get_by_label("Lesezeichen").click();
+    h.get_all_by_label("Lesezeichen").next().unwrap().click();
     h.run_steps(5);
-    h.get_by_label("Ansicht").click();
+    tab(&mut h, "Ansicht");
     h.run_steps(2);
     h.get_by_label("Doppelseite").click();
     h.run_steps(10);
@@ -328,4 +338,110 @@ fn real_world_sample() {
         h.run_steps(10);
         save(&mut h, &format!("sample-{name}-3"));
     }
+}
+
+/// Selects a tool through the quick start search (works for every command).
+fn quick(harness: &mut Harness<'_, MrPdfApp>, query: &str) {
+    harness.key_press_modifiers(Modifiers::COMMAND, egui::Key::Period);
+    harness.run_steps(3);
+    harness.input_mut().events.push(Event::Text(query.into()));
+    harness.run_steps(2);
+    harness.key_press(egui::Key::Enter);
+    harness.run_steps(3);
+}
+
+fn kinds(harness: &mut Harness<'_, MrPdfApp>) -> Vec<AnnotKind> {
+    let tab = harness.state_mut().active_tab_mut().unwrap();
+    tab.doc.annotations(0).unwrap().iter().map(|a| a.kind).collect()
+}
+
+#[test]
+fn new_comment_tools() {
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let file = sample_file(&dir, 1);
+    let mut h = harness(vec![file], false);
+    h.run_steps(10);
+    let at = |h: &Harness<'_, MrPdfApp>, x: f32, y: f32| {
+        h.state().active_tab().unwrap().screen_pos(0, mrpdf::geometry::PointF::new(x, y)).unwrap()
+    };
+
+    // Typewriter: click, type, Enter.
+    quick(&mut h, "Schreibmaschine");
+    assert_eq!(h.state().tool(), mrpdf::ui::tools::Tool::Typewriter);
+    let p = at(&h, 100.0, 500.0);
+    click(&mut h, p);
+    h.input_mut().events.push(Event::Text("Getippt".into()));
+    h.run_steps(2);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(4);
+    assert_eq!(kinds(&mut h).last(), Some(&AnnotKind::FreeText));
+
+    // Cloud polygon by clicking corners, Enter finishes.
+    quick(&mut h, "Wolke");
+    for (x, y) in [(300.0, 700.0), (450.0, 700.0), (450.0, 600.0), (300.0, 600.0)] {
+        let p = at(&h, x, y);
+        click(&mut h, p);
+    }
+    assert_eq!(h.state().tool(), mrpdf::ui::tools::Tool::Cloud);
+    assert_eq!(h.state().active_tab().unwrap().polygon.len(), 4, "vertices");
+    h.key_press(egui::Key::Enter);
+    h.run_steps(4);
+    assert_eq!(kinds(&mut h).last(), Some(&AnnotKind::Polygon));
+
+    // Distance measurement.
+    quick(&mut h, "Entfernung");
+    let (a, b) = (at(&h, 100.0, 560.0), at(&h, 280.0, 560.0));
+    drag(&mut h, a, b);
+    h.run_steps(3);
+    {
+        let tab = h.state_mut().active_tab_mut().unwrap();
+        let last = tab.doc.annotations(0).unwrap().last().cloned().unwrap();
+        assert_eq!(last.kind, AnnotKind::Line);
+        assert!(last.contents.ends_with("mm"), "{}", last.contents);
+    }
+
+    // Callout: drag from the tip to the box position, then type.
+    quick(&mut h, "Beschreibung");
+    let (a, b) = (at(&h, 100.0, 780.0), at(&h, 160.0, 800.0));
+    drag(&mut h, a, b);
+    h.input_mut().events.push(Event::Text("Hinweis".into()));
+    h.run_steps(2);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(4);
+    assert_eq!(kinds(&mut h).last(), Some(&AnnotKind::FreeText));
+
+    // Freehand drawing, then the eraser removes it again.
+    quick(&mut h, "Stift");
+    let (a, b) = (at(&h, 400.0, 480.0), at(&h, 500.0, 520.0));
+    drag(&mut h, a, b);
+    h.run_steps(3);
+    let before = kinds(&mut h).len();
+    assert_eq!(kinds(&mut h).last(), Some(&AnnotKind::Ink));
+    quick(&mut h, "Radiergummi");
+    let (a, b) = (at(&h, 390.0, 485.0), at(&h, 510.0, 515.0));
+    drag(&mut h, a, b);
+    h.run_steps(3);
+    assert_eq!(kinds(&mut h).len(), before - 1, "eraser should remove the ink");
+
+    // Area highlight and caret.
+    quick(&mut h, "Bereich hervorheben");
+    let (a, b) = (at(&h, 60.0, 470.0), at(&h, 200.0, 455.0));
+    drag(&mut h, a, b);
+    h.run_steps(3);
+    assert_eq!(kinds(&mut h).last(), Some(&AnnotKind::Highlight));
+    quick(&mut h, "Text einfügen");
+    let p = at(&h, 250.0, 530.0);
+    click(&mut h, p);
+    h.input_mut().events.push(Event::Text("ergänzt".into()));
+    h.run_steps(2);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(4);
+    assert_eq!(kinds(&mut h).last(), Some(&AnnotKind::Caret));
+    save(&mut h, "17-new-tools");
+
+    // View rotation and history.
+    quick(&mut h, "Ansicht rechts drehen");
+    assert_eq!(h.state().active_tab().unwrap().view_rotation, mrpdf::geometry::Rotation::R90);
+    save(&mut h, "18-view-rotated");
 }

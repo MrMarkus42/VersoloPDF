@@ -57,7 +57,8 @@ fn renders_page_and_tiles() {
     assert!(has_dark);
 
     // A tile equals the corresponding area of the full render.
-    let tile = doc.render_tile(0, 300, 424, 20, 40, 100, 50).unwrap();
+    let tile =
+        doc.render_tile(0, 300, 424, 20, 40, 100, 50, mrpdf::document::RenderOptions::default()).unwrap();
     for y in 0..50 {
         for x in 0..100 {
             let a = ((y * 100 + x) * 4) as usize;
@@ -497,4 +498,55 @@ fn image_stamp_is_rendered() {
     let bad = dir.path().join("kaputt.png");
     std::fs::write(&bad, b"not an image").unwrap();
     assert!(doc.add_image_stamp(0, &bad, &AnnotStyle::default()).is_err());
+}
+
+#[test]
+fn view_rotation_matches_geometry() {
+    let _guard = common::lock();
+    use mrpdf::document::RenderOptions;
+    use mrpdf::geometry::PageGeometry;
+    let mut doc = open(1);
+    // A black square at a known PDF position.
+    let mut sq = NewAnnotation::new(
+        AnnotKind::Square,
+        AnnotStyle { color: Rgba::BLACK, fill: Some(Rgba::BLACK), ..AnnotStyle::default() },
+    );
+    sq.rect = RectF::new(100.0, 600.0, 160.0, 660.0);
+    doc.add_annotation(0, &sq).unwrap();
+    for rotation in [Rotation::R90, Rotation::R180, Rotation::R270] {
+        let base = *doc.geometry(0).unwrap();
+        let geo = PageGeometry::new(base.crop, base.rotation.rotated_by(rotation.degrees()));
+        let (w, h) = geo.view_size();
+        let img = doc
+            .render_tile(
+                0,
+                w as u32,
+                h as u32,
+                0,
+                0,
+                w as u32,
+                h as u32,
+                RenderOptions { rotation, annotations: true },
+            )
+            .unwrap();
+        let v = geo.pdf_rect_to_view(&sq.rect);
+        let c = v.center();
+        let inside = common::average(&img, c.x as u32 - 5, c.y as u32 - 5, c.x as u32 + 5, c.y as u32 + 5);
+        assert!(inside[0] < 40.0, "{rotation:?}: {inside:?}");
+        // Without annotations the spot is white.
+        let plain = doc
+            .render_tile(
+                0,
+                w as u32,
+                h as u32,
+                0,
+                0,
+                w as u32,
+                h as u32,
+                RenderOptions { rotation, annotations: false },
+            )
+            .unwrap();
+        let spot = common::average(&plain, c.x as u32 - 5, c.y as u32 - 5, c.x as u32 + 5, c.y as u32 + 5);
+        assert!(spot[0] > 220.0, "{rotation:?}: {spot:?}");
+    }
 }

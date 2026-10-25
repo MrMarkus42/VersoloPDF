@@ -1,0 +1,954 @@
+//! Central command table: every action of the ribbon, the quick start search
+//! and keyboard shortcuts is a [`Cmd`]. Each command has a label, an icon and
+//! an availability state; [`MrPdfApp::run`] executes it.
+
+use egui::Context;
+
+use super::{Dialog, InsertPosition, MrPdfApp, PaperChoice, RangePurpose, SidePanel};
+use crate::ui::i18n::Language;
+use crate::ui::icons::Icon;
+use crate::ui::tools::Tool;
+use crate::ui::view::{PageLayout, ZoomMode};
+
+/// Why a command is not offered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Unavailable {
+    Signatures,
+    JavaScript,
+    Ocr,
+    Scanner,
+    Media,
+    Spelling,
+    TextEditing,
+    Speech,
+    Office,
+    Barcodes,
+}
+
+impl Unavailable {
+    pub fn reason(self, lang: Language) -> &'static str {
+        let (de, en) = match self {
+            Unavailable::Signatures => (
+                "Digitale Signaturen mit Zertifikaten werden noch nicht unterstützt.",
+                "Digital signatures with certificates are not supported yet.",
+            ),
+            Unavailable::JavaScript => (
+                "JavaScript in PDF-Dateien wird aus Sicherheitsgründen bewusst nicht ausgeführt.",
+                "JavaScript in PDF files is deliberately not executed for security reasons.",
+            ),
+            Unavailable::Ocr => (
+                "Texterkennung (OCR) benötigt eine eigene Erkennungs-Software und ist noch nicht enthalten.",
+                "Text recognition (OCR) needs a recognition engine and is not included yet.",
+            ),
+            Unavailable::Scanner => {
+                ("Scannen wird noch nicht unterstützt.", "Scanning is not supported yet.")
+            }
+            Unavailable::Media => {
+                ("Video, Audio und 3D werden nicht unterstützt.", "Video, audio and 3D are not supported.")
+            }
+            Unavailable::Spelling => {
+                ("Eine Rechtschreibprüfung ist noch nicht enthalten.", "A spell checker is not included yet.")
+            }
+            Unavailable::TextEditing => (
+                "Das Bearbeiten von vorhandenem Seiteninhalt wird noch nicht unterstützt.",
+                "Editing existing page content is not supported yet.",
+            ),
+            Unavailable::Speech => {
+                ("Vorlesen wird noch nicht unterstützt.", "Read aloud is not supported yet.")
+            }
+            Unavailable::Office => (
+                "Export nach Excel/PowerPoint wird nicht unterstützt (Text- und Word-Export sind möglich).",
+                "Export to Excel/PowerPoint is not supported (text and Word export are available).",
+            ),
+            Unavailable::Barcodes => ("Barcodes werden nicht unterstützt.", "Barcodes are not supported."),
+        };
+        if lang == Language::German { de } else { en }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Cmd {
+    // File and quick access
+    New,
+    Open,
+    Save,
+    SaveAs,
+    Print,
+    Close,
+    Exit,
+    DocProperties,
+    Settings,
+    Email,
+    OpenFolder,
+    ViewBack,
+    ViewForward,
+    Undo,
+    Redo,
+    // Tools
+    Tool(Tool),
+    CopyText,
+    SelectAll,
+    Search,
+    InsertImage,
+    WebLinksCreate,
+    WebLinksRemove,
+    // View
+    FirstPage,
+    PrevPage,
+    NextPage,
+    LastPage,
+    ActualSize,
+    FitPage,
+    FitWidth,
+    ZoomIn,
+    ZoomOut,
+    RotateViewLeft,
+    RotateViewRight,
+    LayoutSingle,
+    LayoutContinuous,
+    LayoutFacing,
+    LayoutCover,
+    ToggleSidebar,
+    ToggleProperties,
+    Fullscreen,
+    DarkMode,
+    Panel(SidePanel),
+    // Comments
+    CommentList,
+    ToggleAnnotations,
+    SummarizeComments,
+    ExportComments,
+    ImportComments,
+    PrevComment,
+    NextComment,
+    Flatten,
+    DeleteComment,
+    DeleteAllComments,
+    // Protect
+    PasswordProtect,
+    RemoveProtection,
+    ApplyRedactions,
+    SearchRedact,
+    // Form
+    HighlightFields,
+    ResetForm,
+    ExportFormData,
+    ImportFormData,
+    // Document structure
+    InsertBlank,
+    InsertFromFile,
+    AppendFile,
+    DeletePages,
+    ExtractPages,
+    MovePageUp,
+    MovePageDown,
+    MergeFiles,
+    SplitDocument,
+    DuplicatePages,
+    ReplacePages,
+    SwapPages,
+    NormalizePages,
+    FindDuplicatePages,
+    ReversePages,
+    RotateLeft,
+    RotateRight,
+    RotatePages,
+    CropPages,
+    ResizePages,
+    Margins,
+    Watermark,
+    Background,
+    HeaderFooter,
+    Bates,
+    PageLabels,
+    // Convert
+    FromFiles,
+    ContentsToImages,
+    ExportImages,
+    ExportText,
+    ExportWord,
+    Grayscale,
+    // Review / accessibility
+    WordCount,
+    CompareDocuments,
+    AccessibilityCheck,
+    // Bookmarks
+    BookmarkAdd,
+    BookmarkFromSelection,
+    BookmarkEveryNth,
+    BookmarkFromHighlights,
+    BookmarkFromTextFile,
+    BookmarkUpper,
+    BookmarkLower,
+    BookmarkTitleCase,
+    BookmarkReplace,
+    BookmarkSort,
+    BookmarkDedupe,
+    BookmarkDeleteAll,
+    BookmarkToc,
+    BookmarkExportHtml,
+    BookmarkExportText,
+    // Help
+    Manual,
+    Support,
+    ReportProblem,
+    CommandLineHelp,
+    CheckUpdate,
+    About,
+    FileAssociation,
+    Homepage,
+    /// A command that MrPDF does not offer.
+    Unavailable(Unavailable, &'static str, &'static str, Icon),
+}
+
+pub const HOMEPAGE: &str = "https://github.com/MrMarkus42/MrPDF";
+
+/// Commands offered by the quick start search.
+pub const SEARCHABLE: &[Cmd] = &[
+    Cmd::New,
+    Cmd::Open,
+    Cmd::Save,
+    Cmd::SaveAs,
+    Cmd::Print,
+    Cmd::Close,
+    Cmd::DocProperties,
+    Cmd::Settings,
+    Cmd::Email,
+    Cmd::OpenFolder,
+    Cmd::ViewBack,
+    Cmd::ViewForward,
+    Cmd::Undo,
+    Cmd::Redo,
+    Cmd::Tool(Tool::Hand),
+    Cmd::Tool(Tool::SelectText),
+    Cmd::Tool(Tool::SelectAnnot),
+    Cmd::Tool(Tool::Zoom),
+    Cmd::Tool(Tool::Snapshot),
+    Cmd::Tool(Tool::Highlight),
+    Cmd::Tool(Tool::AreaHighlight),
+    Cmd::Tool(Tool::Underline),
+    Cmd::Tool(Tool::StrikeOut),
+    Cmd::Tool(Tool::Squiggly),
+    Cmd::Tool(Tool::Replace),
+    Cmd::Tool(Tool::Caret),
+    Cmd::Tool(Tool::Note),
+    Cmd::Tool(Tool::FileAttach),
+    Cmd::Tool(Tool::TextBox),
+    Cmd::Tool(Tool::Typewriter),
+    Cmd::Tool(Tool::Callout),
+    Cmd::Tool(Tool::Rectangle),
+    Cmd::Tool(Tool::Ellipse),
+    Cmd::Tool(Tool::Line),
+    Cmd::Tool(Tool::Arrow),
+    Cmd::Tool(Tool::Polygon),
+    Cmd::Tool(Tool::Polyline),
+    Cmd::Tool(Tool::Cloud),
+    Cmd::Tool(Tool::Pencil),
+    Cmd::Tool(Tool::Eraser),
+    Cmd::Tool(Tool::Stamp),
+    Cmd::Tool(Tool::MeasureDistance),
+    Cmd::Tool(Tool::MeasurePerimeter),
+    Cmd::Tool(Tool::MeasureArea),
+    Cmd::Tool(Tool::Link),
+    Cmd::Tool(Tool::Redact),
+    Cmd::Tool(Tool::Signature),
+    Cmd::Tool(Tool::SelectFields),
+    Cmd::Tool(Tool::FieldText),
+    Cmd::Tool(Tool::FieldButton),
+    Cmd::Tool(Tool::FieldCheckBox),
+    Cmd::Tool(Tool::FieldRadio),
+    Cmd::Tool(Tool::FieldList),
+    Cmd::Tool(Tool::FieldCombo),
+    Cmd::Tool(Tool::FieldSignature),
+    Cmd::CopyText,
+    Cmd::SelectAll,
+    Cmd::Search,
+    Cmd::InsertImage,
+    Cmd::WebLinksCreate,
+    Cmd::WebLinksRemove,
+    Cmd::FirstPage,
+    Cmd::PrevPage,
+    Cmd::NextPage,
+    Cmd::LastPage,
+    Cmd::ActualSize,
+    Cmd::FitPage,
+    Cmd::FitWidth,
+    Cmd::ZoomIn,
+    Cmd::ZoomOut,
+    Cmd::RotateViewLeft,
+    Cmd::RotateViewRight,
+    Cmd::LayoutSingle,
+    Cmd::LayoutContinuous,
+    Cmd::LayoutFacing,
+    Cmd::LayoutCover,
+    Cmd::ToggleSidebar,
+    Cmd::ToggleProperties,
+    Cmd::Fullscreen,
+    Cmd::DarkMode,
+    Cmd::CommentList,
+    Cmd::ToggleAnnotations,
+    Cmd::SummarizeComments,
+    Cmd::ExportComments,
+    Cmd::ImportComments,
+    Cmd::PrevComment,
+    Cmd::NextComment,
+    Cmd::Flatten,
+    Cmd::DeleteComment,
+    Cmd::DeleteAllComments,
+    Cmd::PasswordProtect,
+    Cmd::RemoveProtection,
+    Cmd::ApplyRedactions,
+    Cmd::SearchRedact,
+    Cmd::HighlightFields,
+    Cmd::ResetForm,
+    Cmd::ExportFormData,
+    Cmd::ImportFormData,
+    Cmd::InsertBlank,
+    Cmd::InsertFromFile,
+    Cmd::AppendFile,
+    Cmd::DeletePages,
+    Cmd::ExtractPages,
+    Cmd::MovePageUp,
+    Cmd::MovePageDown,
+    Cmd::MergeFiles,
+    Cmd::SplitDocument,
+    Cmd::DuplicatePages,
+    Cmd::ReplacePages,
+    Cmd::SwapPages,
+    Cmd::NormalizePages,
+    Cmd::FindDuplicatePages,
+    Cmd::ReversePages,
+    Cmd::RotateLeft,
+    Cmd::RotateRight,
+    Cmd::RotatePages,
+    Cmd::CropPages,
+    Cmd::ResizePages,
+    Cmd::Margins,
+    Cmd::Watermark,
+    Cmd::Background,
+    Cmd::HeaderFooter,
+    Cmd::Bates,
+    Cmd::PageLabels,
+    Cmd::FromFiles,
+    Cmd::ContentsToImages,
+    Cmd::ExportImages,
+    Cmd::ExportText,
+    Cmd::ExportWord,
+    Cmd::Grayscale,
+    Cmd::WordCount,
+    Cmd::CompareDocuments,
+    Cmd::AccessibilityCheck,
+    Cmd::BookmarkAdd,
+    Cmd::BookmarkFromSelection,
+    Cmd::BookmarkEveryNth,
+    Cmd::BookmarkFromHighlights,
+    Cmd::BookmarkFromTextFile,
+    Cmd::BookmarkUpper,
+    Cmd::BookmarkLower,
+    Cmd::BookmarkTitleCase,
+    Cmd::BookmarkReplace,
+    Cmd::BookmarkSort,
+    Cmd::BookmarkDedupe,
+    Cmd::BookmarkDeleteAll,
+    Cmd::BookmarkToc,
+    Cmd::BookmarkExportHtml,
+    Cmd::BookmarkExportText,
+    Cmd::Manual,
+    Cmd::Support,
+    Cmd::ReportProblem,
+    Cmd::CommandLineHelp,
+    Cmd::CheckUpdate,
+    Cmd::About,
+    Cmd::FileAssociation,
+    Cmd::Homepage,
+];
+
+impl Cmd {
+    /// German and English label.
+    pub fn names(self) -> (&'static str, &'static str) {
+        use Cmd::*;
+        match self {
+            New => ("Neues Dokument", "New document"),
+            Open => ("Öffnen", "Open"),
+            Save => ("Speichern", "Save"),
+            SaveAs => ("Speichern unter", "Save as"),
+            Print => ("Drucken", "Print"),
+            Close => ("Schließen", "Close"),
+            Exit => ("Beenden", "Exit"),
+            DocProperties => ("Dokumenteigenschaften", "Document properties"),
+            Settings => ("Einstellungen", "Settings"),
+            Email => ("Per E-Mail senden", "Send by e-mail"),
+            OpenFolder => ("Ordner öffnen", "Open folder"),
+            ViewBack => ("Letzte Ansicht", "Previous view"),
+            ViewForward => ("Nächste Ansicht", "Next view"),
+            Undo => ("Rückgängig", "Undo"),
+            Redo => ("Wiederholen", "Redo"),
+            Tool(t) => tool_names(t),
+            CopyText => ("Text kopieren", "Copy text"),
+            SelectAll => ("Alles auswählen", "Select all"),
+            Search => ("Suche", "Search"),
+            InsertImage => ("Bild", "Image"),
+            WebLinksCreate => ("Web-Links zu URLs erstellen", "Create web links from URLs"),
+            WebLinksRemove => ("Alle Web-Links entfernen", "Remove all web links"),
+            FirstPage => ("Erste Seite", "First page"),
+            PrevPage => ("Vorherige Seite", "Previous page"),
+            NextPage => ("Nächste Seite", "Next page"),
+            LastPage => ("Letzte Seite", "Last page"),
+            ActualSize => ("Tatsächliche Größe", "Actual size"),
+            FitPage => ("Ganze Seite", "Fit page"),
+            FitWidth => ("Breite", "Fit width"),
+            ZoomIn => ("Vergrößern", "Zoom in"),
+            ZoomOut => ("Verkleinern", "Zoom out"),
+            RotateViewLeft => ("Ansicht links drehen", "Rotate view left"),
+            RotateViewRight => ("Ansicht rechts drehen", "Rotate view right"),
+            LayoutSingle => ("Einzelseite", "Single page"),
+            LayoutContinuous => ("Fortlaufend", "Continuous"),
+            LayoutFacing => ("Doppelseite", "Two pages"),
+            LayoutCover => ("Deckblatt separat", "Separate cover"),
+            ToggleSidebar => ("Seitenleiste", "Sidebar"),
+            ToggleProperties => ("Eigenschaften", "Properties"),
+            Fullscreen => ("Vollbild", "Full screen"),
+            DarkMode => ("Design", "Theme"),
+            Panel(SidePanel::Thumbnails) => ("Seiten", "Pages"),
+            Panel(SidePanel::Bookmarks) => ("Lesezeichen", "Bookmarks"),
+            Panel(SidePanel::Comments) => ("Kommentare", "Comments"),
+            Panel(SidePanel::Attachments) => ("Anhänge", "Attachments"),
+            Panel(SidePanel::Search) => ("Suchen", "Search"),
+            CommentList => ("Kommentarliste", "Comment list"),
+            ToggleAnnotations => ("Anzeigen", "Show"),
+            SummarizeComments => ("Anmerkungen zusammenfassen", "Summarize comments"),
+            ExportComments => ("Exportieren", "Export"),
+            ImportComments => ("Importieren", "Import"),
+            PrevComment => ("Vorherige", "Previous"),
+            NextComment => ("Nächste", "Next"),
+            Flatten => ("Anmerkungen einbetten", "Flatten comments"),
+            DeleteComment => ("Anmerkung löschen", "Delete comment"),
+            DeleteAllComments => ("Anmerkungen löschen", "Delete comments"),
+            PasswordProtect => ("Sicherheitseinstellungen", "Security settings"),
+            RemoveProtection => ("Schutz entfernen", "Remove protection"),
+            ApplyRedactions => ("Übernehmen", "Apply"),
+            SearchRedact => ("Suchen und schwärzen", "Search and redact"),
+            HighlightFields => ("Felder hervorheben", "Highlight fields"),
+            ResetForm => ("Formular zurücksetzen", "Reset form"),
+            ExportFormData => ("Formulardaten exportieren", "Export form data"),
+            ImportFormData => ("Formulardaten importieren", "Import form data"),
+            InsertBlank => ("Leere Seiten einfügen", "Insert blank pages"),
+            InsertFromFile => ("Seiten aus Datei einfügen", "Insert pages from file"),
+            AppendFile => ("Datei anhängen", "Append file"),
+            DeletePages => ("Löschen", "Delete"),
+            ExtractPages => ("Seiten extrahieren", "Extract pages"),
+            MovePageUp => ("Seite nach vorne", "Move page up"),
+            MovePageDown => ("Seite nach hinten", "Move page down"),
+            MergeFiles => ("Seiten zusammenführen", "Merge files"),
+            SplitDocument => ("Aufteilen", "Split"),
+            DuplicatePages => ("Seiten duplizieren", "Duplicate pages"),
+            ReplacePages => ("Seiten ersetzen", "Replace pages"),
+            SwapPages => ("Seiten austauschen", "Swap pages"),
+            NormalizePages => ("Seiten normalisieren", "Normalize pages"),
+            FindDuplicatePages => ("Duplikate finden", "Find duplicates"),
+            ReversePages => ("Seitenreihenfolge umkehren", "Reverse page order"),
+            RotateLeft => ("Links drehen", "Rotate left"),
+            RotateRight => ("Rechts drehen", "Rotate right"),
+            RotatePages => ("Drehen", "Rotate"),
+            CropPages => ("Zuschneiden", "Crop"),
+            ResizePages => ("Größe ändern", "Resize"),
+            Margins => ("Ränder", "Margins"),
+            Watermark => ("Wasserzeichen", "Watermark"),
+            Background => ("Hintergrund", "Background"),
+            HeaderFooter => ("Kopf- und Fußzeilen", "Header and footer"),
+            Bates => ("Paginierung", "Bates numbering"),
+            PageLabels => ("Seiten nummerieren", "Number pages"),
+            FromFiles => ("Aus Dateien", "From files"),
+            ContentsToImages => ("Inhalte in Bilder umwandeln", "Convert contents to images"),
+            ExportImages => ("In Bilder", "To images"),
+            ExportText => ("In Text", "To text"),
+            ExportWord => ("In MS Word", "To MS Word"),
+            Grayscale => ("Farben umwandeln", "Convert colours"),
+            WordCount => ("Wörter zählen", "Count words"),
+            CompareDocuments => ("Dokumente vergleichen", "Compare documents"),
+            AccessibilityCheck => ("Barrierefreiheit prüfen", "Check accessibility"),
+            BookmarkAdd => ("Lesezeichen hinzufügen", "Add bookmark"),
+            BookmarkFromSelection => ("Aus Seitentext", "From page text"),
+            BookmarkEveryNth => ("Lesezeichen für jede n-te Seite", "Bookmark every n-th page"),
+            BookmarkFromHighlights => ("Aus Hervorhebungen", "From highlights"),
+            BookmarkFromTextFile => ("Aus Textdatei", "From text file"),
+            BookmarkUpper => ("GROSSBUCHSTABEN", "UPPER CASE"),
+            BookmarkLower => ("kleinbuchstaben", "lower case"),
+            BookmarkTitleCase => ("Erster Buchstabe groß", "Title case"),
+            BookmarkReplace => ("Suchen und ersetzen", "Find and replace"),
+            BookmarkSort => ("Sortieren", "Sort"),
+            BookmarkDedupe => ("Duplikate zusammenfassen", "Merge duplicates"),
+            BookmarkDeleteAll => ("Alle Lesezeichen löschen", "Delete all bookmarks"),
+            BookmarkToc => ("Inhaltsverzeichnis erstellen", "Create table of contents"),
+            BookmarkExportHtml => ("Als HTML exportieren", "Export as HTML"),
+            BookmarkExportText => ("Als Textdatei exportieren", "Export as text file"),
+            Manual => ("Handbuch", "Manual"),
+            Support => ("Support", "Support"),
+            ReportProblem => ("Problem melden", "Report a problem"),
+            CommandLineHelp => ("Hilfe zur Kommandozeile", "Command line help"),
+            CheckUpdate => ("Nach neuer Version suchen", "Check for updates"),
+            About => ("Über", "About"),
+            FileAssociation => ("Dateizuordnung", "File association"),
+            Homepage => ("Homepage", "Homepage"),
+            Unavailable(_, de, en, _) => (de, en),
+        }
+    }
+
+    pub fn label(self, lang: Language) -> &'static str {
+        let (de, en) = self.names();
+        if lang == Language::German { de } else { en }
+    }
+
+    pub fn icon(self) -> Icon {
+        use Cmd::*;
+        match self {
+            New => Icon::New,
+            Open => Icon::Open,
+            Save => Icon::Save,
+            SaveAs => Icon::SaveAs,
+            Print => Icon::Print,
+            Close => Icon::Close,
+            Exit => Icon::Close,
+            DocProperties => Icon::Info,
+            Settings => Icon::Gear,
+            Email => Icon::Mail,
+            OpenFolder => Icon::Open,
+            ViewBack => Icon::Back,
+            ViewForward => Icon::Forward,
+            Undo => Icon::Undo,
+            Redo => Icon::Redo,
+            Tool(t) => t.icon(),
+            CopyText => Icon::Copy,
+            SelectAll => Icon::SelectText,
+            Search => Icon::Search,
+            InsertImage => Icon::Image,
+            WebLinksCreate => Icon::Link,
+            WebLinksRemove => Icon::LinkOff,
+            FirstPage => Icon::First,
+            PrevPage => Icon::Prev,
+            NextPage => Icon::Next,
+            LastPage => Icon::Last,
+            ActualSize => Icon::ActualSize,
+            FitPage => Icon::FitPage,
+            FitWidth => Icon::FitWidth,
+            ZoomIn => Icon::ZoomIn,
+            ZoomOut => Icon::ZoomOut,
+            RotateViewLeft => Icon::RotateLeft,
+            RotateViewRight => Icon::RotateRight,
+            LayoutSingle => Icon::SinglePage,
+            LayoutContinuous => Icon::Continuous,
+            LayoutFacing => Icon::TwoPages,
+            LayoutCover => Icon::CoverPages,
+            ToggleSidebar => Icon::Sidebar,
+            ToggleProperties => Icon::Properties,
+            Fullscreen => Icon::Fullscreen,
+            DarkMode => Icon::Theme,
+            Panel(SidePanel::Thumbnails) => Icon::Thumbnails,
+            Panel(SidePanel::Bookmarks) => Icon::Bookmarks,
+            Panel(SidePanel::Comments) => Icon::Comments,
+            Panel(SidePanel::Attachments) => Icon::Attachment,
+            Panel(SidePanel::Search) => Icon::Search,
+            CommentList => Icon::Comments,
+            ToggleAnnotations => Icon::Eye,
+            SummarizeComments => Icon::Summary,
+            ExportComments => Icon::Export,
+            ImportComments => Icon::Import,
+            PrevComment => Icon::Prev,
+            NextComment => Icon::Next,
+            Flatten => Icon::Flatten,
+            DeleteComment => Icon::Delete,
+            DeleteAllComments => Icon::Delete,
+            PasswordProtect => Icon::Lock,
+            RemoveProtection => Icon::Unlock,
+            ApplyRedactions => Icon::Redact,
+            SearchRedact => Icon::Search,
+            HighlightFields => Icon::Form,
+            ResetForm => Icon::Undo,
+            ExportFormData => Icon::Export,
+            ImportFormData => Icon::Import,
+            InsertBlank => Icon::InsertPage,
+            InsertFromFile => Icon::InsertFile,
+            AppendFile => Icon::InsertFile,
+            DeletePages => Icon::DeletePage,
+            ExtractPages => Icon::ExtractPages,
+            MovePageUp => Icon::MoveUp,
+            MovePageDown => Icon::MoveDown,
+            MergeFiles => Icon::Merge,
+            SplitDocument => Icon::Split,
+            DuplicatePages => Icon::Copy,
+            ReplacePages => Icon::InsertFile,
+            SwapPages => Icon::Swap,
+            NormalizePages => Icon::Resize,
+            FindDuplicatePages => Icon::Search,
+            ReversePages => Icon::Swap,
+            RotateLeft => Icon::RotateLeft,
+            RotateRight => Icon::RotateRight,
+            RotatePages => Icon::RotateRight,
+            CropPages => Icon::Crop,
+            ResizePages => Icon::Resize,
+            Margins => Icon::Margins,
+            Watermark => Icon::Watermark,
+            Background => Icon::Background,
+            HeaderFooter => Icon::HeaderFooter,
+            Bates => Icon::Numbering,
+            PageLabels => Icon::Numbering,
+            FromFiles => Icon::InsertFile,
+            ContentsToImages => Icon::Image,
+            ExportImages => Icon::Image,
+            ExportText => Icon::TextFile,
+            ExportWord => Icon::WordFile,
+            Grayscale => Icon::Theme,
+            WordCount => Icon::Count,
+            CompareDocuments => Icon::Compare,
+            AccessibilityCheck => Icon::Accessibility,
+            BookmarkAdd => Icon::Bookmarks,
+            BookmarkFromSelection => Icon::SelectText,
+            BookmarkEveryNth => Icon::Numbering,
+            BookmarkFromHighlights => Icon::Highlight,
+            BookmarkFromTextFile => Icon::TextFile,
+            BookmarkUpper | BookmarkLower | BookmarkTitleCase => Icon::TextBox,
+            BookmarkReplace => Icon::Search,
+            BookmarkSort => Icon::Sort,
+            BookmarkDedupe => Icon::Merge,
+            BookmarkDeleteAll => Icon::Delete,
+            BookmarkToc => Icon::Summary,
+            BookmarkExportHtml => Icon::Export,
+            BookmarkExportText => Icon::TextFile,
+            Manual => Icon::Help,
+            Support => Icon::Help,
+            ReportProblem => Icon::Bug,
+            CommandLineHelp => Icon::Console,
+            CheckUpdate => Icon::Web,
+            About => Icon::Logo,
+            FileAssociation => Icon::Gear,
+            Homepage => Icon::Web,
+            Unavailable(_, _, _, icon) => icon,
+        }
+    }
+}
+
+pub fn tool_names(tool: Tool) -> (&'static str, &'static str) {
+    match tool {
+        Tool::Hand => ("Hand", "Hand"),
+        Tool::SelectText => ("Textauswahl", "Select text"),
+        Tool::SelectAnnot => ("Anmerkungen bearbeiten", "Edit comments"),
+        Tool::Zoom => ("Vergrößerung", "Zoom tool"),
+        Tool::Snapshot => ("Bildschirmfoto", "Snapshot"),
+        Tool::Highlight => ("Text hervorheben", "Highlight text"),
+        Tool::AreaHighlight => ("Bereich hervorheben", "Highlight area"),
+        Tool::Underline => ("Unterstreichen", "Underline"),
+        Tool::StrikeOut => ("Durchstreichen", "Strike out"),
+        Tool::Squiggly => ("Wellenlinie", "Squiggly"),
+        Tool::Replace => ("Text ersetzen", "Replace text"),
+        Tool::Caret => ("Text einfügen", "Insert text"),
+        Tool::Note => ("Kommentar", "Comment"),
+        Tool::FileAttach => ("Dateianhang", "File attachment"),
+        Tool::TextBox => ("Textfeld", "Text box"),
+        Tool::Typewriter => ("Schreibmaschine", "Typewriter"),
+        Tool::Callout => ("Beschreibung", "Callout"),
+        Tool::Rectangle => ("Rechteck", "Rectangle"),
+        Tool::Ellipse => ("Ellipse", "Ellipse"),
+        Tool::Line => ("Linie", "Line"),
+        Tool::Arrow => ("Pfeil", "Arrow"),
+        Tool::Polygon => ("Polygon", "Polygon"),
+        Tool::Polyline => ("Polygonzug", "Polyline"),
+        Tool::Cloud => ("Wolke", "Cloud"),
+        Tool::Pencil => ("Stift", "Pencil"),
+        Tool::Eraser => ("Radiergummi", "Eraser"),
+        Tool::Stamp => ("Stempel", "Stamp"),
+        Tool::MeasureDistance => ("Entfernung", "Distance"),
+        Tool::MeasurePerimeter => ("Umfang", "Perimeter"),
+        Tool::MeasureArea => ("Fläche", "Area"),
+        Tool::Link => ("Verweis erstellen", "Create link"),
+        Tool::Redact => ("Zum Schwärzen markieren", "Mark for redaction"),
+        Tool::Signature => ("Freies Zeichen", "Draw signature"),
+        Tool::SelectFields => ("Felder auswählen", "Select fields"),
+        Tool::FieldText => ("Text", "Text"),
+        Tool::FieldButton => ("Schaltfläche", "Button"),
+        Tool::FieldCheckBox => ("Auswahlfeld (Häkchen)", "Check box"),
+        Tool::FieldRadio => ("Auswahlfeld (Knopf)", "Radio button"),
+        Tool::FieldList => ("Liste", "List box"),
+        Tool::FieldCombo => ("Menü", "Combo box"),
+        Tool::FieldSignature => ("Signatur", "Signature field"),
+    }
+}
+
+impl MrPdfApp {
+    fn lang(&self) -> Language {
+        self.settings.language
+    }
+
+    /// Whether the command is implemented.
+    pub fn cmd_implemented(&self, cmd: Cmd) -> bool {
+        use Cmd::*;
+        !matches!(cmd, Unavailable(..)) && !super::features::PENDING.contains(&cmd)
+    }
+
+    /// Whether the command can be executed right now.
+    pub fn cmd_enabled(&self, cmd: Cmd) -> bool {
+        use Cmd::*;
+        if !self.cmd_implemented(cmd) {
+            return false;
+        }
+        let tab = self.active_tab();
+        let has_doc = tab.is_some();
+        match cmd {
+            New | Open | Exit | Settings | ToggleSidebar | ToggleProperties | Fullscreen | DarkMode
+            | FromFiles | MergeFiles | CompareDocuments | Manual | Support | ReportProblem
+            | CommandLineHelp | CheckUpdate | About | FileAssociation | Homepage => true,
+            Undo => tab.and_then(|t| t.doc.can_undo()).is_some(),
+            Redo => tab.and_then(|t| t.doc.can_redo()).is_some(),
+            ViewBack => tab.is_some_and(|t| t.can_go_back()),
+            ViewForward => tab.is_some_and(|t| t.can_go_forward()),
+            FirstPage | PrevPage => tab.is_some_and(|t| t.current_page > 0),
+            NextPage | LastPage => tab.is_some_and(|t| t.current_page + 1 < t.doc.page_count()),
+            CopyText => tab.is_some_and(|t| t.selection.is_some()),
+            DeleteComment => tab.is_some_and(|t| t.selected_annot.is_some()),
+            RemoveProtection => tab.is_some_and(|t| t.doc.is_encrypted() && t.doc.has_full_access()),
+            PasswordProtect => tab.is_some_and(|t| t.doc.has_full_access()),
+            MovePageUp => tab.is_some_and(|t| t.current_page > 0),
+            MovePageDown => tab.is_some_and(|t| t.current_page + 1 < t.doc.page_count()),
+            DeletePages | SwapPages => tab.is_some_and(|t| t.doc.page_count() > 1),
+            Email | OpenFolder => tab.is_some_and(|t| t.doc.path().is_some()),
+            BookmarkFromSelection => tab.is_some_and(|t| t.selection.is_some()),
+            _ => has_doc,
+        }
+    }
+
+    /// Whether the command is currently "on" (tools, toggles, modes).
+    pub fn cmd_selected(&self, cmd: Cmd) -> bool {
+        use Cmd::*;
+        let tab = self.active_tab();
+        match cmd {
+            Tool(t) => self.tool == t,
+            FitPage => tab.is_some_and(|t| t.zoom_mode == ZoomMode::FitPage),
+            FitWidth => tab.is_some_and(|t| t.zoom_mode == ZoomMode::FitWidth),
+            LayoutSingle => tab.is_some_and(|t| t.layout_mode == PageLayout::Single),
+            LayoutContinuous => tab.is_some_and(|t| t.layout_mode == PageLayout::Continuous),
+            LayoutFacing => tab.is_some_and(|t| t.layout_mode == PageLayout::Facing),
+            LayoutCover => tab.is_some_and(|t| t.layout_mode == PageLayout::Cover),
+            ToggleSidebar => self.settings.show_sidebar,
+            ToggleProperties => self.settings.show_properties,
+            DarkMode => self.settings.dark_mode,
+            HighlightFields => self.settings.highlight_fields,
+            ToggleAnnotations => tab.is_some_and(|t| t.show_annotations),
+            Panel(p) => self.settings.show_sidebar && self.side == p,
+            CommentList => self.settings.show_sidebar && self.side == SidePanel::Comments,
+            _ => false,
+        }
+    }
+
+    /// Tooltip: label plus the reason if the command is not offered.
+    pub fn cmd_tooltip(&self, cmd: Cmd) -> String {
+        let lang = self.lang();
+        match cmd {
+            Cmd::Unavailable(reason, ..) => format!("{}\n{}", cmd.label(lang), reason.reason(lang)),
+            _ if !self.cmd_implemented(cmd) => format!(
+                "{}\n{}",
+                cmd.label(lang),
+                if lang == Language::German { "In Vorbereitung." } else { "In preparation." }
+            ),
+            _ => cmd.label(lang).to_string(),
+        }
+    }
+
+    /// Executes a command.
+    pub fn run(&mut self, ctx: &Context, cmd: Cmd) {
+        use Cmd::*;
+        if !self.cmd_enabled(cmd) {
+            return;
+        }
+        match cmd {
+            New => self.new_document(ctx),
+            Open => self.open_dialog(),
+            Save => {
+                self.save(ctx, None);
+            }
+            SaveAs => {
+                self.save_as(ctx, None);
+            }
+            Print => self.open_print_dialog(ctx),
+            Close => self.request_close_tab(ctx, self.active),
+            Exit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+            DocProperties => self.open_properties(),
+            Settings => self.dialog = Some(Dialog::Settings { author: self.settings.author.clone() }),
+            Undo => self.undo(ctx),
+            Redo => self.redo(ctx),
+            ViewBack => {
+                if let Some(tab) = self.tab() {
+                    tab.go_back();
+                }
+            }
+            ViewForward => {
+                if let Some(tab) = self.tab() {
+                    tab.go_forward();
+                }
+            }
+            Tool(t) => self.select_tool(t),
+            CopyText => self.copy_selection(ctx),
+            SelectAll => self.select_all_text(),
+            Search | Panel(SidePanel::Search) => {
+                self.settings.show_sidebar = true;
+                self.side = SidePanel::Search;
+                self.focus_search = true;
+            }
+            Panel(p) => {
+                if self.settings.show_sidebar && self.side == p {
+                    self.settings.show_sidebar = false;
+                } else {
+                    self.settings.show_sidebar = true;
+                    self.side = p;
+                }
+            }
+            InsertImage => self.insert_image(ctx),
+            FirstPage => self.navigate(|_, _| 0),
+            PrevPage => self.navigate(|cur, _| cur.saturating_sub(1)),
+            NextPage => self.navigate(|cur, n| (cur + 1).min(n.saturating_sub(1))),
+            LastPage => self.navigate(|_, n| n.saturating_sub(1)),
+            ActualSize => self.set_zoom(1.0),
+            FitPage => self.set_zoom_mode(ZoomMode::FitPage),
+            FitWidth => self.set_zoom_mode(ZoomMode::FitWidth),
+            ZoomIn => self.zoom_step(true),
+            ZoomOut => self.zoom_step(false),
+            RotateViewLeft => self.rotate_view(-90),
+            RotateViewRight => self.rotate_view(90),
+            LayoutSingle => self.set_layout(PageLayout::Single),
+            LayoutContinuous => self.set_layout(PageLayout::Continuous),
+            LayoutFacing => self.set_layout(PageLayout::Facing),
+            LayoutCover => self.set_layout(PageLayout::Cover),
+            ToggleSidebar => self.settings.show_sidebar = !self.settings.show_sidebar,
+            ToggleProperties => self.settings.show_properties = !self.settings.show_properties,
+            Fullscreen => {
+                let full = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!full));
+            }
+            DarkMode => self.settings.dark_mode = !self.settings.dark_mode,
+            CommentList => self.run(ctx, Panel(SidePanel::Comments)),
+            ToggleAnnotations => {
+                if let Some(tab) = self.tab() {
+                    tab.show_annotations = !tab.show_annotations;
+                    tab.textures.clear();
+                }
+            }
+            PrevComment => self.step_comment(false),
+            NextComment => self.step_comment(true),
+            Flatten => {
+                if let Some(tab) = self.active_tab() {
+                    self.dialog = Some(Dialog::PageRange {
+                        purpose: RangePurpose::Flatten,
+                        text: format!("1-{}", tab.doc.page_count()),
+                        error: false,
+                    });
+                }
+            }
+            DeleteComment => self.delete_selected_annotation(ctx),
+            PasswordProtect => {
+                self.dialog = Some(Dialog::Protect {
+                    opts: crate::security::ProtectOptions::default(),
+                    repeat: String::new(),
+                    error: None,
+                })
+            }
+            RemoveProtection => {
+                self.edit(ctx, |tab| tab.doc.unprotect());
+                let t = self.t();
+                self.set_status(ctx, t.protection_removed);
+            }
+            HighlightFields => self.settings.highlight_fields = !self.settings.highlight_fields,
+            InsertBlank => {
+                self.dialog = Some(Dialog::InsertBlank {
+                    count: 1,
+                    paper: PaperChoice::SameAsCurrent,
+                    landscape: false,
+                    position: InsertPosition::After,
+                })
+            }
+            InsertFromFile => self.insert_from_file(ctx, InsertPosition::After),
+            AppendFile => self.insert_from_file(ctx, InsertPosition::End),
+            DeletePages => self.range_dialog(RangePurpose::Delete, true),
+            ExtractPages => self.range_dialog(RangePurpose::Extract, true),
+            RotatePages => self.range_dialog(RangePurpose::Rotate(90), false),
+            MovePageUp => self.move_current_page(ctx, true),
+            MovePageDown => self.move_current_page(ctx, false),
+            RotateLeft => self.rotate_current(ctx, -90),
+            RotateRight => self.rotate_current(ctx, 90),
+            ExportImages => {
+                if let Some(tab) = self.active_tab() {
+                    self.dialog = Some(Dialog::ExportImage {
+                        range: (tab.current_page + 1).to_string(),
+                        dpi: 150,
+                        jpeg: false,
+                        error: false,
+                    });
+                }
+            }
+            BookmarkAdd => {
+                if let Some(tab) = self.active_tab() {
+                    let page = tab.current_page;
+                    let t = self.t();
+                    self.dialog = Some(Dialog::BookmarkTitle {
+                        parent: Some(Vec::new()),
+                        path: None,
+                        page,
+                        title: format!("{} {}", t.page, page + 1),
+                    });
+                }
+            }
+            About => self.dialog = Some(Dialog::About),
+            Homepage | Support => ctx.open_url(egui::OpenUrl::new_tab(HOMEPAGE)),
+            ReportProblem => ctx.open_url(egui::OpenUrl::new_tab(format!("{HOMEPAGE}/issues"))),
+            CheckUpdate => ctx.open_url(egui::OpenUrl::new_tab(format!("{HOMEPAGE}/releases"))),
+            other => self.run_feature(ctx, other),
+        }
+    }
+
+    fn navigate(&mut self, target: impl FnOnce(usize, usize) -> usize) {
+        if let Some(tab) = self.tab() {
+            let page = target(tab.current_page, tab.doc.page_count());
+            tab.jump_to_page(page);
+        }
+    }
+
+    fn range_dialog(&mut self, purpose: RangePurpose, current_only: bool) {
+        if let Some(tab) = self.active_tab() {
+            let text = if current_only {
+                (tab.current_page + 1).to_string()
+            } else {
+                format!("1-{}", tab.doc.page_count())
+            };
+            self.dialog = Some(Dialog::PageRange { purpose, text, error: false });
+        }
+    }
+
+    fn rotate_view(&mut self, delta: i32) {
+        if let Some(tab) = self.tab() {
+            tab.view_rotation = tab.view_rotation.rotated_by(delta);
+            tab.textures.clear();
+        }
+    }
+
+    /// Selects the previous/next comment in document order.
+    fn step_comment(&mut self, forward: bool) {
+        let Some(tab) = self.tab() else { return };
+        let comments = tab.all_comments();
+        if comments.is_empty() {
+            return;
+        }
+        let pos = tab
+            .selected_annot
+            .and_then(|s| comments.iter().position(|c| c.page == s.page && c.index == s.index));
+        let next = match (pos, forward) {
+            (None, true) => 0,
+            (None, false) => comments.len() - 1,
+            (Some(i), true) => (i + 1) % comments.len(),
+            (Some(i), false) => (i + comments.len() - 1) % comments.len(),
+        };
+        let c = &comments[next];
+        tab.selected_annot = Some(crate::ui::tab::AnnotRef { page: c.page, index: c.index });
+        if let Some(geo) = tab.display_geometry(c.page) {
+            let v = geo.pdf_rect_to_view(&c.rect).center();
+            tab.current_page = c.page;
+            tab.pending_scroll = Some(crate::ui::tab::ScrollRequest::Point(c.page, v));
+        }
+    }
+}

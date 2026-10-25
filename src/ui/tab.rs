@@ -7,7 +7,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use egui::{Pos2, Rect, Vec2};
 
 use crate::document::Document;
-use crate::geometry::{PointF, RectF};
+use crate::document::RenderOptions;
+use crate::geometry::{PageGeometry, PointF, RectF, Rotation};
 use crate::model::{AnnotationInfo, Bookmark, FormFieldInfo, LinkInfo, SearchHit, SearchOptions};
 use crate::pdf_edit::AnnotDetails;
 use crate::search;
@@ -31,10 +32,31 @@ pub struct TextSelection {
 pub enum Interaction {
     None,
     Pan,
-    SelectText { page: usize, anchor: usize },
-    Markup { page: usize, anchor: Option<usize>, start: PointF, current: PointF },
-    Shape { page: usize, start: PointF, current: PointF, points: Vec<PointF> },
-    MoveAnnot { annot: AnnotRef, delta: Vec2 },
+    SelectText {
+        page: usize,
+        anchor: usize,
+    },
+    Markup {
+        page: usize,
+        anchor: Option<usize>,
+        start: PointF,
+        current: PointF,
+    },
+    Shape {
+        page: usize,
+        start: PointF,
+        current: PointF,
+        points: Vec<PointF>,
+    },
+    MoveAnnot {
+        annot: AnnotRef,
+        delta: Vec2,
+    },
+    /// Eraser: annotations touched so far.
+    Erase {
+        page: usize,
+        hits: Vec<usize>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -93,6 +115,8 @@ pub struct DocTab {
     pub pending_scroll: Option<ScrollRequest>,
     /// Content-space offset applied to centre narrow layouts.
     pub content_shift: Vec2,
+    /// Screen position of the content origin in the last frame.
+    pub canvas_origin: Pos2,
     pub textures: TextureCache,
     texts: HashMap<usize, Cached<PageText>>,
     annots: HashMap<usize, Cached<Vec<AnnotationInfo>>>,
@@ -108,6 +132,16 @@ pub struct DocTab {
     pub last_pointer: Option<Pos2>,
     /// Time of the last page flip by mouse wheel (single page layout).
     pub last_flip: f64,
+    /// Pages visited before/after jumps ("Letzte/Nächste Ansicht").
+    back: Vec<usize>,
+    forward: Vec<usize>,
+    /// Additional rotation of the view (does not change the document).
+    pub view_rotation: Rotation,
+    /// Whether annotations are drawn.
+    pub show_annotations: bool,
+    /// Vertices of a polygon tool in progress (view space of polygon_page).
+    pub polygon: Vec<PointF>,
+    pub polygon_page: usize,
 }
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
@@ -126,6 +160,7 @@ impl DocTab {
             scroll_offset: Vec2::ZERO,
             pending_scroll: None,
             content_shift: Vec2::ZERO,
+            canvas_origin: Pos2::ZERO,
             textures: TextureCache::default(),
             texts: HashMap::new(),
             annots: HashMap::new(),
@@ -140,6 +175,12 @@ impl DocTab {
             field_edit: None,
             last_pointer: None,
             last_flip: 0.0,
+            back: Vec::new(),
+            forward: Vec::new(),
+            view_rotation: Rotation::R0,
+            show_annotations: true,
+            polygon: Vec::new(),
+            polygon_page: 0,
         }
     }
 
@@ -154,8 +195,60 @@ impl DocTab {
 
     pub fn page_sizes(&self) -> Vec<(f32, f32)> {
         (0..self.doc.page_count())
-            .map(|i| self.doc.geometry(i).map_or((595.0, 842.0), |g| g.view_size()))
+            .map(|i| self.display_geometry(i).map_or((595.0, 842.0), |g| g.view_size()))
             .collect()
+    }
+
+    /// Screen position of a PDF point as of the last frame (used by tests and pop-ups).
+    pub fn screen_pos(&self, page: usize, pdf: PointF) -> Option<Pos2> {
+        let slot = self.layout.slot(page)?;
+        let v = self.display_geometry(page)?.pdf_to_view(pdf);
+        Some(self.canvas_origin + slot.rect.min.to_vec2() + Vec2::new(v.x, v.y) * self.scale())
+    }
+
+    /// Page geometry as displayed (page rotation plus view rotation).
+    pub fn display_geometry(&self, page: usize) -> Option<PageGeometry> {
+        self.doc
+            .geometry(page)
+            .map(|g| PageGeometry::new(g.crop, g.rotation.rotated_by(self.view_rotation.degrees())))
+    }
+
+    pub fn render_options(&self) -> RenderOptions {
+        RenderOptions { rotation: self.view_rotation, annotations: self.show_annotations }
+    }
+
+    /// Navigates to page and remembers the current page for "previous view".
+    pub fn jump_to_page(&mut self, page: usize) {
+        if page != self.current_page {
+            self.back.push(self.current_page);
+            if self.back.len() > 100 {
+                self.back.remove(0);
+            }
+            self.forward.clear();
+        }
+        self.go_to_page(page);
+    }
+
+    pub fn can_go_back(&self) -> bool {
+        !self.back.is_empty()
+    }
+
+    pub fn can_go_forward(&self) -> bool {
+        !self.forward.is_empty()
+    }
+
+    pub fn go_back(&mut self) {
+        if let Some(page) = self.back.pop() {
+            self.forward.push(self.current_page);
+            self.go_to_page(page);
+        }
+    }
+
+    pub fn go_forward(&mut self) {
+        if let Some(page) = self.forward.pop() {
+            self.back.push(self.current_page);
+            self.go_to_page(page);
+        }
     }
 
     pub fn go_to_page(&mut self, page: usize) {
@@ -311,7 +404,7 @@ impl DocTab {
     pub fn reveal_hit(&mut self, index: usize) {
         if let Some(hit) = self.search.hits.get(index) {
             let page = hit.page;
-            if let (Some(geo), Some(r)) = (self.doc.geometry(page).copied(), hit.rects.first()) {
+            if let (Some(geo), Some(r)) = (self.display_geometry(page), hit.rects.first()) {
                 let v = geo.pdf_rect_to_view(r).center();
                 self.current_page = page;
                 self.pending_scroll = Some(ScrollRequest::Point(page, v));

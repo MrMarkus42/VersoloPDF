@@ -120,7 +120,10 @@ impl MrPdfApp {
                     }
                     painter.rect_filled(thumb, 0.0, Color32::WHITE);
                     let px = [((THUMB_WIDTH * ppp) as u32).max(1), ((thumb_h * ppp) as u32).max(1)];
-                    if let Some(img) = tab.textures.thumbnail(&ctx, &tab.doc, page, px, &mut budget, tab.id) {
+                    let opts = tab.render_options();
+                    if let Some(img) =
+                        tab.textures.thumbnail(&ctx, &tab.doc, page, px, &mut budget, tab.id, opts)
+                    {
                         painter.image(
                             img.tex.id(),
                             thumb,
@@ -183,7 +186,7 @@ impl MrPdfApp {
             ctx.request_repaint();
         }
         if let Some(page) = go_to {
-            tab.go_to_page(page);
+            tab.jump_to_page(page);
         }
         if let Some((from, to)) = move_req
             && from != to
@@ -291,7 +294,7 @@ impl MrPdfApp {
             tree(ui, t, &bookmarks, &mut Vec::new(), &mut action);
         });
         match action {
-            Some(Action::Go(page)) => tab.go_to_page(page),
+            Some(Action::Go(page)) => tab.jump_to_page(page),
             Some(Action::AddChild(parent)) => {
                 self.dialog = Some(super::Dialog::BookmarkTitle {
                     parent: Some(parent),
@@ -521,24 +524,8 @@ impl MrPdfApp {
     }
 }
 
-pub fn kind_name_for_tool(t: &Strings, tool: crate::ui::tools::Tool) -> &'static str {
-    use crate::ui::tools::Tool;
-    match tool {
-        Tool::Hand => t.tool_hand,
-        Tool::SelectText => t.tool_select_text,
-        Tool::Highlight => t.tool_highlight,
-        Tool::Underline => t.tool_underline,
-        Tool::StrikeOut => t.tool_strikeout,
-        Tool::Squiggly => t.tool_squiggly,
-        Tool::Note => t.tool_note,
-        Tool::TextBox => t.tool_textbox,
-        Tool::Rectangle => t.tool_rectangle,
-        Tool::Ellipse => t.tool_ellipse,
-        Tool::Line => t.tool_line,
-        Tool::Arrow => t.tool_arrow,
-        Tool::Pencil => t.tool_pencil,
-        Tool::Stamp => t.tool_stamp,
-    }
+pub fn kind_name_for_tool(lang: crate::ui::i18n::Language, tool: crate::ui::tools::Tool) -> &'static str {
+    super::commands::Cmd::Tool(tool).label(lang)
 }
 
 pub fn kind_name(t: &Strings, kind: AnnotKind) -> &'static str {

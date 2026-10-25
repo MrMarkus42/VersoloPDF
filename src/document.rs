@@ -36,6 +36,21 @@ const MAX_UNDO_BYTES: usize = 512 * 1024 * 1024;
 const MAX_BOOKMARKS: usize = 20_000;
 const MAX_BOOKMARK_DEPTH: usize = 32;
 
+/// Display options for rendering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RenderOptions {
+    /// Additional clockwise rotation (view rotation).
+    pub rotation: Rotation,
+    /// Draw annotations and form fields.
+    pub annotations: bool,
+}
+
+impl Default for RenderOptions {
+    fn default() -> Self {
+        Self { rotation: Rotation::R0, annotations: true }
+    }
+}
+
 /// A rendered page (or part of a page) as straight RGBA pixels.
 #[derive(Debug, Clone)]
 pub struct RenderedImage {
@@ -324,7 +339,7 @@ impl Document {
 
     /// Renders a whole page into a bitmap of the given size.
     pub fn render_page(&self, index: usize, width: u32, height: u32) -> Result<RenderedImage> {
-        self.render_tile(index, width, height, 0, 0, width, height)
+        self.render_tile(index, width, height, 0, 0, width, height, RenderOptions::default())
     }
 
     /// Renders the part `(x, y, w, h)` of the page scaled to `full_w × full_h`.
@@ -338,6 +353,7 @@ impl Document {
         y: u32,
         w: u32,
         h: u32,
+        opts: RenderOptions,
     ) -> Result<RenderedImage> {
         let limit = MAX_BITMAP_EDGE * 8;
         if w == 0 || h == 0 || w > MAX_BITMAP_EDGE || h > MAX_BITMAP_EDGE || full_w > limit || full_h > limit
@@ -350,8 +366,9 @@ impl Document {
         let config = PdfRenderConfig::new()
             .set_fixed_size(to_px(full_w)?, to_px(full_h)?)
             .set_origin(-to_px(x)?, -to_px(y)?)
-            .render_form_data(true)
-            .render_annotations(true)
+            .render_form_data(opts.annotations)
+            .render_annotations(opts.annotations)
+            .rotate(to_pdf_rotation(opts.rotation), false)
             .set_clear_color(PdfColor::WHITE);
         page.render_into_bitmap_with_config(&mut bitmap, &config)?;
         Ok(RenderedImage { width: w, height: h, rgba: bitmap.as_rgba_bytes() })
@@ -718,6 +735,67 @@ impl Document {
         self.check_page(page)?;
         self.require(self.permissions().annotate)?;
         self.edit_bytes("edit annotation", |b, pw| pdf_edit::update_annotation(b, pw, page, index, update))
+    }
+
+    pub fn delete_annotations(&mut self, page: usize, indices: &[usize]) -> Result<()> {
+        self.check_page(page)?;
+        self.require(self.permissions().annotate)?;
+        self.edit_bytes("delete annotations", |b, pw| pdf_edit::delete_annotations(b, pw, page, indices))
+    }
+
+    pub fn add_links(&mut self, page: usize, links: &[(RectF, pdf_edit::LinkSpec)]) -> Result<()> {
+        self.check_page(page)?;
+        self.require(self.permissions().modify)?;
+        if links.is_empty() {
+            return Ok(());
+        }
+        self.edit_bytes("add links", |b, pw| pdf_edit::add_links(b, pw, page, links))
+    }
+
+    /// Creates links for all web addresses found in the page texts.
+    /// Returns the number of new links.
+    pub fn create_web_links(&mut self) -> Result<usize> {
+        self.require(self.permissions().modify)?;
+        let mut per_page = Vec::new();
+        for page in 0..self.page_count() {
+            let existing = self.links(page)?;
+            let text = self.page_text(page)?;
+            let links: Vec<(RectF, pdf_edit::LinkSpec)> = text
+                .find_urls()
+                .into_iter()
+                .flat_map(|(range, url)| {
+                    text.line_rects(range).into_iter().map(move |r| (r, pdf_edit::LinkSpec::Uri(url.clone())))
+                })
+                .filter(|(r, _)| !existing.iter().any(|l| l.rect.intersects(r)))
+                .collect();
+            if !links.is_empty() {
+                per_page.push((page, links));
+            }
+        }
+        let count = per_page.iter().map(|(_, l)| l.len()).sum();
+        if count == 0 {
+            return Ok(0);
+        }
+        self.edit_bytes("create web links", |b, pw| {
+            let mut bytes = b.to_vec();
+            for (page, links) in &per_page {
+                bytes = pdf_edit::add_links(&bytes, pw, *page, links)?;
+            }
+            Ok(bytes)
+        })?;
+        Ok(count)
+    }
+
+    /// Removes all web links; returns how many were removed.
+    pub fn remove_web_links(&mut self) -> Result<usize> {
+        self.require(self.permissions().modify)?;
+        let mut removed = 0;
+        self.edit_bytes("remove web links", |b, pw| {
+            let (bytes, n) = pdf_edit::remove_web_links(b, pw)?;
+            removed = n;
+            Ok(bytes)
+        })?;
+        Ok(removed)
     }
 
     pub fn delete_annotation(&mut self, page: usize, index: usize) -> Result<()> {

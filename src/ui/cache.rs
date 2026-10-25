@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use egui::{ColorImage, Context, TextureHandle, TextureOptions};
 
-use crate::document::{Document, RenderedImage};
+use crate::document::{Document, RenderOptions, RenderedImage};
 
 /// Limits how much rendering happens in one frame to keep the UI responsive.
 pub struct Budget {
@@ -84,10 +84,11 @@ impl TextureCache {
         px: [u32; 2],
         budget: &mut Budget,
         id: u64,
+        opts: RenderOptions,
     ) -> Option<&CachedImage> {
         let fresh = self.pages.get(&page).is_some_and(|c| c.revision == doc.revision() && c.px == px);
         if !fresh && budget.allow() {
-            match doc.render_page(page, px[0], px[1]) {
+            match doc.render_tile(page, px[0], px[1], 0, 0, px[0], px[1], opts) {
                 Ok(img) => {
                     let tex = upload(ctx, format!("doc{id}-p{page}"), &img);
                     self.pages.insert(
@@ -116,6 +117,7 @@ impl TextureCache {
         want: [u32; 4],
         budget: &mut Budget,
         id: u64,
+        opts: RenderOptions,
     ) -> Option<&Tile> {
         let covers = |t: &Tile| {
             t.revision == doc.revision()
@@ -133,7 +135,7 @@ impl TextureCache {
             let y = want[1].saturating_sub(margin);
             let w = (want[2] + 2 * margin).min(full_px[0] - x);
             let h = (want[3] + 2 * margin).min(full_px[1] - y);
-            match doc.render_tile(page, full_px[0], full_px[1], x, y, w, h) {
+            match doc.render_tile(page, full_px[0], full_px[1], x, y, w, h, opts) {
                 Ok(img) => {
                     let tex = upload(ctx, format!("doc{id}-t{page}"), &img);
                     self.tiles.insert(
@@ -157,6 +159,7 @@ impl TextureCache {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn thumbnail(
         &mut self,
         ctx: &Context,
@@ -165,10 +168,11 @@ impl TextureCache {
         px: [u32; 2],
         budget: &mut Budget,
         id: u64,
+        opts: RenderOptions,
     ) -> Option<&CachedImage> {
         let fresh = self.thumbs.get(&page).is_some_and(|c| c.revision == doc.revision() && c.px == px);
         if !fresh && budget.allow() {
-            match doc.render_page(page, px[0], px[1]) {
+            match doc.render_tile(page, px[0], px[1], 0, 0, px[0], px[1], opts) {
                 Ok(img) => {
                     let tex = upload(ctx, format!("doc{id}-th{page}"), &img);
                     self.thumbs.insert(

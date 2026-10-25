@@ -561,21 +561,23 @@ impl MrPdfApp {
                     tab.selected_annot = Some(crate::ui::tab::AnnotRef { page, index });
                     Ok(())
                 });
-                if self.tool != Tool::Pencil && !self.tool.is_markup() {
+                if !self.tool.is_sticky() && self.tool.gesture() != crate::ui::tools::Gesture::Vertices {
                     // Like most editors, return to the hand tool after placing a single object.
                     self.tool = Tool::Hand;
                 }
             }
-            CanvasEvent::RequestText { page, rect, kind } => {
-                self.dialog = Some(Dialog::TextInput { page, rect, kind, text: String::new(), edit: None });
-            }
             CanvasEvent::EditText(annot) => {
                 let info = self.tab().and_then(|t| t.annotations(annot.page).get(annot.index).cloned());
                 if let Some(info) = info {
+                    let tool = match info.kind {
+                        AnnotKind::Note => Tool::Note,
+                        AnnotKind::Caret => Tool::Caret,
+                        _ => Tool::TextBox,
+                    };
                     self.dialog = Some(Dialog::TextInput {
                         page: annot.page,
-                        rect: info.rect,
-                        kind: info.kind,
+                        tool,
+                        template: None,
                         text: info.contents,
                         edit: Some(annot),
                     });
@@ -620,41 +622,8 @@ impl MrPdfApp {
             CanvasEvent::DeleteSelected => self.delete_selected_annotation(ctx),
             CanvasEvent::ShowProperties => self.settings.show_properties = true,
             CanvasEvent::Status(text) => self.set_status(ctx, text),
+            other => self.handle_tool_event(ctx, other),
         }
-    }
-
-    /// Creates or edits a note / text box after the text dialog.
-    pub fn finish_text_input(
-        &mut self,
-        ctx: &Context,
-        page: usize,
-        rect: crate::geometry::RectF,
-        kind: AnnotKind,
-        text: String,
-        edit: Option<crate::ui::tab::AnnotRef>,
-    ) {
-        let tool = if kind == AnnotKind::Note { Tool::Note } else { Tool::TextBox };
-        let style = self.settings.style(tool);
-        self.edit(ctx, |tab| match edit {
-            Some(annot) => tab.doc.update_annotation(
-                annot.page,
-                annot.index,
-                &AnnotUpdate { contents: Some(text), ..AnnotUpdate::default() },
-            ),
-            None => {
-                if text.trim().is_empty() && kind == AnnotKind::FreeText {
-                    return Ok(());
-                }
-                let mut annot = NewAnnotation::new(kind, style);
-                annot.rect = rect;
-                annot.contents = text;
-                tab.doc.add_annotation(page, &annot)?;
-                let index = tab.doc.annotations(page)?.len().saturating_sub(1);
-                tab.selected_annot = Some(crate::ui::tab::AnnotRef { page, index });
-                Ok(())
-            }
-        });
-        self.tool = Tool::Hand;
     }
 
     /// Asks for an image file and places it as stamp on the current page.

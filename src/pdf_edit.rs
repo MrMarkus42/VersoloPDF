@@ -35,6 +35,14 @@ pub struct NewAnnotation {
     pub style: AnnotStyle,
     /// Standard stamp/icon name (`/Name`).
     pub icon: Option<String>,
+    /// Polygon with a cloudy border.
+    pub cloudy: bool,
+    /// Callout: leader line from the arrow tip (first point) to the text box.
+    pub leader: Vec<PointF>,
+    /// Measurement text shown next to lines and polygons.
+    pub measure_label: String,
+    /// Embedded file of a file attachment annotation (name, content).
+    pub attachment: Option<(String, Vec<u8>)>,
 }
 
 impl NewAnnotation {
@@ -49,6 +57,10 @@ impl NewAnnotation {
             label: String::new(),
             style,
             icon: None,
+            cloudy: false,
+            leader: Vec::new(),
+            measure_label: String::new(),
+            attachment: None,
         }
     }
 }
@@ -121,7 +133,7 @@ impl Edit {
         self.inc.get_prev_documents()
     }
 
-    fn page_ids(&self) -> Vec<ObjectId> {
+    pub(crate) fn page_ids(&self) -> Vec<ObjectId> {
         self.prev().get_pages().into_values().collect()
     }
 
@@ -173,7 +185,7 @@ impl Edit {
         }
     }
 
-    fn annots(&self, page_id: ObjectId) -> Result<Vec<Object>> {
+    pub(crate) fn annots(&self, page_id: ObjectId) -> Result<Vec<Object>> {
         let page = self.object(page_id)?.as_dict()?;
         match page.get(b"Annots") {
             Ok(obj) => Ok(self.resolve(obj)?.as_array()?.clone()),
@@ -443,6 +455,9 @@ fn can_regenerate(kind: AnnotKind) -> bool {
             | AnnotKind::FreeText
             | AnnotKind::Stamp
             | AnnotKind::Note
+            | AnnotKind::Caret
+            | AnnotKind::FileAttachment
+            | AnnotKind::Redact
     )
 }
 
@@ -474,6 +489,18 @@ fn ap_input_from_dict(dict: &Dictionary) -> Option<ApInput> {
     if kind == AnnotKind::FreeText {
         // MrPDF stores the text box background in /IC like other shapes.
         input.fill = read_color(dict, b"IC");
+        let leader = read_points(&numbers(dict.get(b"CL").ok()));
+        if leader.len() >= 2 {
+            let rd = numbers(dict.get(b"RD").ok());
+            if let [l, b, r, t] = rd.as_slice() {
+                input.inner = Some(RectF::new(rect.x0 + l, rect.y0 + b, rect.x1 - r, rect.y1 - t));
+            }
+            input.leader = leader;
+        }
+    }
+    input.cloudy = matches!(dict.get(b"BE"), Ok(Object::Dictionary(be)) if be.get(b"S").ok().and_then(|s| s.as_name().ok()) == Some(b"C".as_slice()));
+    if name(dict, b"IT").is_some_and(|it| it.ends_with("Dimension")) {
+        input.label = string(dict, b"Contents").unwrap_or_default();
     }
     Some(input)
 }
@@ -553,6 +580,12 @@ pub fn add_annotation(
         };
         if kind == AnnotKind::FreeText {
             input.text_color = style.color;
+        }
+        input.cloudy = annot.cloudy;
+        input.label = annot.measure_label.clone();
+        if annot.leader.len() >= 2 {
+            input.leader = annot.leader.clone();
+            input.inner = Some(annot.rect.normalized());
         }
         let rect = appearance::required_rect(&input);
         if rect.is_empty() && !matches!(kind, AnnotKind::Line | AnnotKind::Ink) {
@@ -651,7 +684,65 @@ pub fn add_annotation(
                 d.set("Name", Object::Name(b"Comment".to_vec()));
                 d.set("Open", Object::Boolean(false));
             }
+            AnnotKind::FileAttachment => {
+                let (file_name, data) = annot
+                    .attachment
+                    .clone()
+                    .ok_or_else(|| Error::Invalid("file attachment without file".into()))?;
+                let mut params = Dictionary::new();
+                params.set("Size", Object::Integer(data.len() as i64));
+                let mut ef_dict = Dictionary::new();
+                ef_dict.set("Type", Object::Name(b"EmbeddedFile".to_vec()));
+                ef_dict.set("Params", Object::Dictionary(params));
+                let mut stream = Stream::new(ef_dict, data);
+                stream.compress()?;
+                let stream_id = edit.add(stream);
+                let mut ef = Dictionary::new();
+                ef.set("F", Object::Reference(stream_id));
+                let mut fs = Dictionary::new();
+                fs.set("Type", Object::Name(b"Filespec".to_vec()));
+                fs.set("F", text_string(&file_name));
+                fs.set("UF", text_string(&file_name));
+                fs.set("EF", Object::Dictionary(ef));
+                d.set("FS", Object::Dictionary(fs));
+                d.set("Name", Object::Name(b"Paperclip".to_vec()));
+            }
+            AnnotKind::Redact => {
+                d.set("IC", color_array(style.fill.unwrap_or(Rgba::BLACK)));
+            }
             _ => {}
+        }
+        if annot.cloudy {
+            let mut be = Dictionary::new();
+            be.set("S", Object::Name(b"C".to_vec()));
+            be.set("I", Object::Integer(1));
+            d.set("BE", Object::Dictionary(be));
+        }
+        if kind == AnnotKind::FreeText && annot.leader.len() >= 2 {
+            let inner = annot.rect.normalized();
+            d.set("IT", Object::Name(b"FreeTextCallout".to_vec()));
+            d.set("CL", points_array(&annot.leader));
+            d.set("LE", Object::Name(b"OpenArrow".to_vec()));
+            d.set(
+                "RD",
+                Object::Array(vec![
+                    real(inner.x0 - rect.x0),
+                    real(inner.y0 - rect.y0),
+                    real(rect.x1 - inner.x1),
+                    real(rect.y1 - inner.y1),
+                ]),
+            );
+        }
+        if !annot.measure_label.is_empty() {
+            let intent: &[u8] = match kind {
+                AnnotKind::Line => b"LineDimension",
+                AnnotKind::Polygon => b"PolygonDimension",
+                _ => b"PolyLineDimension",
+            };
+            d.set("IT", Object::Name(intent.to_vec()));
+            if annot.contents.is_empty() {
+                d.set("Contents", text_string(&annot.measure_label));
+            }
         }
 
         let annot_id = edit.add(Object::Dictionary(d));
@@ -796,43 +887,171 @@ fn translate_annotation(d: &mut Dictionary, dx: f32, dy: f32) {
 
 /// Removes an annotation (and its pop-up) from a page.
 pub fn delete_annotation(bytes: &[u8], password: Option<&str>, page: usize, index: usize) -> Result<Vec<u8>> {
+    delete_annotations(bytes, password, page, &[index])
+}
+
+/// Removes several annotations together with their pop-ups and replies.
+/// Deleted form field widgets are also removed from the form's field list.
+pub fn delete_annotations(
+    bytes: &[u8],
+    password: Option<&str>,
+    page: usize,
+    indices: &[usize],
+) -> Result<Vec<u8>> {
     guarded(|| {
         let mut edit = Edit::open(bytes, password)?;
         let page_id = edit.page_id(page)?;
         let annots = edit.annots(page_id)?;
-        let entry = annots.get(index).cloned().ok_or(Error::AnnotationOutOfRange(index))?;
-        let target_id = entry.as_reference().ok();
-        let popup = edit
-            .resolve(&entry)?
-            .as_dict()
-            .ok()
-            .and_then(|d| d.get(b"Popup").ok())
-            .and_then(|p| p.as_reference().ok());
+        let mut targets: Vec<ObjectId> = Vec::new();
+        let mut popups: Vec<ObjectId> = Vec::new();
+        for &index in indices {
+            let entry = annots.get(index).ok_or(Error::AnnotationOutOfRange(index))?;
+            if let Ok(id) = entry.as_reference() {
+                targets.push(id);
+            }
+            if let Some(p) = edit
+                .resolve(entry)?
+                .as_dict()
+                .ok()
+                .and_then(|d| d.get(b"Popup").ok())
+                .and_then(|p| p.as_reference().ok())
+            {
+                popups.push(p);
+            }
+        }
         let mut kept = Vec::with_capacity(annots.len());
         for (i, obj) in annots.into_iter().enumerate() {
-            if i == index {
+            if indices.contains(&i) {
                 continue;
             }
             let id = obj.as_reference().ok();
-            if id.is_some() && id == popup {
+            if id.is_some_and(|id| popups.contains(&id)) {
                 continue;
             }
-            // Pop-ups and replies that belong to the removed annotation.
-            if let (Some(target), Ok(dict)) = (target_id, edit.resolve(&obj).and_then(|o| Ok(o.as_dict()?))) {
+            // Pop-ups and replies that belong to a removed annotation.
+            if let Ok(dict) = edit.resolve(&obj).and_then(|o| Ok(o.as_dict()?)) {
                 let refers = |key: &[u8]| {
-                    dict.get(key).ok().and_then(|p| p.as_reference().ok()).is_some_and(|p| p == target)
+                    dict.get(key)
+                        .ok()
+                        .and_then(|p| p.as_reference().ok())
+                        .is_some_and(|p| targets.contains(&p))
                 };
-                if refers(b"Parent") || refers(b"IRT") {
+                let is_popup = dict.get(b"Subtype").ok().and_then(|s| s.as_name().ok()) == Some(b"Popup");
+                if (refers(b"Parent") && is_popup) || refers(b"IRT") {
                     continue;
                 }
             }
             kept.push(obj);
         }
         *edit.annots_mut(page_id)? = kept;
+        remove_form_fields(&mut edit, &targets)?;
         edit.finish()
     })
 }
 
+/// Removes references to `ids` from the AcroForm field list.
+fn remove_form_fields(edit: &mut Edit, ids: &[ObjectId]) -> Result<()> {
+    let catalog_id = edit.prev().trailer.get(b"Root")?.as_reference()?;
+    let Some(form) = edit.object(catalog_id)?.as_dict()?.get(b"AcroForm").ok().cloned() else {
+        return Ok(());
+    };
+    let form_id = match form {
+        Object::Reference(id) => id,
+        Object::Dictionary(dict) => {
+            let id = edit.add(Object::Dictionary(dict));
+            edit.dict_mut(catalog_id)?.set("AcroForm", Object::Reference(id));
+            id
+        }
+        _ => return Ok(()),
+    };
+    let fields = edit.object(form_id)?.as_dict()?.get(b"Fields").ok().cloned();
+    let list = match &fields {
+        Some(obj) => edit.resolve(obj)?.as_array()?.clone(),
+        None => return Ok(()),
+    };
+    let filtered: Vec<Object> =
+        list.iter().filter(|f| !f.as_reference().is_ok_and(|id| ids.contains(&id))).cloned().collect();
+    if filtered.len() != list.len() {
+        edit.dict_mut(form_id)?.set("Fields", Object::Array(filtered));
+    }
+    Ok(())
+}
+
+/// Target of a new link annotation.
+#[derive(Debug, Clone, PartialEq)]
+pub enum LinkSpec {
+    Uri(String),
+    Page(usize),
+}
+
+/// Adds link annotations to a page.
+pub fn add_links(
+    bytes: &[u8],
+    password: Option<&str>,
+    page: usize,
+    links: &[(RectF, LinkSpec)],
+) -> Result<Vec<u8>> {
+    guarded(|| {
+        let mut edit = Edit::open(bytes, password)?;
+        let page_id = edit.page_id(page)?;
+        for (rect, spec) in links {
+            let mut d = Dictionary::new();
+            d.set("Type", Object::Name(b"Annot".to_vec()));
+            d.set("Subtype", Object::Name(b"Link".to_vec()));
+            d.set("Rect", rect_array(rect));
+            d.set("P", Object::Reference(page_id));
+            d.set("Border", Object::Array(vec![0.into(), 0.into(), 0.into()]));
+            d.set("NM", text_string(&unique_name()));
+            match spec {
+                LinkSpec::Uri(uri) => {
+                    let mut action = Dictionary::new();
+                    action.set("S", Object::Name(b"URI".to_vec()));
+                    action.set("URI", Object::string_literal(uri.as_bytes().to_vec()));
+                    d.set("A", Object::Dictionary(action));
+                }
+                LinkSpec::Page(target) => {
+                    let target_id = edit.page_id(*target)?;
+                    d.set(
+                        "Dest",
+                        Object::Array(vec![Object::Reference(target_id), Object::Name(b"Fit".to_vec())]),
+                    );
+                }
+            }
+            let id = edit.add(Object::Dictionary(d));
+            edit.annots_mut(page_id)?.push(Object::Reference(id));
+        }
+        edit.finish()
+    })
+}
+
+/// Removes all links that open web addresses (URI actions). Returns the
+/// new bytes and the number of removed links.
+pub fn remove_web_links(bytes: &[u8], password: Option<&str>) -> Result<(Vec<u8>, usize)> {
+    guarded(|| {
+        let mut edit = Edit::open(bytes, password)?;
+        let mut removed = 0;
+        for page_id in edit.page_ids() {
+            let annots = edit.annots(page_id)?;
+            let mut kept = Vec::with_capacity(annots.len());
+            for obj in &annots {
+                let is_web_link = edit.resolve(obj).ok().and_then(|o| o.as_dict().ok()).is_some_and(|d| {
+                    name(d, b"Subtype").as_deref() == Some("Link")
+                        && matches!(d.get(b"A").ok().and_then(|a| edit.resolve(a).ok()).and_then(|a| a.as_dict().ok()),
+                            Some(a) if name(a, b"S").as_deref() == Some("URI"))
+                });
+                if is_web_link {
+                    removed += 1;
+                } else {
+                    kept.push(obj.clone());
+                }
+            }
+            if kept.len() != annots.len() {
+                *edit.annots_mut(page_id)? = kept;
+            }
+        }
+        Ok((edit.finish()?, removed))
+    })
+}
 const INHERITABLE: [&[u8]; 4] = [b"Resources", b"MediaBox", b"CropBox", b"Rotate"];
 
 /// Puts the pages into a new order. `order[i]` is the old index of the page

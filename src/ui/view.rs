@@ -27,6 +27,8 @@ pub enum PageLayout {
     Single,
     Continuous,
     Facing,
+    /// Two pages side by side with the first page alone (books).
+    Cover,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -71,11 +73,13 @@ impl Layout {
                 }
                 y += MARGIN - PAGE_GAP;
             }
-            PageLayout::Facing => {
+            PageLayout::Facing | PageLayout::Cover => {
                 let mut i = 0;
                 while i < sizes.len() {
                     let a = size_of(i);
-                    let b = (i + 1 < sizes.len()).then(|| size_of(i + 1));
+                    // With a separate cover the first page stands alone.
+                    let alone = mode == PageLayout::Cover && i == 0;
+                    let b = (!alone && i + 1 < sizes.len()).then(|| size_of(i + 1));
                     let row_h = a.y.max(b.map_or(0.0, |b| b.y));
                     slots.push(Slot { page: i, rect: Rect::from_min_size(pos2(0.0, y), a) });
                     let mut row_w = a.x;
@@ -88,7 +92,7 @@ impl Layout {
                     }
                     width = width.max(row_w);
                     y += row_h + PAGE_GAP;
-                    i += 2;
+                    i += if alone { 1 } else { 2 };
                 }
                 y += MARGIN - PAGE_GAP;
             }
@@ -170,6 +174,13 @@ mod tests {
         assert!(l.slots[1].rect.min.y > l.slots[0].rect.max.y);
         assert_eq!(l.slots[0].rect.center().x, l.size.x / 2.0);
         assert_eq!(l.page_at(l.slots[1].rect.center().y), Some(1));
+    }
+
+    #[test]
+    fn cover_layout_keeps_first_page_alone() {
+        let l = Layout::compute(&[(100.0, 100.0); 3], 1.0, PageLayout::Cover, 0);
+        assert!(l.slots[1].rect.min.y > l.slots[0].rect.max.y);
+        assert_eq!(l.slots[1].rect.min.y, l.slots[2].rect.min.y);
     }
 
     #[test]

@@ -116,6 +116,48 @@ impl PageText {
         Some(TextRange::new(start, end))
     }
 
+    /// Finds web addresses (`http://`, `https://`, `www.`) in the text.
+    pub fn find_urls(&self) -> Vec<(TextRange, String)> {
+        let chars: Vec<char> = self.chars.iter().map(|c| c.ch).collect();
+        let mut out = Vec::new();
+        let mut i = 0;
+        let starts_with = |i: usize, s: &str| {
+            s.chars().enumerate().all(|(k, c)| chars.get(i + k).is_some_and(|x| x.to_ascii_lowercase() == c))
+        };
+        while i < chars.len() {
+            let boundary = i == 0 || !chars[i - 1].is_alphanumeric();
+            if boundary && (starts_with(i, "http://") || starts_with(i, "https://") || starts_with(i, "www."))
+            {
+                let mut end = i;
+                while end < chars.len() && !chars[end].is_whitespace() && !chars[end].is_control() {
+                    end += 1;
+                }
+                // Trailing punctuation does not belong to the address.
+                while end > i
+                    && matches!(
+                        chars[end - 1],
+                        '.' | ',' | ';' | ':' | ')' | ']' | '>' | '"' | '\'' | '!' | '?'
+                    )
+                {
+                    end -= 1;
+                }
+                let url: String = chars[i..end].iter().collect();
+                if url.len() > 7 {
+                    let url = if url.to_ascii_lowercase().starts_with("www.") {
+                        format!("https://{url}")
+                    } else {
+                        url
+                    };
+                    out.push((TextRange::new(i, end - 1), url));
+                }
+                i = end.max(i + 1);
+            } else {
+                i += 1;
+            }
+        }
+        out
+    }
+
     /// Merges the boxes of the characters in `range` into one rectangle per
     /// line (PDF space). Used for selection display and text markup.
     pub fn line_rects(&self, range: TextRange) -> Vec<RectF> {
@@ -180,6 +222,13 @@ mod tests {
         let t = sample();
         assert_eq!(t.all_text(), "Hello world\nSecond");
         assert_eq!(t.text_in(TextRange::new(6, 10)), "world");
+    }
+
+    #[test]
+    fn urls_are_found() {
+        let t = PageText { chars: line("Siehe https://example.org/a. und www.test.de, danke", 0.0, 0.0) };
+        let urls: Vec<String> = t.find_urls().into_iter().map(|(_, u)| u).collect();
+        assert_eq!(urls, vec!["https://example.org/a", "https://www.test.de"]);
     }
 
     #[test]

@@ -129,6 +129,14 @@ pub struct ApInput {
     pub text: String,
     pub font_size: f32,
     pub text_color: Rgba,
+    /// Polygon drawn with a cloudy border.
+    pub cloudy: bool,
+    /// Text box of a callout (the rest of `rect` holds the leader line).
+    pub inner: Option<RectF>,
+    /// Callout leader line from the arrow tip towards the box.
+    pub leader: Vec<PointF>,
+    /// Measurement label drawn next to lines and polygons.
+    pub label: String,
 }
 
 impl ApInput {
@@ -146,6 +154,10 @@ impl ApInput {
             text: String::new(),
             font_size: 12.0,
             text_color: Rgba::BLACK,
+            cloudy: false,
+            inner: None,
+            leader: Vec::new(),
+            label: String::new(),
         }
     }
 }
@@ -391,6 +403,19 @@ pub fn build(input: &ApInput) -> Appearance {
                 }
             }
         }
+        AnnotKind::Polygon if input.cloudy => {
+            b.stroke_color(input.color);
+            b.op(&format!("{} w 1 J 1 j", num(w.max(0.1))));
+            if let Some(path) = input.paths.first() {
+                cloud_path(&mut b, path, cloud_radius(w));
+                if let Some(fill) = input.fill {
+                    b.fill_color(fill);
+                    b.op("B");
+                } else {
+                    b.op("S");
+                }
+            }
+        }
         AnnotKind::Ink | AnnotKind::Polyline | AnnotKind::Polygon => {
             b.stroke_color(input.color);
             b.op(&format!("{} w 1 J 1 j", num(w.max(0.1))));
@@ -408,6 +433,19 @@ pub fn build(input: &ApInput) -> Appearance {
             }
         }
         AnnotKind::FreeText => {
+            if input.leader.len() >= 2 {
+                // Callout leader with an open arrow at the tip.
+                b.stroke_color(input.color);
+                b.op(&format!("{} w 1 J 1 j", num(w.max(0.5))));
+                b.polyline(&input.leader);
+                b.op("S");
+                let (a, c) = arrow_head(input.leader[1], input.leader[0], w.max(0.5));
+                b.move_to(a);
+                b.line_to(input.leader[0]);
+                b.line_to(c);
+                b.op("S");
+            }
+            let rect = input.inner.map(|r| r.normalized()).unwrap_or(rect);
             if let Some(fill) = input.fill {
                 b.fill_color(fill);
                 b.rect(&rect);
@@ -460,6 +498,53 @@ pub fn build(input: &ApInput) -> Appearance {
             b.fill_color(input.color);
             b.show_text(font, fitted, inner.center().x - tw / 2.0, inner.center().y - fitted * 0.35, &label);
         }
+        AnnotKind::Caret => {
+            let r = rect.inflate(-0.5);
+            b.fill_color(input.color);
+            b.move_to(PointF::new(r.x0, r.y0));
+            b.curve_to(
+                PointF::new(r.x0 + r.width() * 0.35, r.y0 + r.height() * 0.2),
+                PointF::new(r.center().x, r.y1 - r.height() * 0.3),
+                PointF::new(r.center().x, r.y1),
+            );
+            b.curve_to(
+                PointF::new(r.center().x, r.y1 - r.height() * 0.3),
+                PointF::new(r.x1 - r.width() * 0.35, r.y0 + r.height() * 0.2),
+                PointF::new(r.x1, r.y0),
+            );
+            b.op("h f");
+        }
+        AnnotKind::FileAttachment => {
+            // A paper clip filling the rectangle.
+            let r = rect.inflate(-1.0);
+            let (x0, x1, xm) = (r.x0 + r.width() * 0.3, r.x1 - r.width() * 0.3, r.center().x);
+            b.stroke_color(input.color);
+            b.op("1.6 w 1 J 1 j");
+            b.move_to(PointF::new(x1, r.y1 - r.height() * 0.25));
+            b.line_to(PointF::new(x1, r.y0 + r.height() * 0.2));
+            b.curve_to(
+                PointF::new(x1, r.y0),
+                PointF::new(x0, r.y0),
+                PointF::new(x0, r.y0 + r.height() * 0.2),
+            );
+            b.line_to(PointF::new(x0, r.y1 - r.height() * 0.1));
+            b.curve_to(
+                PointF::new(x0, r.y1 + 1.0),
+                PointF::new(xm, r.y1 + 1.0),
+                PointF::new(xm, r.y1 - r.height() * 0.1),
+            );
+            b.line_to(PointF::new(xm, r.y0 + r.height() * 0.3));
+            b.op("S");
+        }
+        AnnotKind::Redact => {
+            b.stroke_color(input.color);
+            b.fill_color(input.color);
+            b.op(&format!("{} w", num(w.max(0.5))));
+            for q in if input.quads.is_empty() { vec![rect] } else { input.quads.clone() } {
+                b.rect(&q.inflate(-w / 2.0));
+            }
+            b.op("S");
+        }
         AnnotKind::Note => {
             // A speech bubble icon filling the rectangle.
             let r = rect.inflate(-0.5);
@@ -487,7 +572,100 @@ pub fn build(input: &ApInput) -> Appearance {
         _ => {}
     }
 
+    if let Some((x, y, bg, text)) = label_layout(input) {
+        let font = StdFont::Helvetica;
+        if !res.fonts.contains(&font) {
+            res.fonts.push(font);
+        }
+        b.fill_color(Rgba::WHITE);
+        b.rect(&bg);
+        b.op("f");
+        b.fill_color(input.color);
+        b.show_text(font, input.font_size.max(4.0), x, y, &text);
+    }
+
     Appearance { bbox: rect, content: b.finish(), resources: res }
+}
+
+/// Radius of the scallops of a cloudy border.
+pub fn cloud_radius(width: f32) -> f32 {
+    4.0 + width * 1.5
+}
+
+/// Appends a closed path with outward bulging arcs along points.
+fn cloud_path(b: &mut Builder, points: &[PointF], radius: f32) {
+    const K: f32 = 0.552_284_8;
+    if points.len() < 2 {
+        return;
+    }
+    // Signed area tells the winding direction; arcs must bulge outwards.
+    let area: f32 =
+        points.iter().zip(points.iter().cycle().skip(1)).map(|(p, q)| p.x * q.y - q.x * p.y).sum();
+    let ccw = area > 0.0;
+    b.move_to(points[0]);
+    for (i, p) in points.iter().enumerate() {
+        let q = points[(i + 1) % points.len()];
+        let (dx, dy) = (q.x - p.x, q.y - p.y);
+        let len = (dx * dx + dy * dy).sqrt();
+        if len < 0.01 {
+            continue;
+        }
+        let n = (len / (2.0 * radius)).round().max(1.0) as usize;
+        let (ux, uy) = (dx / len, dy / len);
+        let (nx, ny) = if ccw { (uy, -ux) } else { (-uy, ux) };
+        for k in 0..n {
+            let a = PointF::new(p.x + dx * k as f32 / n as f32, p.y + dy * k as f32 / n as f32);
+            let c = PointF::new(p.x + dx * (k + 1) as f32 / n as f32, p.y + dy * (k + 1) as f32 / n as f32);
+            let r = len / n as f32 / 2.0;
+            let m = PointF::new((a.x + c.x) / 2.0, (a.y + c.y) / 2.0);
+            let top = PointF::new(m.x + nx * r, m.y + ny * r);
+            b.curve_to(
+                PointF::new(a.x + nx * K * r, a.y + ny * K * r),
+                PointF::new(top.x - ux * K * r, top.y - uy * K * r),
+                top,
+            );
+            b.curve_to(
+                PointF::new(top.x + ux * K * r, top.y + uy * K * r),
+                PointF::new(c.x + nx * K * r, c.y + ny * K * r),
+                c,
+            );
+        }
+    }
+    b.op("h");
+}
+
+/// Position (baseline), background box and encoded text of a measurement label.
+fn label_layout(input: &ApInput) -> Option<(f32, f32, RectF, Vec<u8>)> {
+    if input.label.is_empty()
+        || !matches!(input.kind, AnnotKind::Line | AnnotKind::Polyline | AnnotKind::Polygon)
+    {
+        return None;
+    }
+    let points = input.paths.first().filter(|p| !p.is_empty())?;
+    let anchor = match input.kind {
+        AnnotKind::Polygon => {
+            let n = points.len() as f32;
+            PointF::new(
+                points.iter().map(|p| p.x).sum::<f32>() / n,
+                points.iter().map(|p| p.y).sum::<f32>() / n,
+            )
+        }
+        _ => {
+            let (a, c) = if points.len() >= 2 {
+                (points[points.len() - 2], points[points.len() - 1])
+            } else {
+                (points[0], points[0])
+            };
+            PointF::new((a.x + c.x) / 2.0, (a.y + c.y) / 2.0)
+        }
+    };
+    let size = input.font_size.max(4.0);
+    let text = win_ansi(&input.label);
+    let tw = StdFont::Helvetica.text_width(&text, size);
+    let x = anchor.x - tw / 2.0;
+    let y = anchor.y + 2.0;
+    let bg = RectF::new(x - 2.0, y - size * 0.25, x + tw + 2.0, y + size * 0.85);
+    Some((x, y, bg, text))
 }
 
 fn rounded_rect(b: &mut Builder, r: &RectF, radius: f32) {
@@ -534,7 +712,7 @@ pub fn arrow_head(from: PointF, to: PointF, width: f32) -> (PointF, PointF) {
 /// The rectangle an annotation needs so that its whole appearance is visible.
 pub fn required_rect(input: &ApInput) -> RectF {
     let w = input.width.max(0.0);
-    match input.kind {
+    let base = match input.kind {
         AnnotKind::Line | AnnotKind::Ink | AnnotKind::Polyline | AnnotKind::Polygon => {
             let mut points: Vec<PointF> = input.paths.iter().flatten().copied().collect();
             if input.kind == AnnotKind::Line
@@ -546,15 +724,30 @@ pub fn required_rect(input: &ApInput) -> RectF {
                 points.push(a);
                 points.push(c);
             }
-            RectF::bounding(points).unwrap_or(input.rect).inflate(w / 2.0 + 1.0)
+            let grow = if input.cloudy { cloud_radius(w) + w } else { w / 2.0 + 1.0 };
+            RectF::bounding(points).unwrap_or(input.rect).inflate(grow)
         }
         AnnotKind::Highlight | AnnotKind::Underline | AnnotKind::StrikeOut | AnnotKind::Squiggly => {
             input.quads.iter().copied().reduce(|a, b| a.union(&b)).unwrap_or(input.rect)
         }
+        AnnotKind::FreeText if input.leader.len() >= 2 => {
+            let boxed = input.inner.unwrap_or(input.rect);
+            let tip = input.leader[0];
+            let (a, c) = arrow_head(input.leader[1], tip, w.max(0.5));
+            input
+                .leader
+                .iter()
+                .chain([a, c].iter())
+                .fold(boxed.normalized(), |r, p| r.union(&RectF::new(p.x, p.y, p.x, p.y)))
+                .inflate(w + 1.0)
+        }
         _ => input.rect.normalized(),
+    };
+    match label_layout(input) {
+        Some((_, _, bg, _)) => base.union(&bg),
+        None => base,
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;

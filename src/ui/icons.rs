@@ -69,6 +69,58 @@ pub enum Icon {
     Unlock,
     Attachment,
     Fullscreen,
+    Gear,
+    Mail,
+    Back,
+    Forward,
+    Link,
+    LinkOff,
+    CoverPages,
+    Eye,
+    Summary,
+    Export,
+    Import,
+    Redact,
+    Merge,
+    Split,
+    Swap,
+    Resize,
+    Crop,
+    Margins,
+    Watermark,
+    Background,
+    HeaderFooter,
+    Numbering,
+    TextFile,
+    WordFile,
+    Count,
+    Compare,
+    Accessibility,
+    Sort,
+    Help,
+    Bug,
+    Console,
+    Web,
+    Pointer,
+    Camera,
+    AreaHighlight,
+    Replace,
+    Caret,
+    Typewriter,
+    Callout,
+    Polyline,
+    Cloud,
+    Eraser,
+    MeasureDistance,
+    MeasurePerimeter,
+    MeasureArea,
+    Signature,
+    FieldText,
+    FieldButton,
+    CheckBox,
+    Radio,
+    ListBox,
+    ComboBox,
     Logo,
 }
 
@@ -541,6 +593,427 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
                     Stroke::new(w * 1.5, color),
                 ));
             }
+        }
+        Icon::Gear => {
+            for i in 0..8 {
+                let a = i as f32 * std::f32::consts::FRAC_PI_4;
+                let (s1, c1) = a.sin_cos();
+                p.line_segment(
+                    [u(0.5 + 0.22 * c1, 0.5 + 0.22 * s1), u(0.5 + 0.42 * c1, 0.5 + 0.42 * s1)],
+                    Stroke::new(w * 2.2, color),
+                );
+            }
+            p.circle(u(0.5, 0.5), s * 0.26, Color32::from_gray(200), st);
+            p.circle_filled(u(0.5, 0.5), s * 0.09, color);
+        }
+        Icon::Mail => {
+            p.rect(
+                Rect::from_min_max(u(0.08, 0.22), u(0.92, 0.78)),
+                1.0,
+                Color32::WHITE,
+                st,
+                egui::StrokeKind::Inside,
+            );
+            p.add(PathShape::line(vec![u(0.08, 0.22), u(0.5, 0.55), u(0.92, 0.22)], st));
+        }
+        Icon::Back | Icon::Forward => {
+            p.circle_stroke(u(0.5, 0.5), s * 0.4, Stroke::new(w, Color32::from_rgb(60, 160, 60)));
+            let (a, b) =
+                if icon == Icon::Back { (u(0.72, 0.5), u(0.28, 0.5)) } else { (u(0.28, 0.5), u(0.72, 0.5)) };
+            arrow(a, b, Stroke::new(w * 1.4, Color32::from_rgb(60, 160, 60)));
+        }
+        Icon::Link | Icon::LinkOff => {
+            p.add(egui::Shape::ellipse_stroke(
+                u(0.36, 0.6),
+                vec2(s * 0.22, s * 0.12),
+                Stroke::new(w * 1.5, accent),
+            ));
+            p.add(egui::Shape::ellipse_stroke(
+                u(0.64, 0.4),
+                vec2(s * 0.22, s * 0.12),
+                Stroke::new(w * 1.5, accent),
+            ));
+            if icon == Icon::LinkOff {
+                p.line_segment([u(0.15, 0.15), u(0.85, 0.85)], Stroke::new(w * 1.6, red));
+            }
+        }
+        Icon::CoverPages => {
+            p.rect(
+                Rect::from_min_max(u(0.3, 0.02), u(0.7, 0.4)),
+                1.0,
+                Color32::WHITE,
+                st,
+                egui::StrokeKind::Inside,
+            );
+            p.rect(
+                Rect::from_min_max(u(0.06, 0.55), u(0.47, 0.98)),
+                1.0,
+                Color32::WHITE,
+                st,
+                egui::StrokeKind::Inside,
+            );
+            p.rect(
+                Rect::from_min_max(u(0.53, 0.55), u(0.94, 0.98)),
+                1.0,
+                Color32::WHITE,
+                st,
+                egui::StrokeKind::Inside,
+            );
+        }
+        Icon::Eye => {
+            p.add(egui::Shape::ellipse_stroke(u(0.5, 0.5), vec2(s * 0.42, s * 0.24), st));
+            p.circle_filled(u(0.5, 0.5), s * 0.13, accent);
+        }
+        Icon::Summary | Icon::TextFile => {
+            page(0.18, 0.06, 0.82, 0.94);
+            for y in [0.38, 0.52, 0.66, 0.8] {
+                p.line_segment([u(0.3, y), u(0.7, y)], thin);
+            }
+            if icon == Icon::Summary {
+                p.circle_filled(u(0.3, 0.38), s * 0.03, accent);
+            }
+        }
+        Icon::WordFile => {
+            page(0.22, 0.06, 0.86, 0.94);
+            p.rect_filled(
+                Rect::from_min_max(u(0.06, 0.35), u(0.5, 0.75)),
+                2.0,
+                Color32::from_rgb(40, 90, 180),
+            );
+            text(0.28, 0.55, "W", 0.32, Color32::WHITE);
+        }
+        Icon::Export | Icon::Import => {
+            page(0.1, 0.06, 0.6, 0.9);
+            let (a, b) = if icon == Icon::Export {
+                (u(0.45, 0.6), u(0.95, 0.6))
+            } else {
+                (u(0.95, 0.6), u(0.45, 0.6))
+            };
+            arrow(a, b, Stroke::new(w * 1.6, accent));
+        }
+        Icon::Redact => {
+            page(0.15, 0.06, 0.85, 0.94);
+            p.rect_filled(Rect::from_min_max(u(0.26, 0.4), u(0.74, 0.52)), 0.0, Color32::BLACK);
+            p.line_segment([u(0.26, 0.65), u(0.74, 0.65)], thin);
+            p.line_segment([u(0.26, 0.78), u(0.6, 0.78)], thin);
+        }
+        Icon::Merge => {
+            page(0.05, 0.05, 0.45, 0.55);
+            page(0.55, 0.05, 0.95, 0.55);
+            arrow(u(0.25, 0.6), u(0.5, 0.9), Stroke::new(w * 1.3, accent));
+            arrow(u(0.75, 0.6), u(0.5, 0.9), Stroke::new(w * 1.3, accent));
+        }
+        Icon::Split => {
+            page(0.3, 0.05, 0.7, 0.45);
+            arrow(u(0.5, 0.5), u(0.2, 0.9), Stroke::new(w * 1.3, accent));
+            arrow(u(0.5, 0.5), u(0.8, 0.9), Stroke::new(w * 1.3, accent));
+        }
+        Icon::Swap => {
+            arrow(u(0.15, 0.35), u(0.85, 0.35), Stroke::new(w * 1.6, accent));
+            arrow(u(0.85, 0.65), u(0.15, 0.65), Stroke::new(w * 1.6, red));
+        }
+        Icon::Resize => {
+            p.rect_stroke(Rect::from_min_max(u(0.1, 0.1), u(0.9, 0.9)), 0.0, thin, egui::StrokeKind::Inside);
+            p.rect(
+                Rect::from_min_max(u(0.1, 0.45), u(0.55, 0.9)),
+                0.0,
+                Color32::WHITE,
+                st,
+                egui::StrokeKind::Inside,
+            );
+            arrow(u(0.45, 0.55), u(0.85, 0.15), Stroke::new(w * 1.3, accent));
+        }
+        Icon::Crop => {
+            p.add(PathShape::line(
+                vec![u(0.25, 0.05), u(0.25, 0.75), u(0.95, 0.75)],
+                Stroke::new(w * 1.6, color),
+            ));
+            p.add(PathShape::line(
+                vec![u(0.05, 0.25), u(0.75, 0.25), u(0.75, 0.95)],
+                Stroke::new(w * 1.6, accent),
+            ));
+        }
+        Icon::Margins => {
+            page(0.15, 0.05, 0.85, 0.95);
+            p.rect_stroke(
+                Rect::from_min_max(u(0.27, 0.2), u(0.73, 0.82)),
+                0.0,
+                Stroke::new(w * 0.8, accent),
+                egui::StrokeKind::Inside,
+            );
+        }
+        Icon::Watermark => {
+            page(0.15, 0.05, 0.85, 0.95);
+            p.text(
+                u(0.5, 0.55),
+                Align2::CENTER_CENTER,
+                "W",
+                FontId::proportional(s * 0.45),
+                Color32::from_rgba_unmultiplied(200, 60, 60, 120),
+            );
+        }
+        Icon::Background => {
+            p.rect_filled(
+                Rect::from_min_max(u(0.15, 0.05), u(0.85, 0.95)),
+                1.0,
+                Color32::from_rgb(200, 225, 250),
+            );
+            p.rect_stroke(
+                Rect::from_min_max(u(0.15, 0.05), u(0.85, 0.95)),
+                1.0,
+                st,
+                egui::StrokeKind::Inside,
+            );
+        }
+        Icon::HeaderFooter => {
+            page(0.15, 0.05, 0.85, 0.95);
+            p.rect_filled(Rect::from_min_max(u(0.25, 0.15), u(0.62, 0.24)), 0.0, accent);
+            p.rect_filled(Rect::from_min_max(u(0.25, 0.8), u(0.75, 0.88)), 0.0, accent);
+        }
+        Icon::Numbering => {
+            page(0.15, 0.05, 0.85, 0.95);
+            text(0.5, 0.58, "#", 0.45, accent);
+        }
+        Icon::Count => {
+            text(0.5, 0.32, "ABC", 0.3, accent);
+            text(0.5, 0.72, "123", 0.3, color);
+        }
+        Icon::Compare => {
+            page(0.05, 0.1, 0.48, 0.9);
+            page(0.52, 0.1, 0.95, 0.9);
+            p.line_segment([u(0.15, 0.5), u(0.38, 0.5)], Stroke::new(w * 1.4, red));
+            p.line_segment(
+                [u(0.62, 0.5), u(0.85, 0.5)],
+                Stroke::new(w * 1.4, Color32::from_rgb(40, 160, 60)),
+            );
+        }
+        Icon::Accessibility => {
+            p.circle_stroke(u(0.5, 0.5), s * 0.42, st);
+            p.circle_filled(u(0.5, 0.25), s * 0.07, accent);
+            p.line_segment([u(0.25, 0.4), u(0.75, 0.4)], Stroke::new(w * 1.4, accent));
+            p.add(PathShape::line(
+                vec![u(0.36, 0.82), u(0.5, 0.5), u(0.64, 0.82)],
+                Stroke::new(w * 1.4, accent),
+            ));
+        }
+        Icon::Sort => {
+            text(0.3, 0.3, "A", 0.3, color);
+            text(0.3, 0.72, "Z", 0.3, color);
+            arrow(u(0.72, 0.15), u(0.72, 0.88), Stroke::new(w * 1.4, accent));
+        }
+        Icon::Help => {
+            p.circle_filled(u(0.5, 0.5), s * 0.42, accent);
+            text(0.5, 0.52, "?", 0.55, Color32::WHITE);
+        }
+        Icon::Bug => {
+            p.add(egui::Shape::ellipse_filled(
+                u(0.5, 0.58),
+                vec2(s * 0.2, s * 0.28),
+                Color32::from_rgb(90, 140, 60),
+            ));
+            p.circle_filled(u(0.5, 0.25), s * 0.11, Color32::from_rgb(70, 110, 50));
+            for y in [0.45f32, 0.6, 0.75] {
+                p.line_segment([u(0.15, y), u(0.85, y)], thin);
+            }
+            p.add(PathShape::convex_polygon(vec![u(0.75, 0.62), u(0.95, 0.95), u(0.55, 0.95)], yellow, thin));
+        }
+        Icon::Console => {
+            p.rect(
+                Rect::from_min_max(u(0.08, 0.15), u(0.92, 0.85)),
+                2.0,
+                Color32::from_gray(40),
+                st,
+                egui::StrokeKind::Inside,
+            );
+            p.add(PathShape::line(
+                vec![u(0.22, 0.38), u(0.36, 0.5), u(0.22, 0.62)],
+                Stroke::new(w * 1.3, Color32::WHITE),
+            ));
+            p.line_segment([u(0.42, 0.65), u(0.62, 0.65)], Stroke::new(w * 1.3, Color32::WHITE));
+        }
+        Icon::Web => {
+            p.circle_stroke(u(0.5, 0.5), s * 0.4, Stroke::new(w, accent));
+            p.add(egui::Shape::ellipse_stroke(
+                u(0.5, 0.5),
+                vec2(s * 0.17, s * 0.4),
+                Stroke::new(w * 0.8, accent),
+            ));
+            p.line_segment([u(0.1, 0.5), u(0.9, 0.5)], Stroke::new(w * 0.8, accent));
+            p.line_segment([u(0.18, 0.3), u(0.82, 0.3)], Stroke::new(w * 0.6, accent));
+            p.line_segment([u(0.18, 0.7), u(0.82, 0.7)], Stroke::new(w * 0.6, accent));
+        }
+        Icon::Pointer => {
+            let pts = vec![
+                u(0.3, 0.1),
+                u(0.3, 0.8),
+                u(0.47, 0.64),
+                u(0.6, 0.92),
+                u(0.7, 0.87),
+                u(0.57, 0.6),
+                u(0.8, 0.6),
+            ];
+            p.add(PathShape::closed_line(pts, st));
+        }
+        Icon::Camera => {
+            p.rect(
+                Rect::from_min_max(u(0.08, 0.3), u(0.92, 0.82)),
+                3.0,
+                Color32::from_gray(200),
+                st,
+                egui::StrokeKind::Inside,
+            );
+            p.rect_filled(Rect::from_min_max(u(0.35, 0.2), u(0.6, 0.3)), 1.0, color);
+            p.circle(u(0.5, 0.56), s * 0.16, Color32::WHITE, st);
+        }
+        Icon::AreaHighlight => {
+            p.rect_filled(Rect::from_min_max(u(0.1, 0.25), u(0.9, 0.75)), 1.0, yellow);
+            p.rect_stroke(
+                Rect::from_min_max(u(0.1, 0.25), u(0.9, 0.75)),
+                1.0,
+                Stroke::new(w * 0.8, color),
+                egui::StrokeKind::Inside,
+            );
+        }
+        Icon::Replace => {
+            text(0.5, 0.4, "T", 0.55, color);
+            p.line_segment([u(0.2, 0.42), u(0.8, 0.42)], Stroke::new(w * 1.4, red));
+            p.add(PathShape::line(
+                vec![u(0.6, 0.95), u(0.72, 0.75), u(0.84, 0.95)],
+                Stroke::new(w * 1.4, accent),
+            ));
+        }
+        Icon::Caret => {
+            p.line_segment([u(0.1, 0.4), u(0.9, 0.4)], thin);
+            p.add(PathShape::line(vec![u(0.3, 0.9), u(0.5, 0.5), u(0.7, 0.9)], Stroke::new(w * 1.8, accent)));
+        }
+        Icon::Typewriter => {
+            text(0.5, 0.45, "Tt", 0.55, color);
+            p.line_segment([u(0.2, 0.85), u(0.8, 0.85)], Stroke::new(w * 1.2, accent));
+        }
+        Icon::Callout => {
+            p.rect(
+                Rect::from_min_max(u(0.35, 0.1), u(0.95, 0.55)),
+                1.0,
+                Color32::from_rgb(255, 255, 220),
+                st,
+                egui::StrokeKind::Inside,
+            );
+            text(0.65, 0.33, "T", 0.35, color);
+            p.add(PathShape::line(vec![u(0.35, 0.4), u(0.2, 0.6), u(0.05, 0.92)], Stroke::new(w * 1.2, red)));
+        }
+        Icon::Polyline => {
+            p.add(PathShape::line(
+                vec![u(0.08, 0.85), u(0.3, 0.25), u(0.6, 0.7), u(0.92, 0.15)],
+                Stroke::new(w * 1.3, red),
+            ));
+        }
+        Icon::Cloud => {
+            for (x, y, r) in [(0.3, 0.55, 0.18), (0.5, 0.42, 0.22), (0.7, 0.55, 0.18), (0.5, 0.65, 0.18)] {
+                p.circle_stroke(u(x, y), s * r, Stroke::new(w * 1.2, red));
+            }
+        }
+        Icon::Eraser => {
+            let pts = vec![u(0.15, 0.62), u(0.55, 0.22), u(0.88, 0.55), u(0.48, 0.95)];
+            p.add(PathShape::convex_polygon(pts, Color32::from_rgb(240, 150, 170), st));
+            p.line_segment([u(0.32, 0.45), u(0.65, 0.78)], thin);
+        }
+        Icon::MeasureDistance | Icon::MeasurePerimeter | Icon::MeasureArea => {
+            match icon {
+                Icon::MeasureDistance => {
+                    arrow(u(0.5, 0.5), u(0.08, 0.5), Stroke::new(w * 1.2, accent));
+                    arrow(u(0.5, 0.5), u(0.92, 0.5), Stroke::new(w * 1.2, accent));
+                }
+                Icon::MeasurePerimeter => {
+                    let pts = vec![u(0.15, 0.25), u(0.85, 0.2), u(0.75, 0.8), u(0.25, 0.85)];
+                    p.add(PathShape::closed_line(pts, Stroke::new(w * 1.3, accent)));
+                }
+                _ => {
+                    let pts = vec![u(0.15, 0.25), u(0.85, 0.2), u(0.75, 0.8), u(0.25, 0.85)];
+                    p.add(PathShape::convex_polygon(
+                        pts,
+                        accent.gamma_multiply(0.35),
+                        Stroke::new(w * 1.3, accent),
+                    ));
+                }
+            }
+            for x in [0.2f32, 0.4, 0.6, 0.8] {
+                p.line_segment([u(x, 0.92), u(x, 0.99)], thin);
+            }
+        }
+        Icon::Signature => {
+            let pts: Vec<Pos2> = (0..=20)
+                .map(|i| {
+                    let t = i as f32 / 20.0;
+                    u(0.08 + t * 0.84, 0.55 - 0.25 * (t * 9.0).sin() * (1.0 - t))
+                })
+                .collect();
+            p.add(PathShape::line(pts, Stroke::new(w * 1.3, Color32::from_rgb(20, 40, 120))));
+            p.line_segment([u(0.08, 0.85), u(0.92, 0.85)], thin);
+        }
+        Icon::FieldText => {
+            p.rect(
+                Rect::from_min_max(u(0.05, 0.3), u(0.95, 0.7)),
+                1.0,
+                Color32::WHITE,
+                st,
+                egui::StrokeKind::Inside,
+            );
+            text(0.3, 0.5, "T", 0.35, accent);
+            p.line_segment([u(0.5, 0.38), u(0.5, 0.62)], thin);
+        }
+        Icon::FieldButton => {
+            p.rect(
+                Rect::from_min_max(u(0.08, 0.28), u(0.92, 0.72)),
+                4.0,
+                Color32::from_gray(220),
+                st,
+                egui::StrokeKind::Inside,
+            );
+            text(0.5, 0.5, "OK", 0.3, color);
+        }
+        Icon::CheckBox => {
+            p.rect(
+                Rect::from_min_max(u(0.15, 0.15), u(0.85, 0.85)),
+                2.0,
+                Color32::WHITE,
+                st,
+                egui::StrokeKind::Inside,
+            );
+            p.add(PathShape::line(
+                vec![u(0.28, 0.5), u(0.45, 0.68), u(0.74, 0.3)],
+                Stroke::new(w * 1.8, accent),
+            ));
+        }
+        Icon::Radio => {
+            p.circle(u(0.5, 0.5), s * 0.36, Color32::WHITE, st);
+            p.circle_filled(u(0.5, 0.5), s * 0.17, accent);
+        }
+        Icon::ListBox => {
+            p.rect(
+                Rect::from_min_max(u(0.08, 0.12), u(0.92, 0.88)),
+                1.0,
+                Color32::WHITE,
+                st,
+                egui::StrokeKind::Inside,
+            );
+            p.rect_filled(Rect::from_min_max(u(0.12, 0.4), u(0.88, 0.58)), 0.0, accent.gamma_multiply(0.4));
+            for y in [0.27f32, 0.49, 0.72] {
+                p.line_segment([u(0.2, y), u(0.72, y)], thin);
+            }
+        }
+        Icon::ComboBox => {
+            p.rect(
+                Rect::from_min_max(u(0.05, 0.3), u(0.95, 0.7)),
+                1.0,
+                Color32::WHITE,
+                st,
+                egui::StrokeKind::Inside,
+            );
+            p.add(PathShape::convex_polygon(
+                vec![u(0.66, 0.42), u(0.86, 0.42), u(0.76, 0.58)],
+                color,
+                Stroke::NONE,
+            ));
         }
         Icon::Logo => {
             p.rect_filled(Rect::from_min_max(u(0.05, 0.05), u(0.95, 0.95)), s * 0.18, red);
