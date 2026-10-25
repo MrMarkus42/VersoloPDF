@@ -550,3 +550,117 @@ fn view_rotation_matches_geometry() {
         assert!(spot[0] > 220.0, "{rotation:?}: {spot:?}");
     }
 }
+
+#[test]
+fn document_structure_operations() {
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let a = dir.path().join("a.pdf");
+    let b = dir.path().join("b.pdf");
+    std::fs::write(&a, common::text_pdf(2)).unwrap();
+    std::fs::write(&b, common::text_pdf(3)).unwrap();
+
+    let merged = Document::merge_files(&[a.clone(), b.clone()], "m.pdf").unwrap();
+    assert_eq!(merged.page_count(), 5);
+    let parts = merged.split(2, dir.path(), "teil").unwrap();
+    assert_eq!(parts.len(), 3);
+    assert_eq!(Document::open(&parts[2], None).unwrap().page_count(), 1);
+
+    let mut doc = open(3);
+    let text = |d: &Document, p: usize| d.page_text(p).unwrap().all_text();
+    doc.duplicate_pages(&[1]).unwrap();
+    assert_eq!(doc.page_count(), 4);
+    assert!(text(&doc, 2).contains("Page 2"));
+    let groups = doc.find_duplicate_pages().unwrap();
+    assert_eq!(groups, vec![vec![1, 2]]);
+
+    doc.swap_pages(0, 3).unwrap();
+    assert!(text(&doc, 0).contains("Page 3"));
+    doc.reverse_pages().unwrap();
+    assert!(text(&doc, 3).contains("Page 3"));
+
+    let mut doc = open(3);
+    doc.replace_pages(&[1], &b, 2).unwrap();
+    assert_eq!(doc.page_count(), 3);
+    assert!(text(&doc, 1).contains("Page 3"), "{}", text(&doc, 1));
+}
+
+#[test]
+fn page_shape_operations() {
+    let _guard = common::lock();
+    let mut doc = open(2);
+    doc.resize_pages(&[0], (419.53, 595.28), true).unwrap();
+    let (w, h) = doc.geometry(0).unwrap().view_size();
+    assert!((w - 419.5).abs() < 1.0 && (h - 595.3).abs() < 1.0, "{w}x{h}");
+    assert!(doc.page_text(0).unwrap().all_text().contains("Page 1"));
+    // The text was scaled and moved with the page.
+    let hits = mrpdf::search::search_page(
+        0,
+        &doc.page_text(0).unwrap(),
+        "Hello",
+        SearchOptions { match_case: true, whole_word: false },
+    );
+    assert!(hits[0].rects[0].x1 < 419.0);
+
+    doc.crop_pages(&[1], [50.0, 50.0, 50.0, 50.0]).unwrap();
+    let (w, h) = doc.geometry(1).unwrap().view_size();
+    assert!((w - 495.0).abs() < 1.0 && (h - 742.0).abs() < 1.0, "{w}x{h}");
+    doc.add_margins(&[1], [20.0, 20.0, 20.0, 20.0]).unwrap();
+    let (w, _) = doc.geometry(1).unwrap().view_size();
+    assert!((w - 535.0).abs() < 1.0, "{w}");
+    assert!(doc.crop_pages(&[1], [400.0, 0.0, 400.0, 0.0]).is_err());
+}
+
+#[test]
+fn page_marks_and_labels() {
+    use mrpdf::pages::{Anchor, LabelStyle, PageMark, TextMark};
+    let _guard = common::lock();
+    let mut doc = open(3);
+    let mark = |text: &str, anchor: Anchor| TextMark {
+        text: text.into(),
+        anchor,
+        font_size: 12.0,
+        color: Rgba::rgb(200, 0, 0),
+        opacity: 1.0,
+        rotation: 0.0,
+        margin: 24.0,
+        bold: false,
+    };
+    let footer = PageMark::Texts {
+        marks: vec![mark("Seite <<page>> von <<pages>>", Anchor::BottomCenter)],
+        behind: false,
+    };
+    doc.add_page_marks(&[0, 1, 2], &footer, &|t, p| mrpdf::pages::expand_placeholders(t, p, 3, "", "x.pdf"))
+        .unwrap();
+    assert!(doc.page_text(1).unwrap().all_text().contains("Seite 2 von 3"));
+
+    let mut wm = mark("ENTWURF", Anchor::Center);
+    wm.font_size = 80.0;
+    wm.rotation = 45.0;
+    wm.opacity = 0.4;
+    wm.bold = true;
+    doc.add_page_marks(&[0], &PageMark::Texts { marks: vec![wm], behind: false }, &|t, _| t.to_string())
+        .unwrap();
+    assert!(doc.page_text(0).unwrap().all_text().contains("ENTWURF"));
+
+    let bates = PageMark::Texts { marks: vec![mark("", Anchor::BottomRight)], behind: false };
+    doc.add_page_marks(&[0, 1], &bates, &|_, p| mrpdf::pages::bates_number("ABC", 1 + p as u64, 6, ""))
+        .unwrap();
+    assert!(doc.page_text(1).unwrap().all_text().contains("ABC000002"));
+
+    doc.add_page_marks(&[2], &PageMark::Fill { color: Rgba::rgb(220, 240, 255) }, &|t, _| t.to_string())
+        .unwrap();
+    let img = doc.render_page(2, 100, 141).unwrap();
+    let corner = common::average(&img, 2, 2, 6, 6);
+    assert!(corner[0] < 235.0 && corner[2] > 245.0, "{corner:?}");
+    assert!(
+        doc.page_text(2).unwrap().all_text().contains("Page 3"),
+        "content stays visible above the background"
+    );
+
+    doc.set_page_labels(0, LabelStyle::RomanLower, "", 1).unwrap();
+    doc.set_page_labels(2, LabelStyle::Decimal, "A-", 1).unwrap();
+    assert_eq!(doc.page_label(0).as_deref(), Some("i"));
+    assert_eq!(doc.page_label(1).as_deref(), Some("ii"));
+    assert_eq!(doc.page_label(2).as_deref(), Some("A-1"));
+}

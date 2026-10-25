@@ -32,22 +32,6 @@ pub const PENDING: &[Cmd] = &[
     Cmd::Tool(Tool::FieldList),
     Cmd::Tool(Tool::FieldCombo),
     Cmd::Tool(Tool::FieldSignature),
-    Cmd::MergeFiles,
-    Cmd::SplitDocument,
-    Cmd::DuplicatePages,
-    Cmd::ReplacePages,
-    Cmd::SwapPages,
-    Cmd::NormalizePages,
-    Cmd::FindDuplicatePages,
-    Cmd::ReversePages,
-    Cmd::CropPages,
-    Cmd::ResizePages,
-    Cmd::Margins,
-    Cmd::Watermark,
-    Cmd::Background,
-    Cmd::HeaderFooter,
-    Cmd::Bates,
-    Cmd::PageLabels,
     Cmd::FromFiles,
     Cmd::ContentsToImages,
     Cmd::ExportText,
@@ -127,7 +111,9 @@ impl MrPdfApp {
                 };
                 self.info(Cmd::FileAssociation.label(self.settings.language), text.to_string());
             }
-            _ => {}
+            other => {
+                self.run_structure(ctx, other);
+            }
         }
     }
 

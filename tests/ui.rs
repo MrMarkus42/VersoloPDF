@@ -445,3 +445,40 @@ fn new_comment_tools() {
     assert_eq!(h.state().active_tab().unwrap().view_rotation, mrpdf::geometry::Rotation::R90);
     save(&mut h, "18-view-rotated");
 }
+
+#[test]
+fn document_structure_ui() {
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let file = sample_file(&dir, 3);
+    let mut h = harness(vec![file], false);
+    h.run_steps(10);
+    tab(&mut h, "Dokumentaufbau");
+    save(&mut h, "19-document-ribbon");
+
+    // Watermark with the default text through its dialog.
+    quick(&mut h, "Wasserzeichen");
+    assert!(h.state().dialog().is_some());
+    save(&mut h, "20-watermark-dialog");
+    h.get_by_label("OK").click();
+    h.run_steps(6);
+    {
+        let tab = h.state_mut().active_tab_mut().unwrap();
+        assert!(tab.doc.page_text(0).unwrap().all_text().contains("ENTWURF"));
+    }
+    save(&mut h, "21-watermark");
+
+    // Header/footer with page numbers.
+    quick(&mut h, "Kopf- und Fußzeilen");
+    h.get_by_label("OK").click();
+    h.run_steps(6);
+    {
+        let tab = h.state_mut().active_tab_mut().unwrap();
+        assert!(tab.doc.page_text(2).unwrap().all_text().contains("Seite 3 von 3"));
+    }
+
+    // Reverse page order.
+    quick(&mut h, "Seitenreihenfolge umkehren");
+    let tab = h.state_mut().active_tab_mut().unwrap();
+    assert!(tab.doc.page_text(0).unwrap().all_text().contains("Page 3"));
+}

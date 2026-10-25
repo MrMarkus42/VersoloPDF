@@ -7,14 +7,14 @@ use super::{Dialog, InsertPosition, MrPdfApp, PaperChoice, RangePurpose};
 use crate::ui::i18n::Strings;
 
 /// Work to do after the modal closed (needs `&mut MrPdfApp`).
-type Action = Box<dyn FnOnce(&mut MrPdfApp, &Context)>;
+pub(super) type Action = Box<dyn FnOnce(&mut MrPdfApp, &Context)>;
 
-enum Outcome {
+pub(super) enum Outcome {
     Keep,
     Close,
 }
 
-fn buttons(ui: &mut Ui, ok: &str, cancel: &str) -> (bool, bool) {
+pub(super) fn buttons(ui: &mut Ui, ok: &str, cancel: &str) -> (bool, bool) {
     let mut result = (false, false);
     ui.add_space(8.0);
     ui.horizontal(|ui| {
@@ -26,7 +26,7 @@ fn buttons(ui: &mut Ui, ok: &str, cancel: &str) -> (bool, bool) {
     (result.0 || enter, result.1 || esc)
 }
 
-fn paper_name(t: &Strings, p: PaperChoice) -> &'static str {
+pub(super) fn paper_name(t: &Strings, p: PaperChoice) -> &'static str {
     match p {
         PaperChoice::SameAsCurrent => t.same_as_current,
         PaperChoice::A4 => "A4",
@@ -298,6 +298,9 @@ impl MrPdfApp {
                         RangePurpose::Delete => t.delete_pages,
                         RangePurpose::Rotate(_) => t.rotate_range,
                         RangePurpose::Flatten => t.flatten,
+                        RangePurpose::Duplicate => {
+                            super::commands::Cmd::DuplicatePages.label(self.settings.language)
+                        }
                     };
                     ui.heading(title);
                     if let RangePurpose::Rotate(delta) = purpose {
@@ -489,6 +492,18 @@ impl MrPdfApp {
                     } else if cancel {
                         outcome = Outcome::Close;
                     }
+                }
+                other @ (Dialog::Split { .. }
+                | Dialog::Replace { .. }
+                | Dialog::Swap { .. }
+                | Dialog::Resize { .. }
+                | Dialog::Margins { .. }
+                | Dialog::PageMark(_)
+                | Dialog::PageLabels { .. }
+                | Dialog::Duplicates { .. }) => {
+                    let (o, a) = self.structure_dialog(ui, other);
+                    outcome = o;
+                    action = a;
                 }
                 Dialog::About => {
                     ui.horizontal(|ui| {

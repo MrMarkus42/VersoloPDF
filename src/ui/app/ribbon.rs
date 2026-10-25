@@ -253,6 +253,8 @@ impl MrPdfApp {
         }
         if edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
             run = matches.first().copied();
+            // The Enter key must not also confirm a dialog opened by the command.
+            ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
         }
         if let Some(cmd) = run {
             self.quick_query.clear();

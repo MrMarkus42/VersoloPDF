@@ -21,6 +21,7 @@ use crate::model::{
     Metadata, Permissions,
 };
 use crate::outline;
+use crate::pages;
 use crate::pdf_edit::{self, AnnotDetails, AnnotUpdate, NewAnnotation};
 use crate::security::{self, ProtectOptions, SecurityInfo};
 use crate::text::{CharInfo, PageText};
@@ -832,6 +833,190 @@ impl Document {
         let view = RectF::new((vw - w) / 2.0, (vh - h) / 2.0, (vw + w) / 2.0, (vh + h) / 2.0);
         let rect = geo.view_rect_to_pdf(&view);
         self.edit_bytes("add image", |b, pw| pdf_edit::add_image_stamp(b, pw, page, rect, &image, style))
+    }
+
+    // -----------------------------------------------------------------
+    // Document structure
+
+    /// Creates a new document from several PDF files (in the given order).
+    pub fn merge_files(paths: &[PathBuf], display_name: &str) -> Result<Document> {
+        if paths.is_empty() {
+            return Err(Error::Invalid("no files selected".into()));
+        }
+        let pdfium = engine::pdfium()?;
+        let mut target = pdfium.create_new_pdf()?;
+        for path in paths {
+            let source = Self::load(read_pdf_file(path)?, None)?;
+            let count = source.pages().len();
+            if count > 0 {
+                let at = target.pages().len();
+                target.pages_mut().copy_page_range_from_document(&source, 0..=count - 1, at)?;
+            }
+        }
+        let bytes = target.save_to_bytes()?;
+        let mut doc = Self::from_bytes(bytes, display_name, None)?;
+        doc.modified = true;
+        Ok(doc)
+    }
+
+    /// Writes the document in parts of every pages into dir. Returns the
+    /// written files.
+    pub fn split(&self, every: usize, dir: &Path, stem: &str) -> Result<Vec<PathBuf>> {
+        if every == 0 {
+            return Err(Error::Invalid("invalid part size".into()));
+        }
+        let n = self.page_count();
+        let mut files = Vec::new();
+        for (part, start) in (0..n).step_by(every).enumerate() {
+            let pages: Vec<usize> = (start..(start + every).min(n)).collect();
+            let path = dir.join(format!("{stem}-{}.pdf", part + 1));
+            self.extract_pages(&pages, &path)?;
+            files.push(path);
+        }
+        Ok(files)
+    }
+
+    /// Inserts copies of pages directly after the last of them.
+    pub fn duplicate_pages(&mut self, pages: &[usize]) -> Result<()> {
+        let mut pages = pages.to_vec();
+        pages.sort_unstable();
+        pages.dedup();
+        let Some(&last) = pages.last() else { return Ok(()) };
+        self.check_page(last)?;
+        self.require(self.permissions().assemble)?;
+        self.sync_bytes()?;
+        let source = Self::load(self.bytes.clone(), self.password.as_deref())?;
+        let spec = pages.iter().map(|p| (p + 1).to_string()).collect::<Vec<_>>().join(",");
+        self.edit_engine("duplicate pages", |pdf| {
+            pdf.pages_mut().copy_pages_from_document(&source, &spec, page_index(last + 1)?)?;
+            Ok(())
+        })
+    }
+
+    /// Replaces pages (consecutive) by the same number of pages of another
+    /// PDF, starting at source_start there.
+    pub fn replace_pages(&mut self, pages: &[usize], source: &Path, source_start: usize) -> Result<()> {
+        let mut pages = pages.to_vec();
+        pages.sort_unstable();
+        pages.dedup();
+        let (Some(&first), Some(&last)) = (pages.first(), pages.last()) else { return Ok(()) };
+        self.check_page(last)?;
+        self.require(self.permissions().assemble)?;
+        let other = Self::load(read_pdf_file(source)?, None)?;
+        let available = usize::try_from(other.pages().len()).unwrap_or(0);
+        let count = pages.len().min(available.saturating_sub(source_start));
+        if count == 0 {
+            return Err(Error::Invalid("the other document has not enough pages".into()));
+        }
+        self.edit_engine("replace pages", |pdf| {
+            for &p in pages.iter().rev() {
+                pdf.pages().get(page_index(p)?)?.delete()?;
+            }
+            pdf.pages_mut().copy_page_range_from_document(
+                &other,
+                page_index(source_start)?..=page_index(source_start + count - 1)?,
+                page_index(first)?,
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn swap_pages(&mut self, a: usize, b: usize) -> Result<()> {
+        self.check_page(a)?;
+        self.check_page(b)?;
+        self.require(self.permissions().assemble)?;
+        if a == b {
+            return Ok(());
+        }
+        let mut order: Vec<usize> = (0..self.page_count()).collect();
+        order.swap(a, b);
+        self.edit_bytes("swap pages", |bytes, pw| pdf_edit::reorder_pages(bytes, pw, &order))
+    }
+
+    pub fn reverse_pages(&mut self) -> Result<()> {
+        self.require(self.permissions().assemble)?;
+        let order: Vec<usize> = (0..self.page_count()).rev().collect();
+        self.edit_bytes("reverse pages", |bytes, pw| pdf_edit::reorder_pages(bytes, pw, &order))
+    }
+
+    /// Groups of pages that look identical (same text and same rendering).
+    pub fn find_duplicate_pages(&self) -> Result<Vec<Vec<usize>>> {
+        use std::collections::HashMap;
+        use std::hash::{Hash, Hasher};
+        let mut groups: HashMap<u64, Vec<usize>> = HashMap::new();
+        for page in 0..self.page_count() {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            self.page_text(page)?.all_text().hash(&mut hasher);
+            let (w, h) = self.geometry(page).map_or((1.0, 1.0), |g| g.view_size());
+            let img = self.render_page(page, 48, ((48.0 * h / w.max(1.0)) as u32).clamp(1, 400))?;
+            // Coarse grey levels make the comparison robust against tiny differences.
+            img.rgba
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|p| (u16::from(p[0]) + u16::from(p[1]) + u16::from(p[2])) / 96)
+                .collect::<Vec<_>>()
+                .hash(&mut hasher);
+            groups.entry(hasher.finish()).or_default().push(page);
+        }
+        let mut out: Vec<Vec<usize>> = groups.into_values().filter(|g| g.len() > 1).collect();
+        out.sort();
+        Ok(out)
+    }
+
+    /// Scales pages to a new size (points, displayed orientation).
+    pub fn resize_pages(&mut self, pages: &[usize], size: (f32, f32), fit: bool) -> Result<()> {
+        for &p in pages {
+            self.check_page(p)?;
+        }
+        self.require(self.permissions().assemble)?;
+        self.edit_bytes("resize pages", |b, pw| pages::resize_pages(b, pw, pages, size, fit))
+    }
+
+    /// Cuts margins (left, bottom, right, top; points) off the visible area.
+    pub fn crop_pages(&mut self, pages: &[usize], margins: [f32; 4]) -> Result<()> {
+        for &p in pages {
+            self.check_page(p)?;
+        }
+        self.require(self.permissions().assemble)?;
+        let neg = margins.map(|m| -m.max(0.0));
+        self.edit_bytes("crop pages", |b, pw| pages::change_margins(b, pw, pages, neg, true))
+    }
+
+    /// Adds white margins around the pages (points).
+    pub fn add_margins(&mut self, pages: &[usize], margins: [f32; 4]) -> Result<()> {
+        for &p in pages {
+            self.check_page(p)?;
+        }
+        self.require(self.permissions().assemble)?;
+        let pos = margins.map(|m| m.max(0.0));
+        self.edit_bytes("add margins", |b, pw| pages::change_margins(b, pw, pages, pos, false))
+    }
+
+    /// Adds watermarks, backgrounds, headers/footers or Bates numbers.
+    pub fn add_page_marks(
+        &mut self,
+        pages: &[usize],
+        mark: &pages::PageMark,
+        text_for: &dyn Fn(&str, usize) -> String,
+    ) -> Result<()> {
+        for &p in pages {
+            self.check_page(p)?;
+        }
+        self.require(self.permissions().modify)?;
+        self.edit_bytes("page marks", |b, pw| pages::add_page_marks(b, pw, pages, mark, text_for))
+    }
+
+    pub fn set_page_labels(
+        &mut self,
+        start: usize,
+        style: pages::LabelStyle,
+        prefix: &str,
+        first: u32,
+    ) -> Result<()> {
+        self.check_page(start)?;
+        self.require(self.permissions().modify)?;
+        self.edit_bytes("page labels", |b, pw| pages::set_page_labels(b, pw, start, style, prefix, first))
     }
 
     // -----------------------------------------------------------------

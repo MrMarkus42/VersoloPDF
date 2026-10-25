@@ -8,6 +8,7 @@ mod properties;
 mod ribbon;
 mod sidebar;
 mod statusbar;
+mod structure;
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -167,6 +168,41 @@ pub enum Dialog {
         page: usize,
         title: String,
     },
+    Split {
+        every: u32,
+    },
+    Replace {
+        range: String,
+        source_start: u32,
+        error: bool,
+    },
+    Swap {
+        a: u32,
+        b: u32,
+    },
+    Resize {
+        range: String,
+        paper: PaperChoice,
+        landscape: bool,
+        fit: bool,
+        error: bool,
+    },
+    Margins {
+        range: String,
+        mm: [f32; 4],
+        crop: bool,
+        error: bool,
+    },
+    PageMark(Box<structure::MarkForm>),
+    PageLabels {
+        start: u32,
+        style: crate::pages::LabelStyle,
+        prefix: String,
+        first: u32,
+    },
+    Duplicates {
+        groups: Vec<Vec<usize>>,
+    },
     About,
 }
 
@@ -176,6 +212,7 @@ pub enum RangePurpose {
     Delete,
     Rotate(i32),
     Flatten,
+    Duplicate,
 }
 
 pub struct MrPdfApp {
