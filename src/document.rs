@@ -17,9 +17,10 @@ use crate::error::{Error, Result};
 use crate::forms::{self, FieldValue};
 use crate::geometry::{PageGeometry, RectF, Rotation};
 use crate::model::{
-    AnnotKind, AnnotationInfo, Bookmark, FieldKind, FormFieldInfo, LinkInfo, LinkTarget, Metadata,
-    Permissions,
+    AnnotKind, AnnotStyle, AnnotationInfo, Bookmark, FieldKind, FormFieldInfo, LinkInfo, LinkTarget,
+    Metadata, Permissions,
 };
+use crate::outline;
 use crate::pdf_edit::{self, AnnotDetails, AnnotUpdate, NewAnnotation};
 use crate::security::{self, ProtectOptions, SecurityInfo};
 use crate::text::{CharInfo, PageText};
@@ -741,6 +742,39 @@ impl Document {
         })
     }
 
+    /// Inserts an image file (PNG/JPEG) as stamp in the middle of page.
+    pub fn add_image_stamp(&mut self, page: usize, image_path: &Path, style: &AnnotStyle) -> Result<()> {
+        self.check_page(page)?;
+        self.require(self.permissions().annotate)?;
+        let image = load_image(image_path)?;
+        let geo = *self.geometry(page).ok_or(Error::PageOutOfRange(page))?;
+        let (vw, vh) = geo.view_size();
+        let w = (vw * 0.4).min(220.0);
+        let h = w * image.height as f32 / image.width as f32;
+        let view = RectF::new((vw - w) / 2.0, (vh - h) / 2.0, (vw + w) / 2.0, (vh + h) / 2.0);
+        let rect = geo.view_rect_to_pdf(&view);
+        self.edit_bytes("add image", |b, pw| pdf_edit::add_image_stamp(b, pw, page, rect, &image, style))
+    }
+
+    // -----------------------------------------------------------------
+    // Bookmarks
+
+    pub fn add_bookmark(&mut self, parent: &[usize], title: &str, page: usize) -> Result<()> {
+        self.check_page(page)?;
+        self.require(self.permissions().modify)?;
+        self.edit_bytes("add bookmark", |b, pw| outline::add_bookmark(b, pw, parent, title, page))
+    }
+
+    pub fn rename_bookmark(&mut self, path: &[usize], title: &str) -> Result<()> {
+        self.require(self.permissions().modify)?;
+        self.edit_bytes("rename bookmark", |b, pw| outline::rename_bookmark(b, pw, path, title))
+    }
+
+    pub fn delete_bookmark(&mut self, path: &[usize]) -> Result<()> {
+        self.require(self.permissions().modify)?;
+        self.edit_bytes("delete bookmark", |b, pw| outline::delete_bookmark(b, pw, path))
+    }
+
     // -----------------------------------------------------------------
     // Forms
 
@@ -980,6 +1014,30 @@ impl Document {
         .map_err(|e| Error::Invalid(e.to_string()))?;
         write_atomic(dest, out.get_ref())
     }
+}
+
+/// Largest edge of images embedded as stamps (larger images are scaled down).
+const MAX_IMAGE_EDGE: u32 = 2000;
+
+/// Loads an image with strict decoder limits (protection against hostile files).
+pub fn load_image(path: &Path) -> Result<pdf_edit::RgbaImage> {
+    let mut reader = image::ImageReader::open(path)
+        .map_err(|e| Error::io(path, e))?
+        .with_guessed_format()
+        .map_err(|e| Error::io(path, e))?;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(12_000);
+    limits.max_image_height = Some(12_000);
+    limits.max_alloc = Some(512 * 1024 * 1024);
+    reader.limits(limits);
+    let img = reader.decode().map_err(|e| Error::Invalid(e.to_string()))?;
+    let img = if img.width().max(img.height()) > MAX_IMAGE_EDGE {
+        img.resize(MAX_IMAGE_EDGE, MAX_IMAGE_EDGE, image::imageops::FilterType::Triangle)
+    } else {
+        img
+    };
+    let rgba = img.to_rgba8();
+    Ok(pdf_edit::RgbaImage { width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() })
 }
 
 /// Computes the page order after moving `pages` before position `to`.

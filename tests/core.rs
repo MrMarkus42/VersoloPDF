@@ -438,3 +438,63 @@ fn attachments_can_be_added_saved_and_removed() {
     doc.undo().unwrap();
     assert_eq!(doc.attachments().len(), 1);
 }
+
+#[test]
+fn bookmarks_can_be_edited() {
+    let _guard = common::lock();
+    let mut doc = open(3);
+    assert!(doc.bookmarks().is_empty());
+    doc.add_bookmark(&[], "Kapitel 1", 0).unwrap();
+    doc.add_bookmark(&[], "Kapitel 2", 2).unwrap();
+    doc.add_bookmark(&[0], "Abschnitt 1.1", 1).unwrap();
+    let b = doc.bookmarks();
+    assert_eq!(b.len(), 2);
+    assert_eq!(b[0].title, "Kapitel 1");
+    assert_eq!(b[0].children[0].title, "Abschnitt 1.1");
+    assert_eq!(b[0].children[0].page, Some(1));
+    assert_eq!(b[1].page, Some(2));
+
+    doc.rename_bookmark(&[1], "Zusammenfassung").unwrap();
+    doc.delete_bookmark(&[0]).unwrap();
+    let b = doc.bookmarks();
+    assert_eq!(b.len(), 1);
+    assert_eq!(b[0].title, "Zusammenfassung");
+    assert!(doc.delete_bookmark(&[5]).is_err());
+
+    let re = Document::from_bytes(doc.to_bytes().unwrap(), "b.pdf", None).unwrap();
+    assert_eq!(re.bookmarks()[0].title, "Zusammenfassung");
+}
+
+#[test]
+fn image_stamp_is_rendered() {
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let png = dir.path().join("signatur.png");
+    // Blue square with a transparent border.
+    let img = image::RgbaImage::from_fn(100, 100, |x, y| {
+        if (10..90).contains(&x) && (10..90).contains(&y) {
+            image::Rgba([0, 0, 255, 255])
+        } else {
+            image::Rgba([0, 0, 0, 0])
+        }
+    });
+    img.save(&png).unwrap();
+    let mut doc = open(1);
+    doc.add_image_stamp(0, &png, &AnnotStyle::default()).unwrap();
+    let annots = doc.annotations(0).unwrap();
+    assert_eq!(annots.len(), 1);
+    assert_eq!(annots[0].kind, AnnotKind::Stamp);
+    let page = doc.render_page(0, 595, 842).unwrap();
+    let centre = common::average(&page, 290, 413, 305, 428);
+    assert!(centre[2] > 200.0 && centre[0] < 60.0, "{centre:?}");
+    // The transparent border keeps the white page visible.
+    let r = annots[0].rect;
+    let edge_x = (r.x0 + 2.0) as u32;
+    let edge_y = (842.0 - r.y1 + 2.0) as u32;
+    let edge = common::average(&page, edge_x, edge_y, edge_x + 3, edge_y + 3);
+    assert!(edge.iter().all(|&c| c > 200.0), "{edge:?}");
+
+    let bad = dir.path().join("kaputt.png");
+    std::fs::write(&bad, b"not an image").unwrap();
+    assert!(doc.add_image_stamp(0, &bad, &AnnotStyle::default()).is_err());
+}

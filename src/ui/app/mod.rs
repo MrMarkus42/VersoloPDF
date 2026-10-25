@@ -96,6 +96,7 @@ pub enum Dialog {
     Print { range: String, copies: u32, error: bool },
     Choice { page: usize, annot_index: usize, options: Vec<String>, selected: String },
     Protect { opts: crate::security::ProtectOptions, repeat: String, error: Option<&'static str> },
+    BookmarkTitle { parent: Option<Vec<usize>>, path: Option<Vec<usize>>, page: usize, title: String },
     About,
 }
 

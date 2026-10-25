@@ -149,6 +149,12 @@ strings! {
     delete_attachment: "Anhang löschen", "Delete attachment";
     attachment_hint: "Anhänge werden aus Sicherheitsgründen nie direkt geöffnet, nur gespeichert.", "For security reasons attachments are never opened directly, only saved.";
     fullscreen: "Vollbild", "Full screen";
+    add_bookmark: "Lesezeichen hinzufügen", "Add bookmark";
+    add_child_bookmark: "Unterlesezeichen hinzufügen", "Add child bookmark";
+    rename: "Umbenennen", "Rename";
+    bookmark_target: "Ziel: Seite", "Target: page";
+    insert_image: "Bild", "Image";
+    images: "Bilder", "Images";
 
     // Tools
     tool_hand: "Hand", "Hand";

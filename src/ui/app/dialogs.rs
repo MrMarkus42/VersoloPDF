@@ -428,6 +428,29 @@ impl MrPdfApp {
                         outcome = Outcome::Close;
                     }
                 }
+                Dialog::BookmarkTitle { parent, path, page, title } => {
+                    ui.heading(if path.is_some() { t.rename } else { t.add_bookmark });
+                    let edit = ui.add(egui::TextEdit::singleline(title).desired_width(320.0));
+                    edit.request_focus();
+                    if path.is_none() {
+                        ui.label(RichText::new(format!("{} {}", t.bookmark_target, *page + 1)).weak());
+                    }
+                    let (ok, cancel) = buttons(ui, t.ok, t.cancel);
+                    if ok && !title.trim().is_empty() {
+                        let title = title.trim().to_string();
+                        let (parent, path, page) = (parent.clone(), path.clone(), *page);
+                        action = Some(Box::new(move |app, ctx| match (parent, path) {
+                            (_, Some(path)) => app.edit(ctx, |tab| tab.doc.rename_bookmark(&path, &title)),
+                            (Some(parent), None) => {
+                                app.edit(ctx, |tab| tab.doc.add_bookmark(&parent, &title, page))
+                            }
+                            (None, None) => {}
+                        }));
+                        outcome = Outcome::Close;
+                    } else if cancel {
+                        outcome = Outcome::Close;
+                    }
+                }
                 Dialog::About => {
                     ui.horizontal(|ui| {
                         let (rect, _) = ui.allocate_exact_size(egui::vec2(48.0, 48.0), egui::Sense::hover());

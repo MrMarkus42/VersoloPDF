@@ -657,6 +657,26 @@ impl MrPdfApp {
         self.tool = Tool::Hand;
     }
 
+    /// Asks for an image file and places it as stamp on the current page.
+    pub fn insert_image(&mut self, ctx: &Context) {
+        let t = self.t();
+        let Some(path) = rfd::FileDialog::new()
+            .set_title(t.insert_image)
+            .add_filter(t.images, &["png", "jpg", "jpeg", "PNG", "JPG", "JPEG"])
+            .pick_file()
+        else {
+            return;
+        };
+        let style = self.settings.style(Tool::Stamp);
+        self.edit(ctx, |tab| {
+            let page = tab.current_page;
+            tab.doc.add_image_stamp(page, &path, &style)?;
+            let index = tab.doc.annotations(page)?.len().saturating_sub(1);
+            tab.selected_annot = Some(crate::ui::tab::AnnotRef { page, index });
+            Ok(())
+        });
+    }
+
     pub fn update_selected(&mut self, ctx: &Context, update: AnnotUpdate) {
         let Some(sel) = self.active_tab().and_then(|t| t.selected_annot) else {
             return;

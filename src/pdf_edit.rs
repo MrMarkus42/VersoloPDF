@@ -160,7 +160,7 @@ impl Edit {
     }
 
     /// The page's `/Annots` array, made editable in the new revision.
-    fn annots_mut(&mut self, page_id: ObjectId) -> Result<&mut Vec<Object>> {
+    pub(crate) fn annots_mut(&mut self, page_id: ObjectId) -> Result<&mut Vec<Object>> {
         let current = self.object(page_id)?.as_dict()?.get(b"Annots").ok().cloned();
         match current {
             Some(Object::Reference(id)) => Ok(self.object_mut(id)?.as_array_mut()?),
@@ -993,4 +993,106 @@ mod tests {
         );
         assert!(reorder_pages(b"%PDF-1.4 garbage", None, &[0]).is_err());
     }
+}
+
+/// An image in straight RGBA, used for image stamps.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RgbaImage {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+}
+
+fn image_xobject(
+    rgb: Vec<u8>,
+    width: u32,
+    height: u32,
+    gray: bool,
+    smask: Option<ObjectId>,
+) -> Result<Stream> {
+    let mut dict = Dictionary::new();
+    dict.set("Type", Object::Name(b"XObject".to_vec()));
+    dict.set("Subtype", Object::Name(b"Image".to_vec()));
+    dict.set("Width", Object::Integer(i64::from(width)));
+    dict.set("Height", Object::Integer(i64::from(height)));
+    dict.set("ColorSpace", Object::Name(if gray { b"DeviceGray".to_vec() } else { b"DeviceRGB".to_vec() }));
+    dict.set("BitsPerComponent", Object::Integer(8));
+    if let Some(mask) = smask {
+        dict.set("SMask", Object::Reference(mask));
+    }
+    let mut stream = Stream::new(dict, rgb);
+    stream.compress()?;
+    Ok(stream)
+}
+
+/// Adds an image stamp (e.g. a scanned signature) filling `rect`.
+pub fn add_image_stamp(
+    bytes: &[u8],
+    password: Option<&str>,
+    page: usize,
+    rect: RectF,
+    image: &RgbaImage,
+    style: &AnnotStyle,
+) -> Result<Vec<u8>> {
+    guarded(|| {
+        let (w, h) = (image.width, image.height);
+        if w == 0 || h == 0 || image.rgba.len() != (w as usize) * (h as usize) * 4 {
+            return Err(Error::Invalid("invalid image".into()));
+        }
+        let rect = rect.normalized();
+        let mut edit = Edit::open(bytes, password)?;
+        let page_id = edit.page_id(page)?;
+
+        let mut rgb = Vec::with_capacity((w * h * 3) as usize);
+        let mut alpha = Vec::with_capacity((w * h) as usize);
+        for px in image.rgba.as_chunks::<4>().0 {
+            rgb.extend_from_slice(&px[..3]);
+            alpha.push(px[3]);
+        }
+        let smask = if alpha.iter().any(|&a| a != 255) {
+            Some(edit.add(image_xobject(alpha, w, h, true, None)?))
+        } else {
+            None
+        };
+        let image_id = edit.add(image_xobject(rgb, w, h, false, smask)?);
+
+        let content = format!(
+            "q {} 0 0 {} {} {} cm /Im0 Do Q\n",
+            appearance::num(rect.width()),
+            appearance::num(rect.height()),
+            appearance::num(rect.x0),
+            appearance::num(rect.y0)
+        );
+        let mut xobjects = Dictionary::new();
+        xobjects.set("Im0", Object::Reference(image_id));
+        let mut resources = Dictionary::new();
+        resources.set("XObject", Object::Dictionary(xobjects));
+        let mut ap = Dictionary::new();
+        ap.set("Type", Object::Name(b"XObject".to_vec()));
+        ap.set("Subtype", Object::Name(b"Form".to_vec()));
+        ap.set("BBox", rect_array(&rect));
+        ap.set("Resources", Object::Dictionary(resources));
+        let ap_id = edit.add(Stream::new(ap, content.into_bytes()));
+
+        let now = pdf_date_now();
+        let mut d = Dictionary::new();
+        d.set("Type", Object::Name(b"Annot".to_vec()));
+        d.set("Subtype", Object::Name(b"Stamp".to_vec()));
+        d.set("Name", Object::Name(b"Image".to_vec()));
+        d.set("Rect", rect_array(&rect));
+        d.set("P", Object::Reference(page_id));
+        d.set("NM", text_string(&unique_name()));
+        d.set("M", Object::string_literal(now.clone()));
+        d.set("CreationDate", Object::string_literal(now));
+        d.set("F", Object::Integer(4));
+        if !style.author.is_empty() {
+            d.set("T", text_string(&style.author));
+        }
+        let mut ap_dict = Dictionary::new();
+        ap_dict.set("N", Object::Reference(ap_id));
+        d.set("AP", Object::Dictionary(ap_dict));
+        let annot_id = edit.add(Object::Dictionary(d));
+        edit.annots_mut(page_id)?.push(Object::Reference(annot_id));
+        edit.finish()
+    })
 }

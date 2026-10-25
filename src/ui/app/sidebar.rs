@@ -219,42 +219,99 @@ impl MrPdfApp {
 
     fn bookmarks_panel(&mut self, ui: &mut Ui) {
         let t = self.t();
+        let ctx = ui.ctx().clone();
         let Some(tab) = self.tabs.get_mut(self.active) else { return };
         let bookmarks = tab.bookmarks();
+        let current_page = tab.current_page;
+        #[derive(Clone)]
+        enum Action {
+            Go(usize),
+            AddChild(Vec<usize>),
+            Rename(Vec<usize>, String),
+            Delete(Vec<usize>),
+        }
+        let mut action: Option<Action> = None;
+        if ui.button(format!("+ {}", t.add_bookmark)).clicked() {
+            self.dialog = Some(super::Dialog::BookmarkTitle {
+                parent: Some(Vec::new()),
+                path: None,
+                page: current_page,
+                title: format!("{} {}", t.page, current_page + 1),
+            });
+            return;
+        }
         if bookmarks.is_empty() {
             ui.label(RichText::new(t.no_bookmarks).weak());
             return;
         }
-        let mut target = None;
         ScrollArea::vertical().id_salt(("bookmarks", tab.id)).auto_shrink([false, false]).show(ui, |ui| {
-            fn tree(ui: &mut Ui, items: &[Bookmark], path: &mut Vec<usize>, target: &mut Option<usize>) {
+            fn tree(
+                ui: &mut Ui,
+                t: &Strings,
+                items: &[Bookmark],
+                path: &mut Vec<usize>,
+                action: &mut Option<Action>,
+            ) {
                 for (i, b) in items.iter().enumerate() {
                     path.push(i);
                     let title = if b.title.is_empty() { "–".to_string() } else { b.title.clone() };
-                    if b.children.is_empty() {
-                        if ui.selectable_label(false, title).clicked() {
-                            *target = b.page;
+                    let mut entry = |ui: &mut Ui| {
+                        let resp = ui.selectable_label(false, title.clone());
+                        if resp.clicked()
+                            && let Some(page) = b.page
+                        {
+                            *action = Some(Action::Go(page));
                         }
+                        resp.context_menu(|ui| {
+                            if ui.button(t.add_child_bookmark).clicked() {
+                                *action = Some(Action::AddChild(path.clone()));
+                                ui.close();
+                            }
+                            if ui.button(t.rename).clicked() {
+                                *action = Some(Action::Rename(path.clone(), b.title.clone()));
+                                ui.close();
+                            }
+                            if ui.button(t.delete).clicked() {
+                                *action = Some(Action::Delete(path.clone()));
+                                ui.close();
+                            }
+                        });
+                    };
+                    if b.children.is_empty() {
+                        entry(ui);
                     } else {
                         let id = ui.make_persistent_id(("bm", path.clone()));
                         egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
-                            .show_header(ui, |ui| {
-                                if ui.selectable_label(false, title).clicked() {
-                                    *target = b.page;
-                                }
-                            })
-                            .body(|ui| tree(ui, &b.children, path, target));
+                            .show_header(ui, |ui| entry(ui))
+                            .body(|ui| tree(ui, t, &b.children, path, action));
                     }
                     path.pop();
                 }
             }
-            tree(ui, &bookmarks, &mut Vec::new(), &mut target);
+            tree(ui, t, &bookmarks, &mut Vec::new(), &mut action);
         });
-        if let Some(page) = target {
-            tab.go_to_page(page);
+        match action {
+            Some(Action::Go(page)) => tab.go_to_page(page),
+            Some(Action::AddChild(parent)) => {
+                self.dialog = Some(super::Dialog::BookmarkTitle {
+                    parent: Some(parent),
+                    path: None,
+                    page: current_page,
+                    title: format!("{} {}", t.page, current_page + 1),
+                });
+            }
+            Some(Action::Rename(path, title)) => {
+                self.dialog = Some(super::Dialog::BookmarkTitle {
+                    parent: None,
+                    path: Some(path),
+                    page: current_page,
+                    title,
+                });
+            }
+            Some(Action::Delete(path)) => self.edit_pages(&ctx, |tab| tab.doc.delete_bookmark(&path)),
+            None => {}
         }
     }
-
     fn comments_panel(&mut self, ui: &mut Ui) {
         let t = self.t();
         let Some(tab) = self.tabs.get_mut(self.active) else { return };

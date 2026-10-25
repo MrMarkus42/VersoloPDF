@@ -258,6 +258,9 @@ impl MrPdfApp {
         });
         group(ui, t.group_stamps, |ui| {
             self.tool_button(ui, Tool::Stamp, t.tool_stamp, true);
+            if big_button(ui, Icon::Image, t.insert_image, false, has_doc).clicked() {
+                self.insert_image(&ctx);
+            }
             ui.vertical(|ui| {
                 let current = self.settings.stamp;
                 egui::ComboBox::from_id_salt("stamp-preset")

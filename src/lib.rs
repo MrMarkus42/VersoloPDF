@@ -16,6 +16,7 @@ pub mod error;
 pub mod forms;
 pub mod geometry;
 pub mod model;
+pub mod outline;
 pub mod pdf_edit;
 pub mod print;
 pub mod search;
