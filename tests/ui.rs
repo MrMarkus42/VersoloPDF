@@ -862,3 +862,60 @@ fn page_shape_ui() {
     assert!((w - 340.0).abs() < 3.0 && (hh - 200.0).abs() < 3.0, "{w}x{hh}");
     save(&mut h, "50-crop-tool");
 }
+
+#[test]
+fn page_marks_ui() {
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let file = sample_file(&dir, 2);
+    let mut h = harness(vec![file], false);
+    h.run_steps(10);
+    let text = |h: &mut Harness<'_, MrPdfApp>, p: usize| {
+        h.state_mut().active_tab_mut().unwrap().doc.page_text(p).unwrap().all_text()
+    };
+    let ok = |h: &mut Harness<'_, MrPdfApp>| {
+        h.get_all_by_label("OK").last().unwrap().click();
+        h.run_steps(8);
+    };
+
+    quick(&mut h, "Wasserzeichen");
+    h.run_steps(4);
+    save(&mut h, "51-watermark-dialog");
+    ok(&mut h);
+    assert!(text(&mut h, 1).contains("ENTWURF"));
+
+    quick(&mut h, "Kopf- und Fußzeilen");
+    h.run_steps(4);
+    save(&mut h, "52-header-footer-dialog");
+    ok(&mut h);
+    assert!(text(&mut h, 1).contains("Seite 2 von 2"));
+
+    quick(&mut h, "Paginierung");
+    h.run_steps(4);
+    save(&mut h, "53-bates-dialog");
+    ok(&mut h);
+    assert!(text(&mut h, 1).contains("000002"));
+
+    // The manager lists the watermark; "Alle entfernen" asks first.
+    quick(&mut h, "Wasserzeichen verwalten");
+    h.run_steps(4);
+    save(&mut h, "54-watermark-manager");
+    h.get_all_by_label("Schließen").last().unwrap().click();
+    h.run_steps(3);
+    quick(&mut h, "Alle Wasserzeichen entfernen");
+    assert!(h.state().dialog().is_some(), "confirmation");
+    ok(&mut h);
+    assert!(!text(&mut h, 1).contains("ENTWURF"));
+    assert!(text(&mut h, 1).contains("Seite 2 von 2"), "other marks stay");
+
+    quick(&mut h, "Hintergrund");
+    h.run_steps(4);
+    save(&mut h, "55-background-dialog");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    quick(&mut h, "Paginierung zu mehreren Dateien");
+    h.run_steps(3);
+    save(&mut h, "56-bates-files-dialog");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+}

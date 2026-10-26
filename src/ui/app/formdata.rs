@@ -96,6 +96,7 @@ impl MrPdfApp {
             Cmd::ResetForm => self.edit(ctx, |tab| tab.doc.reset_form()),
             Cmd::BookmarkDeleteAll => self.edit(ctx, |tab| tab.doc.delete_all_bookmarks()),
             Cmd::Grayscale => self.edit(ctx, |tab| tab.doc.to_grayscale()),
+            Cmd::RemoveMarks(kind) => self.remove_all_marks(ctx, kind),
             Cmd::ApplyRedactions => {
                 let result = self.tab().map(|t| {
                     t.selected_annot = None;

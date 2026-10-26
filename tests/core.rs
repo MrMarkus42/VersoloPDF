@@ -1263,3 +1263,140 @@ fn page_shape_dialog_operations() {
     assert!((size(&d, 0).0 - 635.3).abs() < 0.5 && (size(&d, 0).1 - 881.9).abs() < 0.5);
     assert!((size(&d, 1).0 - 635.3).abs() < 0.5);
 }
+
+/// A one-page PDF with body text and a watermark artifact as other
+/// programs write it.
+fn foreign_watermark_pdf() -> Vec<u8> {
+    use lopdf::{Document as Lo, Object, Stream, dictionary};
+    let mut doc = Lo::with_version("1.7");
+    let pages_id = doc.new_object_id();
+    let font =
+        doc.add_object(dictionary! { "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica" });
+    let content = b"BT /F1 24 Tf 72 700 Td (Body text) Tj ET\n/Artifact <</Type /Pagination /Subtype /Watermark>> BDC\nBT /F1 40 Tf 100 400 Td (FREMD) Tj ET\nEMC\n".to_vec();
+    let content_id = doc.add_object(Stream::new(lopdf::Dictionary::new(), content));
+    let page = doc.add_object(dictionary! {
+        "Type" => "Page", "Parent" => pages_id, "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+        "Contents" => content_id, "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } },
+    });
+    doc.objects.insert(
+        pages_id,
+        Object::Dictionary(dictionary! { "Type" => "Pages", "Kids" => vec![page.into()], "Count" => 1 }),
+    );
+    let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+    doc.trailer.set("Root", catalog);
+    let mut out = Vec::new();
+    doc.save_to(&mut out).unwrap();
+    out
+}
+
+#[test]
+fn managed_page_marks() {
+    use mrpdf::compose::Align;
+    use mrpdf::marks::{BatesFormat, FontSpec, ImageData, Kind, MarkDef, Source};
+    let _guard = common::lock();
+    let mut d = open(2);
+    let text = |d: &Document, p: usize| d.page_text(p).unwrap().all_text();
+
+    let watermark = MarkDef {
+        kind: Kind::Watermark,
+        source: Source::Text {
+            text: "ENTWURF".into(),
+            font: FontSpec { size: 60.0, ..FontSpec::default() },
+            align: Align::Center,
+        },
+        rotation: 45.0,
+        opacity: 0.3,
+        pages: vec![0, 1],
+        ..MarkDef::default()
+    };
+    let id = d.add_mark(&watermark, None).unwrap();
+    assert!(text(&d, 1).contains("ENTWURF"));
+    let header = MarkDef {
+        kind: Kind::HeaderFooter,
+        source: Source::HeaderFooter {
+            texts: [
+                "%[FileName]".into(),
+                String::new(),
+                String::new(),
+                String::new(),
+                "Seite %[Page] von %[Pages]".into(),
+                String::new(),
+            ],
+            font: FontSpec::default(),
+            margins: [36.0; 4],
+            shrink: true,
+        },
+        pages: vec![0, 1],
+        ..MarkDef::default()
+    };
+    let header_id = d.add_mark(&header, None).unwrap();
+    assert!(text(&d, 1).contains("Seite 2 von 2"), "{}", text(&d, 1));
+    let bates = MarkDef {
+        kind: Kind::Bates,
+        source: Source::HeaderFooter {
+            texts: [
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+                "%[Bates]".into(),
+            ],
+            font: FontSpec::default(),
+            margins: [20.0; 4],
+            shrink: false,
+        },
+        bates: BatesFormat { prefix: "AB".into(), start: 7, digits: 4, suffix: String::new() },
+        pages: vec![0, 1],
+        ..MarkDef::default()
+    };
+    d.add_mark(&bates, None).unwrap();
+    assert!(text(&d, 1).contains("AB0008"));
+
+    // The marks are listed and survive saving.
+    let reopened = Document::from_bytes(d.to_bytes().unwrap(), "m.pdf", None).unwrap();
+    let mut reopened = reopened;
+    let marks = reopened.marks().unwrap();
+    assert_eq!(marks.len(), 3);
+    assert_eq!(marks[0].id, id);
+    assert_eq!(marks[0].def, watermark);
+
+    // Edit the header in one undo step.
+    let mut changed = header.clone();
+    if let Source::HeaderFooter { texts, .. } = &mut changed.source {
+        texts[4] = "S. %[Page]".into();
+    }
+    d.update_mark(&header_id, &changed, None).unwrap();
+    assert!(text(&d, 1).contains("S. 2") && !text(&d, 1).contains("Seite 2 von 2"));
+    assert!(d.undo().unwrap());
+    assert!(text(&d, 1).contains("Seite 2 von 2"));
+
+    // Removing the watermarks leaves the other marks.
+    assert_eq!(d.remove_marks(Kind::Watermark, None, false).unwrap(), 2);
+    assert!(!text(&d, 0).contains("ENTWURF"));
+    assert!(text(&d, 0).contains("Seite 1 von 2"));
+    assert_eq!(d.marks().unwrap().len(), 2);
+
+    // Image watermark with preview.
+    let img = mrpdf::pdf_edit::RgbaImage { width: 20, height: 10, rgba: [255, 0, 0, 255].repeat(200) };
+    let pic = MarkDef {
+        source: Source::Image { name: "rot.png".into() },
+        pages: vec![0],
+        scale: 0.5,
+        ..MarkDef::default()
+    };
+    let preview = d.mark_preview(0, &pic, Some(ImageData::Pixels(img.clone()))).unwrap();
+    let rendered = preview.render_page(0, 100, 141).unwrap();
+    assert!(rendered.rgba.as_chunks::<4>().0.iter().any(|p| p[0] > 200 && p[1] < 60), "red image visible");
+    d.add_mark(&pic, Some(ImageData::Pixels(img))).unwrap();
+    let pic_id = d.marks().unwrap().last().unwrap().id.clone();
+    let moved = MarkDef { h_from: Align::Start, ..pic.clone() };
+    d.update_mark(&pic_id, &moved, None).unwrap();
+
+    // Watermarks of other programs are removed with "Alle entfernen".
+    let mut f = Document::from_bytes(foreign_watermark_pdf(), "f.pdf", None).unwrap();
+    assert!(text(&f, 0).contains("FREMD"));
+    assert_eq!(f.remove_marks(Kind::Watermark, None, true).unwrap(), 1);
+    let t = text(&f, 0);
+    assert!(!t.contains("FREMD") && t.contains("Body text"), "{t}");
+}

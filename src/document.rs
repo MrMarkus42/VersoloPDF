@@ -2159,6 +2159,139 @@ impl Document {
     }
 
     // -----------------------------------------------------------------
+    // Managed page marks (step E, see crate::marks)
+
+    fn mark_context(&self) -> crate::marks::MarkContext {
+        let now = pdf_edit::pdf_date_now();
+        let digits: String = now.chars().filter(|c| c.is_ascii_digit()).take(14).collect();
+        let (date, time) = if digits.len() >= 12 {
+            (
+                format!("{}.{}.{}", &digits[6..8], &digits[4..6], &digits[0..4]),
+                format!("{}:{}", &digits[8..10], &digits[10..12]),
+            )
+        } else {
+            (String::new(), String::new())
+        };
+        crate::marks::MarkContext { file_name: self.display_name.clone(), date, time, ..Default::default() }
+    }
+
+    /// The managed marks of the document.
+    pub fn marks(&mut self) -> Result<Vec<crate::marks::StoredMark>> {
+        self.sync_bytes()?;
+        crate::marks::list(&self.bytes, self.password.as_deref())
+    }
+
+    /// Adds a mark; returns its id.
+    pub fn add_mark(
+        &mut self,
+        def: &crate::marks::MarkDef,
+        image: Option<crate::marks::ImageData>,
+    ) -> Result<String> {
+        self.add_mark_with(def, None, image, 0)
+    }
+
+    /// Adds a mark with Bates numbers continuing at `bates_offset`.
+    pub fn add_mark_with(
+        &mut self,
+        def: &crate::marks::MarkDef,
+        id: Option<&str>,
+        image: Option<crate::marks::ImageData>,
+        bates_offset: u64,
+    ) -> Result<String> {
+        self.require(self.permissions().modify)?;
+        let mut ctx = self.mark_context();
+        ctx.bates_offset = bates_offset;
+        let mut new_id = String::new();
+        self.edit_bytes("page marks", |b, pw| {
+            let (bytes, id) = crate::marks::add(b, pw, def, id, image, &ctx)?;
+            new_id = id;
+            Ok(bytes)
+        })?;
+        Ok(new_id)
+    }
+
+    /// Removes marks of `kind` (all, or the given ids). With `foreign` also
+    /// matching marks of other programs. Returns the number of removed marks.
+    pub fn remove_marks(
+        &mut self,
+        kind: crate::marks::Kind,
+        ids: Option<&[String]>,
+        foreign: bool,
+    ) -> Result<usize> {
+        self.require(self.permissions().modify)?;
+        let filter = crate::marks::RemoveFilter { kind: Some(kind), ids, foreign };
+        let mut removed = 0;
+        self.edit_bytes("remove page marks", |b, pw| {
+            let (bytes, n) = crate::marks::remove(b, pw, &filter)?;
+            removed = n;
+            Ok(bytes)
+        })?;
+        Ok(removed)
+    }
+
+    /// Replaces a mark by a new definition (keeping its id and image unless a
+    /// new image is given).
+    pub fn update_mark(
+        &mut self,
+        id: &str,
+        def: &crate::marks::MarkDef,
+        image: Option<crate::marks::ImageData>,
+    ) -> Result<()> {
+        let stored = self
+            .marks()?
+            .into_iter()
+            .find(|m| m.id == id)
+            .ok_or_else(|| Error::Invalid("mark not found".into()))?;
+        let image = image.or(stored.image.map(crate::marks::ImageData::Existing));
+        let snapshot_len = self.history.undo.len();
+        let ids = [id.to_string()];
+        self.remove_marks(stored.def.kind, Some(&ids), false)?;
+        self.add_mark_with(def, Some(id), image, 0)?;
+        // One undo step for remove + add.
+        while self.history.undo.len() > snapshot_len + 1 {
+            let last = self.history.undo.pop();
+            if let (Some(first), Some(_)) = (self.history.undo.last_mut(), last) {
+                first.label = "edit page mark".into();
+            }
+        }
+        Ok(())
+    }
+
+    /// Redraws the marks of `kind` in the order of `ids`.
+    pub fn reorder_marks(&mut self, kind: crate::marks::Kind, ids: &[String]) -> Result<()> {
+        let stored: Vec<_> = self.marks()?.into_iter().filter(|m| m.def.kind == kind).collect();
+        let snapshot_len = self.history.undo.len();
+        self.remove_marks(kind, None, false)?;
+        for id in ids {
+            if let Some(m) = stored.iter().find(|m| &m.id == id) {
+                self.add_mark_with(&m.def, Some(&m.id), m.image.map(crate::marks::ImageData::Existing), 0)?;
+            }
+        }
+        while self.history.undo.len() > snapshot_len + 1 {
+            self.history.undo.pop();
+        }
+        Ok(())
+    }
+
+    /// A one-page document showing `page` with the mark applied (preview).
+    pub fn mark_preview(
+        &self,
+        page: usize,
+        def: &crate::marks::MarkDef,
+        image: Option<crate::marks::ImageData>,
+    ) -> Result<Document> {
+        let bytes = self.extract_pages_to_bytes(&[page])?;
+        let mut def = def.clone();
+        def.pages = vec![0];
+        let mut ctx = self.mark_context();
+        ctx.page_base = page;
+        ctx.total = Some(self.page_count());
+        // An id of its own: resource names of the page's marks must not clash.
+        let (bytes, _) = crate::marks::add(&bytes, None, &def, Some("preview"), image, &ctx)?;
+        Self::from_bytes(bytes, "preview.pdf", None)
+    }
+
+    // -----------------------------------------------------------------
     // Page shape (step D): cropping, white margins, resizing, margins
 
     /// White margins of a page (display terms: left, right, top, bottom).

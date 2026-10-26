@@ -348,7 +348,7 @@ pub(super) fn macro_menu(
 }
 
 /// Toolbar + table of a file list dialog ("Dateien hinzufügen…").
-fn file_list(
+pub(super) fn file_list(
     ui: &mut Ui,
     de: bool,
     files: &mut Vec<PathBuf>,
