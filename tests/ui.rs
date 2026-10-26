@@ -805,3 +805,60 @@ fn combine_split_overlay_ui() {
     h.key_press(egui::Key::Escape);
     h.run_steps(3);
 }
+
+#[test]
+fn page_shape_ui() {
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let file = sample_file(&dir, 2);
+    let mut h = harness(vec![file], false);
+    h.run_steps(10);
+    let size =
+        |h: &Harness<'_, MrPdfApp>| h.state().active_tab().unwrap().doc.geometry(0).unwrap().view_size();
+    let ok = |h: &mut Harness<'_, MrPdfApp>| {
+        h.get_all_by_label("OK").last().unwrap().click();
+        h.run_steps(8);
+    };
+
+    // Crop dialog: white margins of the current page via the button.
+    quick(&mut h, "Seiten zuschneiden");
+    h.get_by_label("Auf weiße Ränder setzen").click();
+    h.run_steps(4);
+    save(&mut h, "47-crop-dialog");
+    ok(&mut h);
+    assert!(size(&h).0 < 500.0, "cropped: {:?}", size(&h));
+    assert!(h.state_mut().active_tab_mut().unwrap().doc.undo().unwrap());
+
+    // Trim white margins from the menu (all pages).
+    quick(&mut h, "Weiße Ränder abschneiden");
+    assert!(size(&h).0 < 500.0);
+    assert!(h.state_mut().active_tab_mut().unwrap().doc.undo().unwrap());
+
+    // Resize: A5 by default? Standard A4 -> choose scaling 50 %.
+    quick(&mut h, "Größe ändern");
+    h.get_by_label("Skalierung").click();
+    h.run_steps(3);
+    save(&mut h, "48-resize-dialog");
+    ok(&mut h);
+    // Scaling defaults to 100 %: size stays.
+    assert!((size(&h).0 - 595.3).abs() < 1.0);
+
+    // Margins: dialog with mirror option.
+    quick(&mut h, "Ränder");
+    save(&mut h, "49-margins-dialog");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+
+    // Crop tool: drag a rectangle on page 1.
+    quick(&mut h, "Seite zuschneiden");
+    assert_eq!(h.state().tool(), mrpdf::ui::tools::Tool::Crop);
+    let at = |h: &Harness<'_, MrPdfApp>, x: f32, y: f32| {
+        h.state().active_tab().unwrap().screen_pos(0, mrpdf::geometry::PointF::new(x, y)).unwrap()
+    };
+    let (a, b) = (at(&h, 60.0, 760.0), at(&h, 400.0, 560.0));
+    drag(&mut h, a, b);
+    h.run_steps(6);
+    let (w, hh) = size(&h);
+    assert!((w - 340.0).abs() < 3.0 && (hh - 200.0).abs() < 3.0, "{w}x{hh}");
+    save(&mut h, "50-crop-tool");
+}

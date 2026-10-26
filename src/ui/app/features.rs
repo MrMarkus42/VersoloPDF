@@ -2,7 +2,7 @@
 
 use egui::Context;
 
-use super::commands::{Cmd, Side};
+use super::commands::Cmd;
 use super::structure::MarkKind;
 use super::{Dialog, MrPdfApp};
 use crate::geometry::RectF;
@@ -15,13 +15,6 @@ use crate::ui::tools::Tool;
 
 /// Commands that are not implemented yet; they are shown greyed out.
 pub const PENDING: &[Cmd] = &[
-    Cmd::Tool(Tool::Crop),
-    Cmd::RemoveCropped,
-    Cmd::TrimWhite(Side::All),
-    Cmd::TrimWhite(Side::Left),
-    Cmd::TrimWhite(Side::Right),
-    Cmd::TrimWhite(Side::Top),
-    Cmd::TrimWhite(Side::Bottom),
     Cmd::RemoveMarks(MarkKind::Watermark),
     Cmd::RemoveMarks(MarkKind::Background),
     Cmd::RemoveMarks(MarkKind::HeaderFooter),
@@ -163,6 +156,10 @@ impl MrPdfApp {
                 });
             }
             CanvasEvent::AttachFile { page, rect } => self.attach_file(ctx, page, rect),
+            CanvasEvent::CropPage { page, rect } => {
+                self.edit(ctx, |tab| tab.doc.crop_to_rect(page, rect));
+                self.select_tool(Tool::Hand);
+            }
             CanvasEvent::CreateField { page, rect, tool } => self.create_field(ctx, page, rect, tool),
             _ => {}
         }

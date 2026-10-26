@@ -81,6 +81,11 @@ pub enum CanvasEvent {
         page: usize,
         rect: RectF,
     },
+    /// The crop tool drew a rectangle.
+    CropPage {
+        page: usize,
+        rect: RectF,
+    },
 }
 
 pub struct CanvasCtx<'a> {
@@ -888,6 +893,7 @@ fn finish_shape(
             }
         }
         Tool::Snapshot if big_enough => cx.events.push(CanvasEvent::Snapshot { page, rect }),
+        Tool::Crop if big_enough => cx.events.push(CanvasEvent::CropPage { page, rect }),
         Tool::Link if big_enough => cx.events.push(CanvasEvent::CreateLink { page, rect }),
         Tool::AreaHighlight if big_enough => {
             let mut annot = new_annot(cx, AnnotKind::Highlight);

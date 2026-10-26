@@ -920,7 +920,7 @@ impl MrPdfApp {
             return;
         }
         // Page dialogs of "Dokumentaufbau" (insert, delete, extract, …).
-        if self.run_page_dialog(cmd) || self.run_layout_dialog(cmd) {
+        if self.run_page_dialog(cmd) || self.run_layout_dialog(cmd) || self.run_shape(ctx, cmd) {
             return;
         }
         match cmd {

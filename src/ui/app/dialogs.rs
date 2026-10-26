@@ -533,6 +533,11 @@ impl MrPdfApp {
                     outcome = o;
                     action = a;
                 }
+                Dialog::Shape(state) => {
+                    let (o, a) = self.shape_dialog(ui, state);
+                    outcome = o;
+                    action = a;
+                }
                 Dialog::About => {
                     ui.horizontal(|ui| {
                         let (rect, _) = ui.allocate_exact_size(egui::vec2(48.0, 48.0), egui::Sense::hover());

@@ -12,6 +12,7 @@ mod preview;
 mod properties;
 mod review;
 mod ribbon;
+mod shape_dialogs;
 mod sidebar;
 mod statusbar;
 mod structure;
@@ -217,6 +218,7 @@ pub enum Dialog {
     NewField(Box<formdata::FieldForm>),
     Pages(Box<page_dialogs::PageDialogState>),
     Layout(Box<layout_dialogs::LayoutState>),
+    Shape(Box<shape_dialogs::ShapeState>),
     SearchRedact {
         query: String,
         match_case: bool,

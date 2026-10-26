@@ -2159,6 +2159,182 @@ impl Document {
     }
 
     // -----------------------------------------------------------------
+    // Page shape (step D): cropping, white margins, resizing, margins
+
+    /// White margins of a page (display terms: left, right, top, bottom).
+    pub fn white_margins(&self, page: usize, consider_annotations: bool) -> Result<pages::Margins> {
+        let geo = self.geometry(page).copied().ok_or(Error::PageOutOfRange(page))?;
+        let (w, h) = geo.view_size();
+        let pw = 500u32;
+        let scale = pw as f32 / w.max(1.0);
+        let ph = ((h * scale) as u32).clamp(1, 4000);
+        let opts = RenderOptions { annotations: consider_annotations, ..RenderOptions::default() };
+        let img = self.render_tile(page, pw, ph, 0, 0, pw, ph, opts)?;
+        let (mut x0, mut y0, mut x1, mut y1) = (pw, ph, 0u32, 0u32);
+        for y in 0..ph {
+            for x in 0..pw {
+                let i = ((y * pw + x) * 4) as usize;
+                let lum = (u32::from(img.rgba[i]) * 3
+                    + u32::from(img.rgba[i + 1]) * 6
+                    + u32::from(img.rgba[i + 2]))
+                    / 10;
+                if lum < 245 {
+                    x0 = x0.min(x);
+                    x1 = x1.max(x);
+                    y0 = y0.min(y);
+                    y1 = y1.max(y);
+                }
+            }
+        }
+        if x0 > x1 {
+            return Ok([0.0; 4]);
+        }
+        // One pixel of safety so nothing visible is cut.
+        let px = 1.0 / scale;
+        Ok([
+            (x0 as f32 / scale - px).max(0.0),
+            ((pw - 1 - x1) as f32 / scale - px).max(0.0),
+            (y0 as f32 / scale - px).max(0.0),
+            ((ph - 1 - y1) as f32 / scale - px).max(0.0),
+        ])
+    }
+
+    /// Margins (display terms) that show the whole media box: negative
+    /// values that enlarge the visible area up to the media box.
+    pub fn media_margins(&self, page: usize) -> Result<pages::Margins> {
+        let geo = self.geometry(page).copied().ok_or(Error::PageOutOfRange(page))?;
+        let p = self.page(page)?;
+        let media = p.boundaries().media().map(|b| to_rectf(&b.bounds)).unwrap_or(geo.crop);
+        // Map the media box into the view and compare with the visible page.
+        let v = geo.pdf_rect_to_view(&media);
+        let (w, h) = geo.view_size();
+        Ok([v.x0.min(0.0), (w - v.x1).min(0.0), v.y0.min(0.0), (h - v.y1).min(0.0)])
+    }
+
+    /// Crops pages by display margins (see [`pages::crop_pages`]).
+    pub fn crop_pages_with(
+        &mut self,
+        items: &[(usize, pages::Margins)],
+        opts: pages::CropOptions,
+    ) -> Result<()> {
+        for (p, _) in items {
+            self.check_page(*p)?;
+        }
+        self.require(self.permissions().modify)?;
+        self.edit_bytes("crop pages", |b, pw| pages::crop_pages(b, pw, items, opts))
+    }
+
+    /// Removes content objects, comments and/or form fields that lie
+    /// completely outside the visible area of `pages`.
+    pub fn remove_outside(
+        &mut self,
+        pages: &[usize],
+        content: bool,
+        comments: bool,
+        fields: bool,
+    ) -> Result<usize> {
+        for &p in pages {
+            self.check_page(p)?;
+        }
+        self.require(self.permissions().modify)?;
+        let mut removed = 0;
+        if comments || fields {
+            for &page in pages {
+                let Some(crop) = self.geometry(page).map(|g| g.crop) else { continue };
+                let indices: Vec<usize> = self
+                    .annotations(page)?
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, a)| {
+                        let wanted = if a.kind == AnnotKind::Widget {
+                            fields
+                        } else {
+                            comments && a.kind != AnnotKind::Popup
+                        };
+                        wanted && !a.rect.intersects(&crop)
+                    })
+                    .map(|(i, _)| i)
+                    .collect();
+                if !indices.is_empty() {
+                    removed += indices.len();
+                    self.delete_annotations(page, &indices)?;
+                }
+            }
+        }
+        if content {
+            let crops: Vec<(usize, RectF)> =
+                pages.iter().filter_map(|&p| self.geometry(p).map(|g| (p, g.crop))).collect();
+            let mut count = 0;
+            self.edit_engine("remove cropped content", |pdf| {
+                for (p, crop) in &crops {
+                    let mut page = pdf.pages().get(page_index(*p)?)?;
+                    let objects = page.objects();
+                    let n = objects.len();
+                    let mut outside = Vec::new();
+                    for i in 0..n {
+                        let Ok(obj) = objects.get(i) else { continue };
+                        let Ok(bounds) = obj.bounds() else { continue };
+                        let r = to_rectf(&bounds.to_rect());
+                        if !r.intersects(crop) {
+                            outside.push(i);
+                        }
+                    }
+                    for i in outside.into_iter().rev() {
+                        page.objects_mut().remove_object_at_index(i)?;
+                        count += 1;
+                    }
+                }
+                Ok(())
+            })?;
+            removed += count;
+        }
+        Ok(removed)
+    }
+
+    /// Crops to a rectangle (PDF space) drawn with the crop tool.
+    pub fn crop_to_rect(&mut self, page: usize, rect: RectF) -> Result<()> {
+        let geo = self.geometry(page).copied().ok_or(Error::PageOutOfRange(page))?;
+        let view = geo.pdf_rect_to_view(&rect.normalized());
+        let (w, h) = geo.view_size();
+        let m = [view.x0.max(0.0), (w - view.x1).max(0.0), view.y0.max(0.0), (h - view.y1).max(0.0)];
+        self.crop_pages_with(&[(page, m)], pages::CropOptions::default())
+    }
+
+    /// "Größe ändern" (see [`pages::resize_pages_with`]); returns changed pages.
+    pub fn resize_pages_with(&mut self, pages: &[usize], spec: &pages::ResizeSpec) -> Result<usize> {
+        for &p in pages {
+            self.check_page(p)?;
+        }
+        self.require(self.permissions().assemble)?;
+        let mut changed = 0;
+        self.edit_bytes("resize pages", |b, pw| {
+            let (bytes, n) = pages::resize_pages_with(b, pw, pages, spec)?;
+            changed = n;
+            Ok(bytes)
+        })?;
+        if changed == 0 {
+            self.history.undo.pop();
+        }
+        Ok(changed)
+    }
+
+    /// A one-page preview document of `page` resized with `spec`.
+    pub fn resize_preview(&self, page: usize, spec: &pages::ResizeSpec) -> Result<Document> {
+        let bytes = self.extract_pages_to_bytes(&[page])?;
+        let (bytes, _) = pages::resize_pages_with(&bytes, None, &[0], spec)?;
+        Self::from_bytes(bytes, "preview.pdf", None)
+    }
+
+    /// "Ränder einrichten": display margins per page (negative = smaller).
+    pub fn add_page_margins(&mut self, items: &[(usize, pages::Margins)]) -> Result<()> {
+        for (p, _) in items {
+            self.check_page(*p)?;
+        }
+        self.require(self.permissions().modify)?;
+        self.edit_bytes("page margins", |b, pw| pages::add_margins(b, pw, items))
+    }
+
+    // -----------------------------------------------------------------
     // Combining, splitting and overlaying (step C)
 
     /// A new document with `pages` placed several per sheet.

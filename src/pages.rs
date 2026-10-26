@@ -681,6 +681,248 @@ pub fn split_pages(
     })
 }
 
+// ---------------------------------------------------------------------------
+// Boxes in display terms (left/right/top/bottom as the page is shown)
+
+/// Margins as shown on screen: left, right, top, bottom (points).
+pub type Margins = [f32; 4];
+
+/// Which page box "Seiten zuschneiden" changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum BoxKind {
+    #[default]
+    Crop,
+    Media,
+    Trim,
+    Bleed,
+    Art,
+}
+
+impl BoxKind {
+    pub const ALL: [BoxKind; 5] =
+        [BoxKind::Crop, BoxKind::Media, BoxKind::Trim, BoxKind::Bleed, BoxKind::Art];
+
+    pub fn key(self) -> &'static [u8] {
+        match self {
+            BoxKind::Crop => b"CropBox",
+            BoxKind::Media => b"MediaBox",
+            BoxKind::Trim => b"TrimBox",
+            BoxKind::Bleed => b"BleedBox",
+            BoxKind::Art => b"ArtBox",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            BoxKind::Crop => "Crop-Box",
+            BoxKind::Media => "Media-Box",
+            BoxKind::Trim => "Trim-Box",
+            BoxKind::Bleed => "Bleed-Box",
+            BoxKind::Art => "Art-Box",
+        }
+    }
+}
+
+/// The user-space rectangle of a rectangle given in display coordinates
+/// (upright, origin bottom left) of a page.
+fn display_to_user(edit: &Edit, page_id: ObjectId, disp: RectF) -> RectF {
+    let vb = visible_box(edit, page_id);
+    let rot = page_rotation(edit, page_id);
+    let (up, _, _) = crate::import::upright(vb, rot);
+    let back = up.invert();
+    let corners = [(disp.x0, disp.y0), (disp.x1, disp.y0), (disp.x0, disp.y1), (disp.x1, disp.y1)]
+        .map(|(x, y)| back.apply(x, y));
+    RectF::bounding(corners.iter().map(|(x, y)| crate::geometry::PointF::new(*x, *y))).unwrap_or(vb)
+}
+
+/// Displayed size of a page (after /Rotate).
+fn display_size(edit: &Edit, page_id: ObjectId) -> (f32, f32) {
+    let vb = visible_box(edit, page_id);
+    if page_rotation(edit, page_id) % 180 == 0 {
+        (vb.width(), vb.height())
+    } else {
+        (vb.height(), vb.width())
+    }
+}
+
+/// Options of [`crop_pages`].
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct CropOptions {
+    pub kind: BoxKind,
+    /// Set the media box to the new crop box ("Seitengröße an die Crop-Box anpassen").
+    pub fit_media: bool,
+    /// Make all changed pages as large as the largest one (centred).
+    pub same_size: bool,
+}
+
+/// Cuts `margins` (display terms, positive = smaller) off the visible area
+/// of each page and stores the result in the chosen box.
+pub fn crop_pages(
+    bytes: &[u8],
+    password: Option<&str>,
+    items: &[(usize, Margins)],
+    opts: CropOptions,
+) -> Result<Vec<u8>> {
+    guarded(|| {
+        let mut edit = Edit::open(bytes, password)?;
+        // Display rectangles first, so all pages can get the same size.
+        let mut rects = Vec::new();
+        for (page, m) in items {
+            let page_id = edit.page_id(*page)?;
+            let (w, h) = display_size(&edit, page_id);
+            let r = RectF::new(m[0], m[3], w - m[1], h - m[2]);
+            if r.x1 - r.x0 < 3.0 || r.y1 - r.y0 < 3.0 {
+                return Err(Error::Invalid("the page would become too small".into()));
+            }
+            rects.push((page_id, r));
+        }
+        if opts.same_size {
+            let mw = rects.iter().map(|(_, r)| r.width()).fold(0.0, f32::max);
+            let mh = rects.iter().map(|(_, r)| r.height()).fold(0.0, f32::max);
+            for (_, r) in &mut rects {
+                let (cx, cy) = ((r.x0 + r.x1) / 2.0, (r.y0 + r.y1) / 2.0);
+                *r = RectF::new(cx - mw / 2.0, cy - mh / 2.0, cx + mw / 2.0, cy + mh / 2.0);
+            }
+        }
+        let converted: Vec<(ObjectId, RectF)> =
+            rects.iter().map(|(id, r)| (*id, display_to_user(&edit, *id, *r))).collect();
+        for (page_id, user) in converted {
+            let media = page_box(&edit, page_id, b"MediaBox").unwrap_or(user);
+            let dict = edit.dict_mut(page_id)?;
+            dict.set(opts.kind.key().to_vec(), rect_array(&user));
+            if opts.kind == BoxKind::Crop && opts.fit_media {
+                dict.set("MediaBox", rect_array(&user));
+            } else if opts.kind == BoxKind::Media {
+                // A smaller media box also limits the crop box.
+                dict.remove(b"CropBox");
+            } else if !media.contains(crate::geometry::PointF::new(user.x0, user.y0))
+                || !media.contains(crate::geometry::PointF::new(user.x1, user.y1))
+            {
+                dict.set("MediaBox", rect_array(&media.union(&user)));
+            }
+        }
+        edit.finish()
+    })
+}
+
+/// Adds margins (display terms; negative values make the page smaller)
+/// around the visible area of each page by enlarging media and crop box.
+pub fn add_margins(bytes: &[u8], password: Option<&str>, items: &[(usize, Margins)]) -> Result<Vec<u8>> {
+    guarded(|| {
+        let mut edit = Edit::open(bytes, password)?;
+        for (page, m) in items {
+            let page_id = edit.page_id(*page)?;
+            let (w, h) = display_size(&edit, page_id);
+            let disp = RectF::new(-m[0], -m[3], w + m[1], h + m[2]);
+            if disp.x1 - disp.x0 < 10.0 || disp.y1 - disp.y0 < 10.0 {
+                return Err(Error::Invalid("the page would become too small".into()));
+            }
+            let user = display_to_user(&edit, page_id, disp);
+            let media = page_box(&edit, page_id, b"MediaBox").unwrap_or(user);
+            let dict = edit.dict_mut(page_id)?;
+            dict.set("CropBox", rect_array(&user));
+            dict.set("MediaBox", rect_array(&media.union(&user)));
+        }
+        edit.finish()
+    })
+}
+
+/// How "Größe ändern" computes the new page size.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum SizeMode {
+    /// A fixed size (display orientation, points).
+    Fixed(f32, f32),
+    /// A factor (1.0 = 100 %).
+    Scale(f32),
+    /// Width and height grow by these amounts (points).
+    Grow(f32, f32),
+}
+
+/// Options of [`resize_pages_with`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ResizeSpec {
+    pub mode: SizeMode,
+    /// 0 = keep, 1 = portrait, 2 = landscape.
+    pub orientation: u8,
+    /// Skip pages: 0 = none, 1 = portrait pages, 2 = landscape pages.
+    pub skip: u8,
+    /// Scale the content to the new size.
+    pub fit: bool,
+    pub keep_aspect: bool,
+    /// Anchor of the content: 0 = left/bottom, 0.5 = centre, 1 = right/top.
+    pub anchor: (f32, f32),
+    /// Extra offset (points, display terms).
+    pub offset: (f32, f32),
+    /// Move the media box to the origin.
+    pub normalize: bool,
+}
+
+/// "Größe ändern": new page sizes, content scaled and/or positioned.
+pub fn resize_pages_with(
+    bytes: &[u8],
+    password: Option<&str>,
+    pages: &[usize],
+    spec: &ResizeSpec,
+) -> Result<(Vec<u8>, usize)> {
+    guarded(|| {
+        let mut edit = Edit::open(bytes, password)?;
+        let mut changed = 0;
+        for &page in pages {
+            let page_id = edit.page_id(page)?;
+            let vb = visible_box(&edit, page_id);
+            let rot = page_rotation(&edit, page_id);
+            let (up, w, h) = crate::import::upright(vb, rot);
+            match spec.skip {
+                1 if h >= w => continue,
+                2 if w > h => continue,
+                _ => {}
+            }
+            let (mut tw, mut th) = match spec.mode {
+                SizeMode::Fixed(a, b) => (a, b),
+                SizeMode::Scale(f) => (w * f, h * f),
+                SizeMode::Grow(a, b) => (w + a, h + b),
+            };
+            match spec.orientation {
+                1 if tw > th => std::mem::swap(&mut tw, &mut th),
+                2 if th > tw => std::mem::swap(&mut tw, &mut th),
+                _ => {}
+            }
+            if !(3.0..=14_400.0).contains(&tw) || !(3.0..=14_400.0).contains(&th) {
+                return Err(Error::Invalid("invalid page size".into()));
+            }
+            let (sx, sy) = if spec.fit {
+                if spec.keep_aspect {
+                    let s = (tw / w).min(th / h);
+                    (s, s)
+                } else {
+                    (tw / w, th / h)
+                }
+            } else {
+                (1.0, 1.0)
+            };
+            let x = (tw - w * sx) * spec.anchor.0 + spec.offset.0;
+            let y = (th - h * sy) * spec.anchor.1 + spec.offset.1;
+            // New box in user orientation (width/height swap for 90°/270°).
+            let (uw, uh) = if rot % 180 == 0 { (tw, th) } else { (th, tw) };
+            let origin = if spec.normalize { (0.0, 0.0) } else { (vb.x0, vb.y0) };
+            let new_box = RectF::new(origin.0, origin.1, origin.0 + uw, origin.1 + uh);
+            let (new_up, _, _) = crate::import::upright(new_box, rot);
+            let m = up.then(Matrix::scale(sx, sy)).then(Matrix::translate(x, y)).then(new_up.invert());
+            transform_page_matrix(&mut edit, page_id, m, 0.0)?;
+            let dict = edit.dict_mut(page_id)?;
+            dict.set("MediaBox", rect_array(&new_box));
+            for key in [&b"CropBox"[..], b"TrimBox", b"BleedBox", b"ArtBox"] {
+                dict.remove(key);
+            }
+            changed += 1;
+        }
+        if changed == 0 {
+            return Ok((bytes.to_vec(), 0));
+        }
+        Ok((edit.finish()?, changed))
+    })
+}
+
 /// Enlarges (positive) or reduces the media and crop boxes of `pages` by the
 /// given margins (left, bottom, right, top) in points.
 pub fn change_margins(

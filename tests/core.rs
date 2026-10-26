@@ -1188,3 +1188,78 @@ fn combine_split_and_overlay() {
     assert_eq!(d.overlay_from(&[0, 1, 2], &src, &[0, 1], &opts).unwrap(), 2);
     std::fs::remove_file(&src).ok();
 }
+
+#[test]
+fn page_shape_dialog_operations() {
+    use mrpdf::pages::{CropOptions, ResizeSpec, SizeMode};
+    let _guard = common::lock();
+    let size = |d: &Document, p: usize| d.geometry(p).unwrap().view_size();
+
+    // White margins: the text starts 72 pt from the left.
+    let mut d = open(2);
+    let m = d.white_margins(0, false).unwrap();
+    assert!((m[0] - 72.0).abs() < 4.0, "{m:?}");
+    assert!(m[2] > 90.0 && m[2] < 140.0, "top {m:?}");
+    d.crop_pages_with(&[(0, m)], CropOptions::default()).unwrap();
+    let (w, h) = size(&d, 0);
+    assert!(w < 595.0 - 72.0 && h < 842.0 - 90.0, "{w}x{h}");
+    assert!(d.page_text(0).unwrap().all_text().contains("Page 1"));
+    // Cropped areas are white margins only: trimming again changes little.
+    let again = d.white_margins(0, false).unwrap();
+    assert!(again.iter().all(|v| *v < 4.0), "{again:?}");
+
+    // Cut the first text line off and remove the hidden content.
+    let mut d = open(1);
+    d.crop_pages_with(&[(0, [0.0, 0.0, 200.0, 0.0])], CropOptions::default()).unwrap();
+    assert!(d.page_text(0).unwrap().all_text().contains("Page 1"), "still in the file");
+    assert!(d.remove_outside(&[0], true, true, true).unwrap() >= 1);
+    let text = d.page_text(0).unwrap().all_text();
+    assert!(!text.contains("Page 1") && text.contains("Zweite"), "{text}");
+
+    // Same size for all changed pages; fit the media box.
+    let mut d = open(2);
+    let opts = CropOptions { same_size: true, fit_media: true, ..CropOptions::default() };
+    d.crop_pages_with(&[(0, [100.0, 100.0, 100.0, 100.0]), (1, [10.0, 10.0, 10.0, 10.0])], opts).unwrap();
+    let (w0, h0) = size(&d, 0);
+    let (w1, h1) = size(&d, 1);
+    assert!((w0 - w1).abs() < 0.5 && (h0 - h1).abs() < 0.5, "{w0}x{h0} vs {w1}x{h1}");
+
+    // Crop tool rectangle.
+    let mut d = open(1);
+    d.crop_to_rect(0, RectF::new(50.0, 500.0, 350.0, 760.0)).unwrap();
+    let (w, h) = size(&d, 0);
+    assert!((w - 300.0).abs() < 0.5 && (h - 260.0).abs() < 0.5, "{w}x{h}");
+
+    // Resize: fixed A5 with scaled content, scale 50 %, grow, skip portrait.
+    let mut d = open(2);
+    let spec = ResizeSpec {
+        mode: SizeMode::Fixed(419.53, 595.28),
+        orientation: 0,
+        skip: 0,
+        fit: true,
+        keep_aspect: true,
+        anchor: (0.5, 0.5),
+        offset: (0.0, 0.0),
+        normalize: true,
+    };
+    assert_eq!(d.resize_pages_with(&[0], &spec).unwrap(), 1);
+    let (w, h) = size(&d, 0);
+    assert!((w - 419.5).abs() < 0.5 && (h - 595.3).abs() < 0.5);
+    assert!(d.page_text(0).unwrap().all_text().contains("Page 1"));
+    let spec2 = ResizeSpec { mode: SizeMode::Scale(0.5), ..spec };
+    d.resize_pages_with(&[1], &spec2).unwrap();
+    assert!((size(&d, 1).0 - 297.6).abs() < 0.5);
+    let spec3 = ResizeSpec { mode: SizeMode::Grow(20.0, 10.0), fit: false, ..spec };
+    d.resize_pages_with(&[1], &spec3).unwrap();
+    assert!((size(&d, 1).0 - 317.6).abs() < 0.5 && (size(&d, 1).1 - 431.0).abs() < 0.5);
+    let skip = ResizeSpec { skip: 1, ..spec3 };
+    assert_eq!(d.resize_pages_with(&[0, 1], &skip).unwrap(), 0, "both pages are portrait");
+    let preview = d.resize_preview(0, &spec2).unwrap();
+    assert!((preview.geometry(0).unwrap().view_size().0 - 209.8).abs() < 0.5);
+
+    // Margins: 20 pt everywhere, mirrored on page 2.
+    let mut d = open(2);
+    d.add_page_margins(&[(0, [20.0, 20.0, 20.0, 20.0]), (1, [10.0, 30.0, 0.0, 0.0])]).unwrap();
+    assert!((size(&d, 0).0 - 635.3).abs() < 0.5 && (size(&d, 0).1 - 881.9).abs() < 0.5);
+    assert!((size(&d, 1).0 - 635.3).abs() < 0.5);
+}
