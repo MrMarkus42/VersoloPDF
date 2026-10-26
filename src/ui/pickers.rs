@@ -135,16 +135,12 @@ impl PageRange {
         (!pages.is_empty()).then_some(pages)
     }
 
-    /// Draws the "Seitenbereich" box. `with_current` offers "Aktuell".
-    pub fn ui(&mut self, ui: &mut Ui, de: bool, page_count: usize, current: usize, with_current: bool) {
-        self.ui_titled(
-            ui,
-            de,
-            page_count,
-            current,
-            with_current,
-            if de { "Seitenbereich" } else { "Page range" },
-        );
+    /// Draws the "Seitenbereich" box offering `modes`.
+    /// All modes offered: "Alle", "Aktuell", "Bereich".
+    pub const ALL_MODES: [RangeMode; 3] = [RangeMode::All, RangeMode::Current, RangeMode::Custom];
+
+    pub fn ui(&mut self, ui: &mut Ui, de: bool, page_count: usize, current: usize, modes: &[RangeMode]) {
+        self.ui_titled(ui, de, page_count, current, modes, if de { "Seitenbereich" } else { "Page range" });
     }
 
     pub fn ui_titled(
@@ -153,9 +149,12 @@ impl PageRange {
         de: bool,
         page_count: usize,
         current: usize,
-        with_current: bool,
+        modes: &[RangeMode],
         title: &str,
     ) {
+        if !modes.contains(&self.mode) {
+            self.mode = modes.first().copied().unwrap_or_default();
+        }
         let selected = self.resolve(page_count, current).map_or(0, |p| p.len());
         let header = if de {
             format!("{title}: {selected} von {page_count} Seiten ausgewählt")
@@ -166,12 +165,16 @@ impl PageRange {
             egui::Grid::new(ui.id().with("range")).num_columns(2).spacing(vec2(8.0, 6.0)).show(ui, |ui| {
                 ui.label(if de { "Seiten" } else { "Pages" });
                 ui.horizontal(|ui| {
-                    let mut options = vec![(RangeMode::All, if de { "Alle" } else { "All" }.to_string())];
-                    if with_current {
-                        let label = if de { "Aktuell" } else { "Current" };
-                        options.push((RangeMode::Current, format!("{label}: {}", current + 1)));
-                    }
-                    options.push((RangeMode::Custom, if de { "Bereich" } else { "Range" }.to_string()));
+                    let options: Vec<(RangeMode, String)> = modes
+                        .iter()
+                        .map(|m| match m {
+                            RangeMode::All => (*m, if de { "Alle" } else { "All" }.to_string()),
+                            RangeMode::Current => {
+                                (*m, format!("{}: {}", if de { "Aktuell" } else { "Current" }, current + 1))
+                            }
+                            RangeMode::Custom => (*m, if de { "Bereich" } else { "Range" }.to_string()),
+                        })
+                        .collect();
                     if segmented(ui, &mut self.mode, &options)
                         && self.mode == RangeMode::Custom
                         && self.text.is_empty()

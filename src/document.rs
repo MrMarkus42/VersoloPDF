@@ -54,6 +54,35 @@ impl Default for RenderOptions {
     }
 }
 
+/// What happens with comments or form fields when pages are extracted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum Handling {
+    #[default]
+    Copy,
+    /// Burn into the page content ("Einbetten").
+    Flatten,
+    Remove,
+}
+
+/// Which bookmarks go into extracted files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum BookmarkCopy {
+    All,
+    /// Only bookmarks pointing to extracted pages ("Zugehörige kopieren").
+    #[default]
+    Related,
+    None,
+}
+
+/// Options of [`Document::extract_pages_with`] ("Einstellungen" of the
+/// extract dialog).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct ExtractOptions {
+    pub comments: Handling,
+    pub forms: Handling,
+    pub bookmarks: BookmarkCopy,
+}
+
 /// Result of [`Document::word_count`].
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct WordCount {
@@ -1761,6 +1790,372 @@ impl Document {
             return Ok(());
         }
         self.edit_bytes("move pages", |b, pw| pdf_edit::reorder_pages(b, pw, &order))
+    }
+
+    // -----------------------------------------------------------------
+    // Page dialogs of "Dokumentaufbau"
+
+    /// Number of pages of a PDF file (for the insert dialogs).
+    pub fn file_page_count(path: &Path, password: Option<&str>) -> Result<usize> {
+        let doc = Self::load(read_pdf_file(path)?, password)?;
+        Ok(usize::try_from(doc.pages().len()).unwrap_or(0))
+    }
+
+    /// Inserts the given pages (0-based) of another PDF before `at`.
+    pub fn insert_pages_selected(
+        &mut self,
+        at: usize,
+        source: &Path,
+        password: Option<&str>,
+        pages: &[usize],
+    ) -> Result<usize> {
+        if at > self.page_count() {
+            return Err(Error::PageOutOfRange(at));
+        }
+        self.require(self.permissions().assemble)?;
+        let other = Self::load(read_pdf_file(source)?, password)?;
+        let count = usize::try_from(other.pages().len()).unwrap_or(0);
+        let pages: Vec<usize> = pages.iter().copied().filter(|p| *p < count).collect();
+        if pages.is_empty() {
+            return Ok(0);
+        }
+        let spec = pages.iter().map(|p| (p + 1).to_string()).collect::<Vec<_>>().join(",");
+        self.edit_engine("insert pages", |pdf| {
+            pdf.pages_mut().copy_pages_from_document(&other, &spec, page_index(at)?)?;
+            Ok(())
+        })?;
+        Ok(pages.len())
+    }
+
+    /// Inserts all pages of a generated PDF before `at` and adds bookmarks
+    /// `(page in that PDF, title)`. Returns the number of pages.
+    pub fn insert_pdf_bytes(
+        &mut self,
+        at: usize,
+        bytes: Vec<u8>,
+        bookmarks: &[(usize, String)],
+    ) -> Result<usize> {
+        if at > self.page_count() {
+            return Err(Error::PageOutOfRange(at));
+        }
+        self.require(self.permissions().assemble)?;
+        let other = Self::load(bytes, None)?;
+        let count = usize::try_from(other.pages().len()).unwrap_or(0);
+        if count == 0 {
+            return Ok(0);
+        }
+        self.edit_engine("insert pages", |pdf| {
+            pdf.pages_mut().copy_page_range_from_document(
+                &other,
+                0..=page_index(count - 1)?,
+                page_index(at)?,
+            )?;
+            Ok(())
+        })?;
+        if !bookmarks.is_empty() && self.permissions().modify {
+            let items: Vec<outline::NewBookmark> = bookmarks
+                .iter()
+                .map(|(p, t)| outline::NewBookmark { title: t.clone(), page: at + p, level: 0 })
+                .collect();
+            self.append_bookmarks(&items)?;
+        }
+        Ok(count)
+    }
+
+    /// Inserts `count` empty pages of `width` × `height` points before `at`.
+    pub fn insert_blank_pages(&mut self, at: usize, width: f32, height: f32, count: usize) -> Result<()> {
+        if at > self.page_count()
+            || !(1.0..=14_400.0).contains(&width)
+            || !(1.0..=14_400.0).contains(&height)
+            || !(1..=1000).contains(&count)
+        {
+            return Err(Error::Invalid("invalid page size, count or position".into()));
+        }
+        self.require(self.permissions().assemble)?;
+        self.edit_engine("insert pages", |pdf| {
+            for _ in 0..count {
+                pdf.pages_mut().create_page_at_index(
+                    PdfPagePaperSize::new_custom(PdfPoints::new(width), PdfPoints::new(height)),
+                    page_index(at)?,
+                )?;
+            }
+            Ok(())
+        })
+    }
+
+    /// Deletes pages, optionally together with the bookmarks pointing to them.
+    pub fn delete_pages_with_bookmarks(&mut self, pages: &[usize], bookmarks: bool) -> Result<()> {
+        if bookmarks && self.permissions().modify {
+            self.sync_bytes()?;
+            let (bytes, removed) = outline::remove_for_pages(&self.bytes, self.password.as_deref(), pages)?;
+            if removed > 0 {
+                let old = std::mem::replace(&mut self.bytes, bytes.clone());
+                self.reload(bytes)?;
+                self.history.push_undo(Snapshot { label: "delete bookmarks".into(), bytes: old });
+            }
+        }
+        self.delete_pages(pages)
+    }
+
+    /// Pages among `pages` that look empty. `tolerance` is the allowed share
+    /// of dark pixels in per mille when `ignore_noise` is set (scans).
+    pub fn blank_pages(
+        &self,
+        pages: &[usize],
+        ignore_annotations: bool,
+        ignore_noise: bool,
+        tolerance: f32,
+    ) -> Result<Vec<usize>> {
+        let mut out = Vec::new();
+        for &page in pages {
+            self.check_page(page)?;
+            let (w, h) = self.geometry(page).map_or((1.0, 1.0), |g| g.view_size());
+            let pw = 120u32;
+            let ph = ((pw as f32 * h / w.max(1.0)) as u32).clamp(1, 1200);
+            let opts = RenderOptions { annotations: !ignore_annotations, ..RenderOptions::default() };
+            let img = self.render_tile(page, pw, ph, 0, 0, pw, ph, opts)?;
+            // Scanners leave dark specks at the border: skip 5 % on each side.
+            let border = if ignore_noise { (pw / 20, ph / 20) } else { (0, 0) };
+            let mut dark = 0u32;
+            let mut total = 0u32;
+            for y in border.1..ph - border.1 {
+                for x in border.0..pw - border.0 {
+                    let i = ((y * pw + x) * 4) as usize;
+                    let lum = (u32::from(img.rgba[i]) * 3
+                        + u32::from(img.rgba[i + 1]) * 6
+                        + u32::from(img.rgba[i + 2]))
+                        / 10;
+                    total += 1;
+                    if lum < 200 {
+                        dark += 1;
+                    }
+                }
+            }
+            let share = dark as f32 / total.max(1) as f32 * 1000.0;
+            let limit = if ignore_noise { tolerance.clamp(0.0, 100.0) } else { 0.5 };
+            let has_text = !self.page_text(page)?.all_text().trim().is_empty();
+            if share <= limit && (!has_text || ignore_noise) {
+                out.push(page);
+            }
+        }
+        Ok(out)
+    }
+
+    /// Inserts `copies` copies of `pages` before `at`. With `collate` the
+    /// whole set is repeated (1,2,3,1,2,3), else each page (1,1,2,2,3,3).
+    /// Without `comments`/`forms` the copies lose those annotations.
+    pub fn duplicate_pages_to(
+        &mut self,
+        pages: &[usize],
+        at: usize,
+        copies: usize,
+        collate: bool,
+        comments: bool,
+        forms: bool,
+    ) -> Result<usize> {
+        if pages.is_empty() || !(1..=100).contains(&copies) || at > self.page_count() {
+            return Err(Error::Invalid("invalid pages, copies or position".into()));
+        }
+        for &p in pages {
+            self.check_page(p)?;
+        }
+        self.require(self.permissions().assemble)?;
+        let order: Vec<usize> = if collate {
+            (0..copies).flat_map(|_| pages.iter().copied()).collect()
+        } else {
+            pages.iter().flat_map(|p| std::iter::repeat_n(*p, copies)).collect()
+        };
+        self.sync_bytes()?;
+        let source = Self::load(self.bytes.clone(), self.password.as_deref())?;
+        let spec = order.iter().map(|p| (p + 1).to_string()).collect::<Vec<_>>().join(",");
+        self.edit_engine("duplicate pages", |pdf| {
+            pdf.pages_mut().copy_pages_from_document(&source, &spec, page_index(at)?)?;
+            Ok(())
+        })?;
+        if !comments || !forms {
+            for page in at..at + order.len() {
+                let indices: Vec<usize> = self
+                    .annotations(page)?
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, a)| {
+                        let widget = a.kind == AnnotKind::Widget;
+                        (widget && !forms) || (!widget && a.kind != AnnotKind::Link && !comments)
+                    })
+                    .map(|(i, _)| i)
+                    .collect();
+                if !indices.is_empty() {
+                    self.edit_bytes("duplicate pages", |b, pw| {
+                        pdf_edit::delete_annotations(b, pw, page, &indices)
+                    })?;
+                    // One undo step for the whole operation.
+                    self.history.undo.pop();
+                }
+            }
+        }
+        Ok(order.len())
+    }
+
+    /// Replaces `targets[i]` by page `sources[i]` of another PDF, keeping the
+    /// target page objects (see [`crate::import::replace_pages`]).
+    pub fn replace_pages_from(
+        &mut self,
+        targets: &[usize],
+        source: &Path,
+        sources: &[usize],
+        opts: crate::import::ReplaceOptions,
+    ) -> Result<usize> {
+        for &p in targets {
+            self.check_page(p)?;
+        }
+        self.require(self.permissions().assemble)?;
+        let src = crate::import::Source::load(&read_pdf_file(source)?, None)?;
+        let n = targets.len().min(sources.len());
+        if n == 0 {
+            return Err(Error::Invalid("no pages to replace".into()));
+        }
+        if sources.iter().any(|&p| p >= src.page_count()) {
+            return Err(Error::Invalid("the other document has not enough pages".into()));
+        }
+        let (t, s) = (&targets[..n], &sources[..n]);
+        self.edit_bytes("replace pages", |b, pw| crate::import::replace_pages(b, pw, t, &src, s, opts))?;
+        Ok(n)
+    }
+
+    /// Reverses the order of `pages` among themselves.
+    pub fn reverse_page_range(&mut self, pages: &[usize]) -> Result<()> {
+        self.require(self.permissions().assemble)?;
+        let mut sorted = pages.to_vec();
+        sorted.sort_unstable();
+        sorted.dedup();
+        for &p in &sorted {
+            self.check_page(p)?;
+        }
+        let mut order: Vec<usize> = (0..self.page_count()).collect();
+        for (slot, page) in sorted.iter().zip(sorted.iter().rev()) {
+            order[*slot] = *page;
+        }
+        self.edit_bytes("reverse pages", |bytes, pw| pdf_edit::reorder_pages(bytes, pw, &order))
+    }
+
+    /// Removes page offsets and rotation without changing the look.
+    pub fn normalize_pages(&mut self, pages: &[usize]) -> Result<usize> {
+        for &p in pages {
+            self.check_page(p)?;
+        }
+        self.require(self.permissions().modify)?;
+        let mut changed = 0;
+        self.edit_bytes("normalize pages", |b, pw| {
+            let (bytes, n) = pages::normalize_pages(b, pw, pages)?;
+            changed = n;
+            Ok(bytes)
+        })?;
+        if changed == 0 {
+            self.history.undo.pop();
+        }
+        Ok(changed)
+    }
+
+    /// Groups of identical-looking pages among `pages`.
+    pub fn find_duplicate_pages_in(
+        &self,
+        pages: &[usize],
+        ignore_orientation: bool,
+        ignore_annotations: bool,
+    ) -> Result<Vec<Vec<usize>>> {
+        use std::collections::HashMap;
+        use std::hash::{Hash, Hasher};
+        const W: u32 = 48;
+        let mut groups: HashMap<u64, Vec<usize>> = HashMap::new();
+        for &page in pages {
+            self.check_page(page)?;
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            self.page_text(page)?.all_text().hash(&mut hasher);
+            let geo = self.geometry(page).copied().ok_or(Error::PageOutOfRange(page))?;
+            let (w, h) = geo.view_size();
+            // Ignoring the orientation: undo the page rotation while rendering,
+            // so the same content gives the same picture.
+            let (rotation, rw, rh) = if ignore_orientation {
+                let undo = Rotation::from_degrees(360 - geo.rotation.degrees());
+                if geo.rotation.is_quarter() { (undo, h, w) } else { (undo, w, h) }
+            } else {
+                (Rotation::R0, w, h)
+            };
+            let ph = ((W as f32 * rh / rw.max(1.0)) as u32).clamp(1, 400);
+            let opts = RenderOptions { annotations: !ignore_annotations, rotation };
+            let img = self.render_tile(page, W, ph, 0, 0, W, ph, opts)?;
+            // Coarse grey levels make the comparison robust against tiny differences.
+            img.rgba
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|p| (u16::from(p[0]) + u16::from(p[1]) + u16::from(p[2])) / 96)
+                .collect::<Vec<u16>>()
+                .hash(&mut hasher);
+            groups.entry(hasher.finish()).or_default().push(page);
+        }
+        let mut out: Vec<Vec<usize>> = groups.into_values().filter(|g| g.len() > 1).collect();
+        out.sort();
+        Ok(out)
+    }
+
+    /// Writes `pages` into a new PDF with the given handling of comments,
+    /// form fields and bookmarks.
+    pub fn extract_pages_with(&self, pages: &[usize], opts: &ExtractOptions) -> Result<Vec<u8>> {
+        let bytes = self.extract_pages_to_bytes(pages)?;
+        if opts.comments == Handling::Copy
+            && opts.forms == Handling::Copy
+            && opts.bookmarks == BookmarkCopy::None
+        {
+            return Ok(bytes);
+        }
+        let mut doc = Self::from_bytes(bytes, "extract.pdf", None)?;
+        let n = doc.page_count();
+        if opts.comments == Handling::Flatten || opts.forms == Handling::Flatten {
+            doc.flatten_pages(&(0..n).collect::<Vec<_>>())?;
+        }
+        if opts.comments == Handling::Remove || opts.forms == Handling::Remove {
+            for page in 0..n {
+                let indices: Vec<usize> = doc
+                    .annotations(page)?
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, a)| match a.kind {
+                        AnnotKind::Widget => opts.forms == Handling::Remove,
+                        AnnotKind::Link => false,
+                        _ => opts.comments == Handling::Remove,
+                    })
+                    .map(|(i, _)| i)
+                    .collect();
+                if !indices.is_empty() {
+                    doc.delete_annotations(page, &indices)?;
+                }
+            }
+        }
+        if opts.bookmarks != BookmarkCopy::None {
+            fn walk(items: &[Bookmark], level: usize, out: &mut Vec<(String, Option<usize>, usize)>) {
+                for b in items {
+                    out.push((b.title.clone(), b.page, level));
+                    walk(&b.children, level + 1, out);
+                }
+            }
+            let mut flat = Vec::new();
+            walk(&self.bookmarks(), 0, &mut flat);
+            let items: Vec<outline::NewBookmark> = flat
+                .into_iter()
+                .filter_map(|(title, page, level)| {
+                    let new_page = page.and_then(|p| pages.iter().position(|x| *x == p));
+                    match (opts.bookmarks, new_page) {
+                        (BookmarkCopy::Related, None) => None,
+                        (_, Some(p)) => Some(outline::NewBookmark { title, page: p, level }),
+                        // Without a target in the new file the bookmark keeps only its title.
+                        (_, None) => Some(outline::NewBookmark { title, page: usize::MAX, level }),
+                    }
+                })
+                .collect();
+            doc.append_bookmarks(&items)?;
+        }
+        doc.to_bytes()
     }
 
     pub fn set_metadata(&mut self, meta: &Metadata) -> Result<()> {

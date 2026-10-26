@@ -99,7 +99,7 @@ fn label_style_name(style: LabelStyle, de: bool) -> &'static str {
 }
 
 /// Today's date for headers/footers.
-fn today(de: bool) -> String {
+pub(super) fn today(de: bool) -> String {
     let d = crate::pdf_edit::pdf_date_now();
     let digits: String = d.chars().filter(|c| c.is_ascii_digit()).take(8).collect();
     if digits.len() < 8 {

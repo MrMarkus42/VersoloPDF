@@ -985,3 +985,133 @@ fn review_and_conversion() {
     std::fs::remove_file(&png).ok();
     std::fs::remove_file(&pdf).ok();
 }
+
+fn page_texts(doc: &Document) -> Vec<String> {
+    (0..doc.page_count())
+        .map(|p| doc.page_text(p).unwrap().all_text().lines().next().unwrap_or("").trim().to_string())
+        .collect()
+}
+
+#[test]
+fn page_dialog_operations() {
+    use mrpdf::outline::NewBookmark;
+    let _guard = common::lock();
+    let src = temp_file("source.pdf");
+    std::fs::write(&src, common::text_pdf(4)).unwrap();
+    assert_eq!(Document::file_page_count(&src, None).unwrap(), 4);
+
+    // Insert pages 2 and 4 of the source after page 1.
+    let mut doc = open(2);
+    assert_eq!(doc.insert_pages_selected(1, &src, None, &[1, 3]).unwrap(), 2);
+    assert_eq!(
+        page_texts(&doc),
+        ["Page 1 Hello World", "Page 2 Hello World", "Page 4 Hello World", "Page 2 Hello World"]
+    );
+
+    // Blank pages: three at the front, then detection.
+    doc.insert_blank_pages(0, 300.0, 400.0, 3).unwrap();
+    assert_eq!(doc.page_count(), 7);
+    assert_eq!(doc.blank_pages(&(0..7).collect::<Vec<_>>(), false, false, 10.0).unwrap(), vec![0, 1, 2]);
+
+    // Delete two blank pages and the bookmark pointing to one of them.
+    doc.append_bookmarks(&[
+        NewBookmark { title: "leer".into(), page: 0, level: 0 },
+        NewBookmark { title: "Text".into(), page: 3, level: 0 },
+    ])
+    .unwrap();
+    doc.delete_pages_with_bookmarks(&[0, 1], true).unwrap();
+    assert_eq!(doc.page_count(), 5);
+    assert_eq!(doc.bookmarks().iter().map(|b| b.title.as_str()).collect::<Vec<_>>(), ["Text"]);
+    doc.delete_pages(&[0]).unwrap();
+
+    // Generated text pages with a bookmark.
+    let (pdf, marks) = mrpdf::compose::text_to_pdf(
+        &[("notiz.txt".into(), "Eingefuegter Text".into())],
+        &mrpdf::compose::TextLayout { bookmark_per_file: true, ..Default::default() },
+    )
+    .unwrap();
+    assert_eq!(doc.insert_pdf_bytes(4, pdf, &marks).unwrap(), 1);
+    assert_eq!(page_texts(&doc)[4], "Eingefuegter Text");
+    assert!(doc.bookmarks().iter().any(|b| b.title == "notiz" && b.page == Some(4)));
+
+    // Duplicate pages 1-2 twice, collated and not collated.
+    let mut d = open(2);
+    assert_eq!(d.duplicate_pages_to(&[0, 1], 2, 2, true, true, true).unwrap(), 4);
+    assert_eq!(
+        page_texts(&d)[2..],
+        ["Page 1 Hello World", "Page 2 Hello World", "Page 1 Hello World", "Page 2 Hello World"]
+    );
+    let mut d = open(2);
+    d.duplicate_pages_to(&[0, 1], 2, 2, false, true, true).unwrap();
+    assert_eq!(
+        page_texts(&d)[2..],
+        ["Page 1 Hello World", "Page 1 Hello World", "Page 2 Hello World", "Page 2 Hello World"]
+    );
+    assert!(d.undo().unwrap());
+    assert_eq!(d.page_count(), 2, "one undo step");
+
+    // Reverse a range only.
+    let mut d = open(4);
+    d.reverse_page_range(&[1, 2, 3]).unwrap();
+    assert_eq!(
+        page_texts(&d),
+        ["Page 1 Hello World", "Page 4 Hello World", "Page 3 Hello World", "Page 2 Hello World"]
+    );
+
+    // Replace page 2 by page 3 of the source and keep its note.
+    let mut d = open(3);
+    let mut note = NewAnnotation::new(AnnotKind::Note, style(Rgba::RED));
+    note.rect = RectF::new(50.0, 50.0, 70.0, 70.0);
+    d.add_annotation(1, &note).unwrap();
+    let opts =
+        mrpdf::import::ReplaceOptions { keep_annotations: true, fit_target: true, scale_content: true };
+    assert_eq!(d.replace_pages_from(&[1], &src, &[2], opts).unwrap(), 1);
+    assert_eq!(page_texts(&d), ["Page 1 Hello World", "Page 3 Hello World", "Page 3 Hello World"]);
+    assert!(d.annotations(1).unwrap().iter().any(|a| a.kind == AnnotKind::Note));
+    let opts = mrpdf::import::ReplaceOptions { keep_annotations: false, ..opts };
+    d.replace_pages_from(&[1], &src, &[3], opts).unwrap();
+    assert!(d.annotations(1).unwrap().is_empty());
+    assert_eq!(page_texts(&d)[1], "Page 4 Hello World");
+
+    // Normalize: a rotated page loses /Rotate but looks the same.
+    let mut d = open(1);
+    d.rotate_pages(&[0], 90).unwrap();
+    let before = d.render_page(0, 120, 85).unwrap();
+    assert_eq!(d.normalize_pages(&[0]).unwrap(), 1);
+    let g = d.geometry(0).unwrap();
+    assert_eq!(g.rotation, Rotation::R0);
+    let (w, h) = g.view_size();
+    assert!(w > h, "still landscape: {w}x{h}");
+    let after = d.render_page(0, 120, 85).unwrap();
+    let diff = before.rgba.iter().zip(&after.rgba).filter(|(a, b)| a.abs_diff(**b) > 40).count();
+    assert!(diff < before.rgba.len() / 100, "look changed: {diff}");
+    assert_eq!(d.normalize_pages(&[0]).unwrap(), 0, "nothing left to do");
+
+    // Duplicates, also when one copy is rotated.
+    let mut d = open(2);
+    d.duplicate_pages_to(&[0], 2, 1, true, true, true).unwrap();
+    d.rotate_pages(&[2], 180).unwrap();
+    assert!(d.find_duplicate_pages_in(&[0, 1, 2], false, false).unwrap().is_empty());
+    assert_eq!(d.find_duplicate_pages_in(&[0, 1, 2], true, false).unwrap(), vec![vec![0, 2]]);
+
+    // Extract with related bookmarks only, comments removed.
+    let mut d = open(3);
+    d.append_bookmarks(&[
+        NewBookmark { title: "eins".into(), page: 0, level: 0 },
+        NewBookmark { title: "drei".into(), page: 2, level: 0 },
+    ])
+    .unwrap();
+    d.add_annotation(2, &note).unwrap();
+    let opts = mrpdf::document::ExtractOptions {
+        comments: mrpdf::document::Handling::Remove,
+        forms: mrpdf::document::Handling::Copy,
+        bookmarks: mrpdf::document::BookmarkCopy::Related,
+    };
+    let out = Document::from_bytes(d.extract_pages_with(&[1, 2], &opts).unwrap(), "x.pdf", None).unwrap();
+    assert_eq!(out.page_count(), 2);
+    let marks = out.bookmarks();
+    assert_eq!(marks.len(), 1);
+    assert_eq!((marks[0].title.as_str(), marks[0].page), ("drei", Some(1)));
+    assert!(out.annotations(1).unwrap().is_empty());
+    std::fs::remove_file(&src).ok();
+}

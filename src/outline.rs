@@ -420,6 +420,49 @@ pub fn remove_duplicates(bytes: &[u8], password: Option<&str>) -> Result<(Vec<u8
     })
 }
 
+/// Removes bookmarks (with their children) that point to one of `pages`.
+/// Returns the bytes and the number of removed items.
+pub fn remove_for_pages(bytes: &[u8], password: Option<&str>, pages: &[usize]) -> Result<(Vec<u8>, usize)> {
+    fn level(
+        edit: &mut Edit,
+        node: ObjectId,
+        all: &[ObjectId],
+        pages: &[usize],
+        depth: usize,
+    ) -> Result<usize> {
+        if depth > MAX_DEPTH {
+            return Ok(0);
+        }
+        let mut kept = Vec::new();
+        let mut removed = 0;
+        for kid in children(edit, node)? {
+            if page_of(edit, kid, all).is_some_and(|p| pages.contains(&p)) {
+                removed += 1;
+            } else {
+                kept.push(kid);
+            }
+        }
+        if removed > 0 {
+            relink(edit, node, &kept)?;
+        }
+        for kid in kept {
+            removed += level(edit, kid, all, pages, depth + 1)?;
+        }
+        Ok(removed)
+    }
+    guarded(|| {
+        let mut edit = Edit::open(bytes, password)?;
+        let Some(root) = outline_root(&mut edit, false)? else { return Ok((bytes.to_vec(), 0)) };
+        let all = edit.page_ids();
+        let removed = level(&mut edit, root, &all, pages, 0)?;
+        if removed == 0 {
+            return Ok((bytes.to_vec(), 0));
+        }
+        recount(&mut edit, root, 0)?;
+        Ok((edit.finish()?, removed))
+    })
+}
+
 /// Removes the whole outline.
 pub fn delete_all(bytes: &[u8], password: Option<&str>) -> Result<Vec<u8>> {
     guarded(|| {

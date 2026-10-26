@@ -15,12 +15,6 @@ use crate::ui::tools::Tool;
 
 /// Commands that are not implemented yet; they are shown greyed out.
 pub const PENDING: &[Cmd] = &[
-    Cmd::InsertClipboard,
-    Cmd::InsertImages,
-    Cmd::InsertText,
-    Cmd::InsertRtf,
-    Cmd::DeleteBlankPages,
-    Cmd::MovePages,
     Cmd::NUp,
     Cmd::SplitPages,
     Cmd::Overlay,
@@ -289,7 +283,7 @@ impl MrPdfApp {
 }
 
 /// Shows a file in the system file manager (no shell involved).
-fn reveal_in_file_manager(path: &std::path::Path) {
+pub(super) fn reveal_in_file_manager(path: &std::path::Path) {
     let result = if cfg!(windows) {
         let mut arg = std::ffi::OsString::from("/select,");
         arg.push(path.as_os_str());

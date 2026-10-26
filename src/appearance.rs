@@ -15,6 +15,8 @@ use crate::model::{AnnotKind, Rgba};
 pub enum StdFont {
     Helvetica,
     HelveticaBold,
+    /// Fixed width (every glyph 600/1000 em).
+    Courier,
 }
 
 impl StdFont {
@@ -22,6 +24,7 @@ impl StdFont {
         match self {
             StdFont::Helvetica => "Helvetica",
             StdFont::HelveticaBold => "Helvetica-Bold",
+            StdFont::Courier => "Courier",
         }
     }
 
@@ -29,6 +32,7 @@ impl StdFont {
         match self {
             StdFont::Helvetica => "Helv",
             StdFont::HelveticaBold => "HeBo",
+            StdFont::Courier => "Cour",
         }
     }
 
@@ -51,6 +55,7 @@ impl StdFont {
         let table = match self {
             StdFont::Helvetica => &HELV,
             StdFont::HelveticaBold => &BOLD,
+            StdFont::Courier => return 600,
         };
         match byte {
             32..=126 => table[usize::from(byte - 32)],

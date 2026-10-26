@@ -2236,6 +2236,7 @@ name = "mrpdf"
 version = "0.1.0"
 dependencies = [
  "aes",
+ "arboard",
  "cbc",
  "eframe",
  "egui",

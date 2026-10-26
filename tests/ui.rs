@@ -667,3 +667,89 @@ fn organize_ribbon_menus() {
     assert!(h.query_by_label("Verwalten…").is_some());
     save(&mut h, "31-watermark-menu");
 }
+
+#[test]
+fn page_dialogs_ui() {
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let file = sample_file(&dir, 3);
+    let mut h = harness(vec![file], false);
+    h.run_steps(10);
+    let count = |h: &Harness<'_, MrPdfApp>| h.state().active_tab().unwrap().doc.page_count();
+    let ok = |h: &mut Harness<'_, MrPdfApp>| {
+        h.get_all_by_label("OK").last().unwrap().click();
+        h.run_steps(6);
+    };
+
+    // Blank pages: dialog, two pages after the current one.
+    quick(&mut h, "Leere Seiten einfügen");
+    assert!(h.state().dialog().is_some());
+    save(&mut h, "32-insert-blank-dialog");
+    ok(&mut h);
+    assert_eq!(count(&h), 4);
+
+    // Duplicate the current page once (after the last page).
+    quick(&mut h, "Seiten duplizieren");
+    save(&mut h, "33-duplicate-dialog");
+    ok(&mut h);
+    assert_eq!(count(&h), 5);
+
+    // Rotate all pages clockwise.
+    quick(&mut h, "Seiten drehen");
+    save(&mut h, "34-rotate-dialog");
+    ok(&mut h);
+    let rotations: Vec<_> =
+        (0..5).map(|p| h.state().active_tab().unwrap().doc.geometry(p).unwrap().rotation).collect();
+    assert!(rotations.iter().all(|r| *r == mrpdf::geometry::Rotation::R90));
+
+    // Normalize removes the rotation again without visual change.
+    quick(&mut h, "Seiten normalisieren");
+    save(&mut h, "35-normalize-dialog");
+    ok(&mut h);
+    assert_eq!(
+        h.state().active_tab().unwrap().doc.geometry(0).unwrap().rotation,
+        mrpdf::geometry::Rotation::R0
+    );
+
+    // Delete blank pages (the inserted one) and show the duplicates.
+    quick(&mut h, "Leere Seiten löschen");
+    save(&mut h, "36-delete-blank-dialog");
+    ok(&mut h);
+    assert_eq!(count(&h), 4, "the blank page is gone");
+    quick(&mut h, "Duplikate finden");
+    ok(&mut h);
+    assert!(matches!(h.state().dialog(), Some(mrpdf::ui::app::Dialog::Duplicates { .. })));
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+
+    // Delete the current page.
+    quick(&mut h, "Seiten löschen");
+    save(&mut h, "37-delete-dialog");
+    ok(&mut h);
+    assert_eq!(count(&h), 3);
+
+    // Replace dialog with two previews (no source chosen yet).
+    quick(&mut h, "Seiten ersetzen");
+    save(&mut h, "38-replace-dialog");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    quick(&mut h, "Seiten extrahieren");
+    save(&mut h, "39-extract-dialog");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    assert!(h.state().dialog().is_none());
+
+    // Image insertion with its settings pages.
+    quick(&mut h, "Bilder einfügen");
+    save(&mut h, "40-images-dialog");
+    h.get_by_label("Einstellungen").click();
+    h.run_steps(3);
+    h.get_by_label("Bildposition").click();
+    h.run_steps(3);
+    save(&mut h, "41-images-settings");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    assert!(h.state().dialog().is_none());
+}

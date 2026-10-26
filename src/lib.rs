@@ -12,12 +12,14 @@
 pub mod accessibility;
 pub mod appearance;
 pub mod compare;
+pub mod compose;
 pub mod convert;
 pub mod document;
 pub mod engine;
 pub mod error;
 pub mod forms;
 pub mod geometry;
+pub mod import;
 pub mod model;
 pub mod outline;
 pub mod pages;

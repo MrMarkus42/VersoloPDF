@@ -919,6 +919,10 @@ impl MrPdfApp {
         if !self.cmd_enabled(cmd) {
             return;
         }
+        // Page dialogs of "Dokumentaufbau" (insert, delete, extract, …).
+        if self.run_page_dialog(cmd) {
+            return;
+        }
         match cmd {
             New => self.new_document(ctx),
             Open => self.open_dialog(),

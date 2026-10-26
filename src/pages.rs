@@ -6,6 +6,7 @@ use lopdf::{Dictionary, Object, ObjectId, Stream};
 use crate::appearance::{StdFont, num, win_ansi};
 use crate::error::{Error, Result};
 use crate::geometry::RectF;
+use crate::import::Matrix;
 use crate::model::Rgba;
 use crate::pdf_edit::{Edit, guarded, number, numbers, real, rect_array, text_string};
 
@@ -340,7 +341,38 @@ pub fn resize_pages(
 
 /// Applies `scale` and translation to the page content and annotations.
 fn transform_page(edit: &mut Edit, page_id: ObjectId, s: f32, dx: f32, dy: f32) -> Result<()> {
-    let cm = format!("q {} 0 0 {} {} {} cm\n", num(s), num(s), num(dx), num(dy));
+    let m = Matrix::scale(s, s).then(Matrix::translate(dx, dy));
+    transform_page_matrix(edit, page_id, m, 0.0)
+}
+
+/// Clockwise rotation of a page in degrees (0, 90, 180, 270).
+pub(crate) fn page_rotation(edit: &Edit, page_id: ObjectId) -> i32 {
+    let r = page_attr(edit, page_id, b"Rotate").and_then(|r| number(&r)).unwrap_or(0.0) as i32;
+    (r.rem_euclid(360) / 90) * 90
+}
+
+fn transform_points(items: &mut [Object], m: &Matrix) {
+    for pair in items.chunks_mut(2) {
+        if let [x, y] = pair
+            && let (Some(px), Some(py)) = (number(x), number(y))
+        {
+            let (nx, ny) = m.apply(px, py);
+            *x = real(nx);
+            *y = real(ny);
+        }
+    }
+}
+
+/// Applies an affine matrix to the page content and its annotations.
+/// `ap_rotation` (counter-clockwise degrees) is added to the appearance
+/// streams so that comments keep their look when the page is rotated.
+pub(crate) fn transform_page_matrix(
+    edit: &mut Edit,
+    page_id: ObjectId,
+    m: Matrix,
+    ap_rotation: f32,
+) -> Result<()> {
+    let cm = format!("q {}\n", m.operator());
     let existing = edit.object(page_id)?.as_dict()?.get(b"Contents").ok().cloned();
     let mut list: Vec<Object> = match existing {
         Some(Object::Array(items)) => items,
@@ -359,29 +391,98 @@ fn transform_page(edit: &mut Edit, page_id: ObjectId, s: f32, dx: f32, dy: f32) 
     // Move annotations with the content.
     for entry in edit.annots(page_id)? {
         let Ok(id) = entry.as_reference() else { continue };
-        let dict = edit.dict_mut(id)?;
-        for key in [&b"Rect"[..], b"QuadPoints", b"L", b"Vertices", b"CL"] {
-            if let Ok(Object::Array(items)) = dict.get_mut(key) {
-                for (i, item) in items.iter_mut().enumerate() {
-                    if let Some(v) = number(item) {
-                        *item = real(v * s + if i % 2 == 0 { dx } else { dy });
+        let mut ap_streams = Vec::new();
+        {
+            let dict = edit.dict_mut(id)?;
+            if let Ok(Object::Array(items)) = dict.get_mut(b"Rect")
+                && items.len() == 4
+                && let Some(v) = items.iter().map(number).collect::<Option<Vec<f32>>>()
+            {
+                // The rectangle becomes the bounding box of its moved corners.
+                let corners =
+                    [(v[0], v[1]), (v[2], v[1]), (v[0], v[3]), (v[2], v[3])].map(|(x, y)| m.apply(x, y));
+                let r = RectF::bounding(corners.iter().map(|(x, y)| crate::geometry::PointF::new(*x, *y)))
+                    .unwrap_or_default();
+                *items = vec![real(r.x0), real(r.y0), real(r.x1), real(r.y1)];
+            }
+            for key in [&b"QuadPoints"[..], b"L", b"Vertices", b"CL"] {
+                if let Ok(Object::Array(items)) = dict.get_mut(key) {
+                    transform_points(items, &m);
+                }
+            }
+            if let Ok(Object::Array(strokes)) = dict.get_mut(b"InkList") {
+                for stroke in strokes {
+                    if let Object::Array(items) = stroke {
+                        transform_points(items, &m);
+                    }
+                }
+            }
+            if ap_rotation != 0.0
+                && let Ok(Object::Dictionary(ap)) = dict.get(b"AP")
+            {
+                for (_, v) in ap.iter() {
+                    match v {
+                        Object::Reference(r) => ap_streams.push(*r),
+                        Object::Dictionary(states) => {
+                            ap_streams.extend(states.iter().filter_map(|(_, s)| s.as_reference().ok()))
+                        }
+                        _ => {}
                     }
                 }
             }
         }
-        if let Ok(Object::Array(strokes)) = dict.get_mut(b"InkList") {
-            for stroke in strokes {
-                if let Object::Array(items) = stroke {
-                    for (i, item) in items.iter_mut().enumerate() {
-                        if let Some(v) = number(item) {
-                            *item = real(v * s + if i % 2 == 0 { dx } else { dy });
+        for stream_id in ap_streams {
+            if let Ok(Object::Stream(s)) = edit.object_mut(stream_id) {
+                let old = match s.dict.get(b"Matrix") {
+                    Ok(Object::Array(a)) if a.len() == 6 => {
+                        let v: Vec<f32> = a.iter().filter_map(number).collect();
+                        if v.len() == 6 {
+                            Matrix([v[0], v[1], v[2], v[3], v[4], v[5]])
+                        } else {
+                            Matrix::IDENTITY
                         }
                     }
-                }
+                    _ => Matrix::IDENTITY,
+                };
+                let new = old.then(Matrix::rotate(ap_rotation));
+                s.dict.set("Matrix", Object::Array(new.0.iter().map(|x| real(*x)).collect()));
             }
         }
     }
     Ok(())
+}
+
+/// "Seiten normalisieren": removes page offsets and /Rotate without changing
+/// the look; the visible box becomes the media box at (0,0). Returns the
+/// bytes and the number of changed pages.
+pub fn normalize_pages(bytes: &[u8], password: Option<&str>, pages: &[usize]) -> Result<(Vec<u8>, usize)> {
+    guarded(|| {
+        let mut edit = Edit::open(bytes, password)?;
+        let mut changed = 0;
+        for &page in pages {
+            let page_id = edit.page_id(page)?;
+            let vb = visible_box(&edit, page_id);
+            let rot = page_rotation(&edit, page_id);
+            let media = page_box(&edit, page_id, b"MediaBox").unwrap_or(vb);
+            let at_origin = vb.x0.abs() < 0.01 && vb.y0.abs() < 0.01;
+            if rot == 0 && at_origin && media == vb {
+                continue;
+            }
+            let (m, w, h) = crate::import::upright(vb, rot);
+            transform_page_matrix(&mut edit, page_id, m, -(rot as f32))?;
+            let dict = edit.dict_mut(page_id)?;
+            dict.set("MediaBox", rect_array(&RectF::new(0.0, 0.0, w, h)));
+            for key in [&b"CropBox"[..], b"TrimBox", b"BleedBox", b"ArtBox"] {
+                dict.remove(key);
+            }
+            dict.set("Rotate", Object::Integer(0));
+            changed += 1;
+        }
+        if changed == 0 {
+            return Ok((bytes.to_vec(), 0));
+        }
+        Ok((edit.finish()?, changed))
+    })
 }
 
 /// Numbering style of page labels.

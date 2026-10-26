@@ -31,6 +31,8 @@ getrandom = "0.4"
 quick-xml = "0.41"
 # Same version eframe already uses for its own persistence.
 ron = "=0.12.2"
+# Same version and features egui-winit already uses (clipboard).
+arboard = { version = "=3.6.1", features = ["image-data"] }
 sha2 = "0.11"
 stringprep = "0.1"
 image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg"] }

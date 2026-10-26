@@ -6,6 +6,7 @@ mod dialogs;
 mod features;
 mod formdata;
 mod outline_tools;
+mod page_dialogs;
 mod preview;
 mod properties;
 mod review;
@@ -72,7 +73,7 @@ pub enum InsertPosition {
     End,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum PaperChoice {
     SameAsCurrent,
     A4,
@@ -213,6 +214,7 @@ pub enum Dialog {
         cmd: commands::Cmd,
     },
     NewField(Box<formdata::FieldForm>),
+    Pages(Box<page_dialogs::PageDialogState>),
     SearchRedact {
         query: String,
         match_case: bool,
@@ -269,7 +271,11 @@ pub struct MrPdfApp {
     /// Last radio group and number of buttons placed in it.
     last_radio: (String, u32),
     /// Page preview shown in the current dialog.
-    preview: Option<preview::PreviewCache>,
+    preview: [Option<preview::PreviewCache>; preview::SLOTS],
+    /// Extra document shown in a dialog (source file, generated pages).
+    dialog_doc: Option<(String, crate::Document)>,
+    /// Clipboard content read for "Seiten aus der Zwischenablage einfügen".
+    clipboard: (Option<String>, Option<crate::pdf_edit::RgbaImage>),
 }
 
 impl MrPdfApp {
@@ -306,7 +312,9 @@ impl MrPdfApp {
             quick_query: String::new(),
             quick_focus: false,
             last_radio: ("RadioGroup1".into(), 0),
-            preview: None,
+            preview: Default::default(),
+            dialog_doc: None,
+            clipboard: (None, None),
         }
     }
 

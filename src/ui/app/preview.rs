@@ -1,21 +1,22 @@
 //! Page previews inside dialogs (with the page strip navigator below).
 
-// Used by the page dialogs that follow in step B.
-#![allow(dead_code)]
-
 use egui::{Color32, Rect, Response, Sense, Stroke, StrokeKind, TextureHandle, Ui, Vec2, vec2};
 
 use super::MrPdfApp;
-use crate::document::RenderedImage;
-use crate::geometry::PageGeometry;
+use crate::Document;
+use crate::geometry::{PageGeometry, PointF};
+
+/// Number of independent previews a dialog can show at once.
+pub const SLOTS: usize = 2;
 
 /// Rendered preview kept between frames; re-rendered when the key changes.
 pub struct PreviewCache {
-    key: (u64, u64, usize, u32, u32, u64),
+    key: (u64, usize, u32, u32),
     texture: TextureHandle,
 }
 
-/// Where a preview was drawn.
+/// Where a preview was drawn (used for interactive previews, e.g. cropping).
+#[allow(dead_code)]
 pub struct PreviewArea {
     /// Screen rectangle of the page.
     pub rect: Rect,
@@ -26,78 +27,89 @@ pub struct PreviewArea {
     pub response: Response,
 }
 
+#[allow(dead_code)]
 impl PreviewArea {
     /// Maps a PDF point to the screen.
-    pub fn to_screen(&self, p: crate::geometry::PointF) -> egui::Pos2 {
+    pub fn to_screen(&self, p: PointF) -> egui::Pos2 {
         let v = self.geometry.pdf_to_view(p);
         self.rect.min + vec2(v.x, v.y) * self.scale
     }
 
     /// Maps a screen position to PDF space.
-    pub fn to_pdf(&self, pos: egui::Pos2) -> crate::geometry::PointF {
+    pub fn to_pdf(&self, pos: egui::Pos2) -> PointF {
         let v = (pos - self.rect.min) / self.scale;
-        self.geometry.view_to_pdf(crate::geometry::PointF::new(v.x, v.y))
+        self.geometry.view_to_pdf(PointF::new(v.x, v.y))
     }
 }
 
 impl MrPdfApp {
-    /// Draws `page` of the active document into `max` (grey background, page
-    /// centred). `variant` distinguishes previews of modified content.
+    /// Preview of `page` of the active document.
     pub(super) fn page_preview(
         &mut self,
         ui: &mut Ui,
+        slot: usize,
         page: usize,
         max: Vec2,
-        variant: u64,
-        render: Option<&dyn Fn(u32, u32) -> crate::Result<RenderedImage>>,
     ) -> Option<PreviewArea> {
         let tab = self.tabs.get(self.active)?;
-        let geometry = *tab.doc.geometry(page)?;
-        let (vw, vh) = geometry.view_size();
-        let (bg_rect, response) = ui.allocate_exact_size(max, Sense::click_and_drag());
-        ui.painter().rect_filled(bg_rect, 0.0, Color32::from_gray(128));
-        let margin = 12.0;
-        let scale = ((max.x - 2.0 * margin) / vw).min((max.y - 2.0 * margin) / vh).max(0.01);
-        let size = vec2(vw * scale, vh * scale);
-        let rect = Rect::from_center_size(bg_rect.center(), size);
-        let ppp = ui.ctx().pixels_per_point();
-        let (pw, ph) = (((size.x * ppp).round() as u32).max(1), ((size.y * ppp).round() as u32).max(1));
-        let key = (tab.id, tab.doc.revision(), page, pw, ph, variant);
-        if self.preview.as_ref().is_none_or(|p| p.key != key) {
-            let image = match render {
-                Some(f) => f(pw, ph),
-                None => tab.doc.render_page(page, pw, ph),
-            };
-            match image {
-                Ok(img) => {
-                    let color = egui::ColorImage::from_rgba_unmultiplied(
-                        [img.width as usize, img.height as usize],
-                        &img.rgba,
-                    );
-                    let texture =
-                        ui.ctx().load_texture("dialog-preview", color, egui::TextureOptions::LINEAR);
-                    self.preview = Some(PreviewCache { key, texture });
-                }
-                Err(err) => {
-                    log::warn!("preview failed: {err}");
-                    self.preview = None;
-                }
+        doc_preview(ui, &mut self.preview[slot], &tab.doc, tab.id, page, max)
+    }
+
+    /// Forgets rendered previews (when a dialog closes).
+    pub(super) fn clear_previews(&mut self) {
+        self.preview = Default::default();
+    }
+}
+
+/// Draws `page` of `doc` into a grey area of `max`; `salt` separates
+/// documents with the same revision number.
+pub fn doc_preview(
+    ui: &mut Ui,
+    cache: &mut Option<PreviewCache>,
+    doc: &Document,
+    salt: u64,
+    page: usize,
+    max: Vec2,
+) -> Option<PreviewArea> {
+    let geometry = *doc.geometry(page)?;
+    let (vw, vh) = geometry.view_size();
+    let (bg, response) = ui.allocate_exact_size(max, Sense::click_and_drag());
+    ui.painter().rect_filled(bg, 0.0, Color32::from_gray(128));
+    let margin = 12.0;
+    let scale = ((max.x - 2.0 * margin) / vw.max(1.0)).min((max.y - 2.0 * margin) / vh.max(1.0)).max(0.01);
+    let rect = Rect::from_center_size(bg.center(), vec2(vw * scale, vh * scale));
+    let ppp = ui.ctx().pixels_per_point();
+    let (pw, ph) =
+        (((rect.width() * ppp).round() as u32).max(1), ((rect.height() * ppp).round() as u32).max(1));
+    let key = (doc.revision().wrapping_mul(1_000_003) ^ salt, page, pw, ph);
+    if cache.as_ref().is_none_or(|c| c.key != key) {
+        *cache = match doc.render_page(page, pw, ph) {
+            Ok(img) => {
+                let color = egui::ColorImage::from_rgba_unmultiplied(
+                    [img.width as usize, img.height as usize],
+                    &img.rgba,
+                );
+                let texture = ui.ctx().load_texture("dialog-preview", color, egui::TextureOptions::LINEAR);
+                Some(PreviewCache { key, texture })
             }
+            Err(err) => {
+                log::warn!("preview failed: {err}");
+                None
+            }
+        };
+    }
+    ui.painter().rect_filled(rect.translate(vec2(2.0, 2.0)), 0.0, Color32::from_black_alpha(60));
+    match cache {
+        Some(c) => {
+            let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+            ui.painter().image(c.texture.id(), rect, uv, Color32::WHITE);
         }
-        ui.painter().rect_filled(rect.translate(vec2(2.0, 2.0)), 0.0, Color32::from_black_alpha(60));
-        if let Some(p) = &self.preview {
-            ui.painter().image(
-                p.texture.id(),
-                rect,
-                Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                Color32::WHITE,
-            );
-        } else {
+        None => {
             ui.painter().rect_filled(rect, 0.0, Color32::WHITE);
         }
-        ui.painter().rect_stroke(rect, 0.0, Stroke::new(1.0, Color32::from_gray(90)), StrokeKind::Outside);
-        Some(PreviewArea { rect, geometry, scale, response })
     }
+    ui.painter().rect_stroke(rect, 0.0, Stroke::new(1.0, Color32::from_gray(90)), StrokeKind::Outside);
+    Some(PreviewArea { rect, geometry, scale, response })
 }
 
 /// Page strip "1 2 3 … ‹ › |‹ ›| [n]" below previews. `page` is 0-based.
