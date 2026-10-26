@@ -294,40 +294,15 @@ impl MrPdfApp {
                         outcome = Outcome::Close;
                     }
                 }
-                Dialog::ExportImage { range, dpi, jpeg, error } => {
-                    ui.heading(t.export_image);
-                    egui::Grid::new("export").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
-                        ui.label(t.page_range_label);
-                        ui.text_edit_singleline(range);
-                        ui.end_row();
-                        ui.label(t.resolution);
-                        ui.add(egui::DragValue::new(dpi).range(36..=600).suffix(" dpi"));
-                        ui.end_row();
-                        ui.label(t.format);
-                        ui.horizontal(|ui| {
-                            ui.radio_value(jpeg, false, "PNG");
-                            ui.radio_value(jpeg, true, "JPEG");
-                        });
-                        ui.end_row();
-                    });
-                    if *error {
-                        ui.colored_label(egui::Color32::from_rgb(200, 40, 40), t.invalid_range);
-                    }
-                    let (ok, cancel) = buttons(ui, t.export, t.cancel);
-                    if ok {
-                        let count = self.active_tab().map_or(0, |tab| tab.doc.page_count());
-                        match parse_page_range(range, count) {
-                            Some(pages) => {
-                                let (dpi, jpeg) = (*dpi, *jpeg);
-                                action =
-                                    Some(Box::new(move |app, ctx| app.export_images(ctx, pages, dpi, jpeg)));
-                                outcome = Outcome::Close;
-                            }
-                            None => *error = true,
-                        }
-                    } else if cancel {
-                        outcome = Outcome::Close;
-                    }
+                Dialog::ExportImages(state) => {
+                    let (o, a) = self.export_images_dialog(ui, state);
+                    outcome = o;
+                    action = a;
+                }
+                Dialog::ExportWord { range } => {
+                    let (o, a) = self.export_word_dialog(ui, range);
+                    outcome = o;
+                    action = a;
                 }
                 Dialog::Settings { author } => {
                     ui.heading(t.settings);
@@ -342,34 +317,10 @@ impl MrPdfApp {
                         outcome = Outcome::Close;
                     }
                 }
-                Dialog::Print { range, copies, error } => {
-                    ui.heading(t.print);
-                    egui::Grid::new("print").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
-                        ui.label(t.page_range_label);
-                        ui.text_edit_singleline(range);
-                        ui.end_row();
-                        ui.label(t.copies);
-                        ui.add(egui::DragValue::new(copies).range(1..=99));
-                        ui.end_row();
-                    });
-                    ui.label(RichText::new(t.print_hint).small().weak());
-                    if *error {
-                        ui.colored_label(egui::Color32::from_rgb(200, 40, 40), t.invalid_range);
-                    }
-                    let (ok, cancel) = buttons(ui, t.print, t.cancel);
-                    if ok {
-                        let count = self.active_tab().map_or(0, |tab| tab.doc.page_count());
-                        match parse_page_range(range, count) {
-                            Some(pages) => {
-                                let copies = *copies;
-                                action = Some(Box::new(move |app, ctx| app.print(ctx, pages, copies)));
-                                outcome = Outcome::Close;
-                            }
-                            None => *error = true,
-                        }
-                    } else if cancel {
-                        outcome = Outcome::Close;
-                    }
+                Dialog::Print(state) => {
+                    let (o, a) = self.print_dialog(ui, state);
+                    outcome = o;
+                    action = a;
                 }
                 Dialog::Choice { page, annot_index, options, selected } => {
                     ui.heading(t.choose_value);

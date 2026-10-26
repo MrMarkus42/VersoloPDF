@@ -1103,6 +1103,47 @@ fn optimize_and_space_usage() {
     save(&mut h, "74-optimize-result");
 }
 
+#[test]
+fn print_and_export_dialogs() {
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let file = sample_file(&dir, 3);
+    let mut h = harness(vec![file], false);
+    h.run_steps(10);
+    h.key_press_modifiers(Modifiers::COMMAND, egui::Key::P);
+    h.run_steps(5);
+    assert!(matches!(h.state().dialog(), Some(mrpdf::ui::app::Dialog::Print(_))));
+    assert!(h.query_all_by_label("Position und Skalierung").next().is_some());
+    save(&mut h, "75-print-dialog");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    assert!(h.state().dialog().is_none());
+    // Exportieren → In Bilder: one multi-page TIFF next to the document.
+    open_backstage(&mut h);
+    h.get_by_label("Exportieren").click();
+    h.run_steps(3);
+    h.get_by_label("In Bilder").click();
+    h.run_steps(5);
+    assert!(matches!(h.state().dialog(), Some(mrpdf::ui::app::Dialog::ExportImages(_))));
+    save(&mut h, "76-export-images");
+    h.get_by_label("Öffne Zielordner und wähle Dateien aus").click();
+    h.run_steps(2);
+    h.get_by_label("OK").click();
+    h.run_steps(6);
+    let tif = dir.path().join("Beispiel_1.tif");
+    assert!(tif.exists(), "TIFF written");
+    let data = std::fs::read(&tif).unwrap();
+    assert_eq!(&data[..4], b"II*\0");
+    // Word settings.
+    open_backstage(&mut h);
+    h.get_by_label("Exportieren").click();
+    h.run_steps(3);
+    h.get_by_label("In Microsoft-Word-Dokument").click();
+    h.run_steps(4);
+    assert!(matches!(h.state().dialog(), Some(mrpdf::ui::app::Dialog::ExportWord { .. })));
+    save(&mut h, "77-export-word");
+}
+
 fn open_backstage(h: &mut Harness<'_, MrPdfApp>) {
     h.get_by_label("Datei").click();
     h.run_steps(4);
@@ -1161,7 +1202,9 @@ fn file_backstage() {
     h.run_steps(3);
     open_backstage(&mut h);
     // Disabled entries do nothing.
-    h.get_by_label("Alle drucken").click();
+    h.get_by_label("Einstellungen verwalten").click();
+    h.run_steps(3);
+    h.get_by_label("Einstellungen exportieren").click();
     h.run_steps(3);
     assert!(h.state().backstage_open());
     // Sub-page lists.

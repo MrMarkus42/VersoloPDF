@@ -419,7 +419,7 @@ pub(super) fn paper_combo(ui: &mut Ui, de: bool, id: &str, paper: &mut PaperChoi
 }
 
 /// Grouped list of all standard paper sizes ("Neues leeres Dokument").
-fn paper_list_combo(ui: &mut Ui, de: bool, id: &str, paper: &mut String, unit: Unit) {
+pub(super) fn paper_list_combo(ui: &mut Ui, de: bool, id: &str, paper: &mut String, unit: Unit) {
     let label = |name: &str| {
         let (w, h) = paper_size(name).unwrap_or((595.28, 841.89));
         format!("{name} {}", size_label(w, h, unit))

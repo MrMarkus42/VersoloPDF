@@ -396,53 +396,9 @@ impl MrPdfApp {
         }
     }
 
-    /// Windows: shows the system print dialog. Elsewhere: MrPDF's own dialog.
-    pub fn open_print_dialog(&mut self, ctx: &Context) {
-        #[cfg(windows)]
-        {
-            let t = self.t();
-            let result = match self.active_tab() {
-                Some(tab) => crate::print::print_with_dialog(&tab.doc),
-                None => return,
-            };
-            match result {
-                Ok(true) => self.set_status(ctx, t.print_sent),
-                Ok(false) => {}
-                Err(err) => self.show_error(&err),
-            }
-        }
-        #[cfg(not(windows))]
-        {
-            let _ = ctx;
-            if let Some(tab) = self.active_tab() {
-                self.dialog = Some(Dialog::Print {
-                    range: format!("1-{}", tab.doc.page_count()),
-                    copies: 1,
-                    error: false,
-                });
-            }
-        }
-    }
-
-    /// Prints through CUPS (Linux, macOS).
-    pub fn print(&mut self, ctx: &Context, pages: Vec<usize>, copies: u32) {
-        #[cfg(unix)]
-        {
-            let t = self.t();
-            let result = match self.tabs.get_mut(self.active) {
-                Some(tab) => crate::print::print_pages(&mut tab.doc, &pages, copies),
-                None => return,
-            };
-            match result {
-                Ok(job) => self.set_status(ctx, format!("{} {job}", t.print_sent)),
-                Err(err) => self.show_error(&err),
-            }
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = (pages, copies);
-            self.open_print_dialog(ctx);
-        }
+    /// MrPDF's print dialog ("Drucken").
+    pub fn open_print_dialog(&mut self, _ctx: &Context) {
+        self.open_print_dialog_for(false);
     }
 
     /// Creates a text markup annotation from the current text selection.
@@ -552,35 +508,6 @@ impl MrPdfApp {
                     None => {}
                 }
             }
-        }
-    }
-
-    pub fn export_images(&mut self, ctx: &Context, pages: Vec<usize>, dpi: u32, jpeg: bool) {
-        let t = self.t();
-        let ext = if jpeg { "jpg" } else { "png" };
-        let Some(tab) = self.active_tab() else { return };
-        let stem = tab.doc.display_name().trim_end_matches(".pdf").trim_end_matches(".PDF").to_string();
-        let result = if pages.len() == 1 {
-            let Some(dest) = rfd::FileDialog::new()
-                .set_title(t.export_image)
-                .add_filter(ext, &[ext])
-                .set_file_name(format!("{stem}-{}.{ext}", pages[0] + 1))
-                .save_file()
-            else {
-                return;
-            };
-            tab.doc.export_page_image(pages[0], dpi as f32, &dest)
-        } else {
-            let Some(dir) = rfd::FileDialog::new().set_title(t.export_image).pick_folder() else {
-                return;
-            };
-            pages.iter().try_for_each(|&p| {
-                tab.doc.export_page_image(p, dpi as f32, &dir.join(format!("{stem}-{}.{ext}", p + 1)))
-            })
-        };
-        match result {
-            Ok(()) => self.set_status(ctx, t.export_done),
-            Err(err) => self.show_error(&err),
         }
     }
 

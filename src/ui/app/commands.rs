@@ -104,8 +104,10 @@ pub enum Cmd {
     Save,
     SaveAs,
     Print,
+    PrintAll,
     Close,
     CloseAll,
+    EmailAll,
     SaveOptimized,
     SpaceUsage,
     Revert,
@@ -264,8 +266,10 @@ pub const SEARCHABLE: &[Cmd] = &[
     Cmd::Save,
     Cmd::SaveAs,
     Cmd::Print,
+    Cmd::PrintAll,
     Cmd::Close,
     Cmd::CloseAll,
+    Cmd::EmailAll,
     Cmd::SaveOptimized,
     Cmd::SpaceUsage,
     Cmd::Revert,
@@ -463,6 +467,8 @@ impl Cmd {
             Print => ("Drucken", "Print"),
             Close => ("Schließen", "Close"),
             CloseAll => ("Alle schließen", "Close all"),
+            PrintAll => ("Alle drucken", "Print all"),
+            EmailAll => ("Alle Dokumente per E-Mail senden", "Send all documents by e-mail"),
             SaveOptimized => ("Optimiert speichern", "Save optimized"),
             SpaceUsage => ("Speicherverbrauch untersuchen", "Examine space usage"),
             Revert => ("Zurücksetzen", "Revert"),
@@ -639,6 +645,8 @@ impl Cmd {
             SaveAs => Icon::SaveAs,
             Print => Icon::Print,
             Close | CloseAll => Icon::Close,
+            PrintAll => Icon::Print,
+            EmailAll => Icon::Mail,
             SaveOptimized => Icon::SaveAs,
             SpaceUsage => Icon::Count,
             Revert => Icon::Undo,
@@ -926,6 +934,7 @@ impl MrPdfApp {
             Email | OpenFolder | Revert | RenameFile | MoveFile | TrashFile => {
                 tab.is_some_and(|t| t.doc.path().is_some())
             }
+            EmailAll => self.tabs.iter().any(|t| t.doc.path().is_some()),
             _ => has_doc,
         }
     }
@@ -981,6 +990,7 @@ impl MrPdfApp {
             || self.run_labels(cmd)
             || self.run_file_op(ctx, cmd)
             || self.run_optimize(cmd)
+            || self.run_export(cmd)
         {
             return;
         }
@@ -994,6 +1004,7 @@ impl MrPdfApp {
                 self.save_as(ctx, None);
             }
             Print => self.open_print_dialog(ctx),
+            PrintAll => self.open_print_dialog_for(true),
             Close => self.request_close_tab(ctx, self.active),
             CloseAll => self.request_close_all(ctx),
             Exit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
@@ -1089,16 +1100,6 @@ impl MrPdfApp {
             RotateLeft => self.rotate_current(ctx, -90),
             RotateRight => self.rotate_current(ctx, 90),
             Rotate180 => self.rotate_current(ctx, 180),
-            ExportImages => {
-                if let Some(tab) = self.active_tab() {
-                    self.dialog = Some(Dialog::ExportImage {
-                        range: (tab.current_page + 1).to_string(),
-                        dpi: 150,
-                        jpeg: false,
-                        error: false,
-                    });
-                }
-            }
             BookmarkAdd => {
                 if let Some(tab) = self.active_tab() {
                     let page = tab.current_page;

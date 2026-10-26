@@ -214,7 +214,11 @@ impl DocTab {
     }
 
     pub fn render_options(&self) -> RenderOptions {
-        RenderOptions { rotation: self.view_rotation, annotations: self.show_annotations }
+        RenderOptions {
+            rotation: self.view_rotation,
+            annotations: self.show_annotations,
+            ..RenderOptions::default()
+        }
     }
 
     /// Navigates to page and remembers the current page for "previous view".

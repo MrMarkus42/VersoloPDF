@@ -4,6 +4,7 @@ mod actions;
 mod backstage;
 pub mod commands;
 mod dialogs;
+mod export_dialog;
 mod features;
 mod file_ops;
 mod formdata;
@@ -14,6 +15,7 @@ mod optimize_dialog;
 mod outline_tools;
 mod page_dialogs;
 mod preview;
+mod print_dialog;
 mod properties;
 mod review;
 mod ribbon;
@@ -144,20 +146,17 @@ pub enum Dialog {
         text: String,
         error: bool,
     },
-    ExportImage {
-        range: String,
-        dpi: u32,
-        jpeg: bool,
-        error: bool,
+    /// "Als Bilddateien exportieren".
+    ExportImages(Box<export_dialog::ExportImagesState>),
+    /// "Einstellungen für Word-Umwandlung".
+    ExportWord {
+        range: crate::ui::pickers::PageRange,
     },
     Settings {
         author: String,
     },
-    Print {
-        range: String,
-        copies: u32,
-        error: bool,
-    },
+    /// "Drucken" / "Alle drucken".
+    Print(Box<print_dialog::PrintState>),
     Choice {
         page: usize,
         annot_index: usize,

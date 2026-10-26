@@ -50,8 +50,6 @@ impl Page {
 enum Left {
     Page(Page),
     Run(Cmd),
-    /// Planned in a later step of docs/DATEI.md (German, English, step).
-    Planned(&'static str, &'static str, char),
     Separator,
 }
 
@@ -65,7 +63,7 @@ const LEFT: &[Left] = &[
     Left::Page(Page::New),
     Left::Separator,
     Left::Run(Cmd::Print),
-    Left::Planned("Alle drucken", "Print all", 'K'),
+    Left::Run(Cmd::PrintAll),
     Left::Page(Page::Export),
     Left::Page(Page::Share),
     Left::Separator,
@@ -215,7 +213,7 @@ fn items(page: Page) -> &'static [Item] {
                         "Alle Dokumente per E-Mail senden",
                         "Send all documents by e-mail",
                         Icon::Mail,
-                        Planned('K'),
+                        Run(Cmd::EmailAll),
                     ),
                     group("Zurückgeben", "Check in", Icon::Cloud, Not(Unavailable::Cloud)),
                     item("Ausleihen", "Check out", Icon::Cloud, Not(Unavailable::Cloud)),
@@ -392,11 +390,6 @@ impl MrPdfApp {
                             if response.clicked() {
                                 chosen = Some(cmd);
                             }
-                        }
-                        Left::Planned(de_label, en_label, step) => {
-                            let label = if de { de_label } else { en_label };
-                            let _ = column_row(ui, label, false, false)
-                                .on_disabled_hover_text(format!("{label}\n{}", planned_hint(lang, step)));
                         }
                     }
                 }

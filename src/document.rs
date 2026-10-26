@@ -46,11 +46,15 @@ pub struct RenderOptions {
     pub rotation: Rotation,
     /// Draw annotations and form fields.
     pub annotations: bool,
+    /// Page background (RGB) behind transparent content.
+    pub background: [u8; 3],
+    /// Render as for a printer (annotations without the print flag hidden).
+    pub printing: bool,
 }
 
 impl Default for RenderOptions {
     fn default() -> Self {
-        Self { rotation: Rotation::R0, annotations: true }
+        Self { rotation: Rotation::R0, annotations: true, background: [255, 255, 255], printing: false }
     }
 }
 
@@ -463,7 +467,8 @@ impl Document {
             .render_form_data(true)
             .render_annotations(opts.annotations)
             .rotate(to_pdf_rotation(opts.rotation), false)
-            .set_clear_color(PdfColor::WHITE);
+            .use_print_quality(opts.printing)
+            .set_clear_color(PdfColor::new(opts.background[0], opts.background[1], opts.background[2], 255));
         page.render_into_bitmap_with_config(&mut bitmap, &config)?;
         Ok(RenderedImage { width: w, height: h, rgba: bitmap.as_rgba_bytes() })
     }
@@ -1571,10 +1576,16 @@ impl Document {
 
     /// Writes the text as a Word document; headings are recognised by size.
     pub fn export_word(&self, dest: &Path) -> Result<()> {
+        self.export_word_pages(dest, &(0..self.page_count()).collect::<Vec<_>>())
+    }
+
+    /// Writes the text of `selection` as a Word document.
+    pub fn export_word_pages(&self, dest: &Path, selection: &[usize]) -> Result<()> {
         let headings: Vec<(usize, String)> =
             self.heading_bookmarks()?.into_iter().map(|b| (b.page, b.title)).collect();
         let mut pages = Vec::new();
-        for page in 0..self.page_count() {
+        for &page in selection {
+            self.check_page(page)?;
             let lines = self
                 .page_text(page)?
                 .lines()
@@ -2165,7 +2176,8 @@ impl Document {
                 (Rotation::R0, w, h)
             };
             let ph = ((W as f32 * rh / rw.max(1.0)) as u32).clamp(1, 400);
-            let opts = RenderOptions { annotations: !ignore_annotations, rotation };
+            let opts =
+                RenderOptions { annotations: !ignore_annotations, rotation, ..RenderOptions::default() };
             let img = self.render_tile(page, W, ph, 0, 0, W, ph, opts)?;
             // Coarse grey levels make the comparison robust against tiny differences.
             img.rgba

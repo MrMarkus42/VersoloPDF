@@ -40,6 +40,7 @@ impl MrPdfApp {
                 self.after_count(ctx, result, if de { "Entfernte Web-Links" } else { "Removed web links" });
             }
             Cmd::Email => self.send_email(ctx),
+            Cmd::EmailAll => self.send_email_all(ctx),
             Cmd::OpenFolder => {
                 if let Some(path) = self.active_tab().and_then(|t| t.doc.path()).map(|p| p.to_path_buf()) {
                     reveal_in_file_manager(&path);
@@ -107,6 +108,25 @@ impl MrPdfApp {
             format!("Your e-mail program was opened. Please attach the file:\n{path}")
         };
         self.info(Cmd::Email.label(self.settings.language), text);
+    }
+
+    /// "Alle Dokumente per E-Mail senden": the mail program with a list of
+    /// all saved documents to attach.
+    fn send_email_all(&mut self, ctx: &Context) {
+        let paths: Vec<String> =
+            self.tabs.iter().filter_map(|t| t.doc.path()).map(|p| p.display().to_string()).collect();
+        if paths.is_empty() {
+            return;
+        }
+        let subject = if self.german() { "PDF-Dokumente" } else { "PDF_documents" };
+        ctx.open_url(egui::OpenUrl::new_tab(format!("mailto:?subject={}", subject.replace(' ', "%20"))));
+        let list = paths.join("\n");
+        let text = if self.german() {
+            format!("Das E-Mail-Programm wurde geöffnet. Bitte hängen Sie diese Dateien an:\n{list}")
+        } else {
+            format!("Your e-mail program was opened. Please attach these files:\n{list}")
+        };
+        self.info(Cmd::EmailAll.label(self.settings.language), text);
     }
 
     /// Canvas events of the newer tools.

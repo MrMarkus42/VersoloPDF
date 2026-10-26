@@ -526,7 +526,7 @@ fn view_rotation_matches_geometry() {
                 0,
                 w as u32,
                 h as u32,
-                RenderOptions { rotation, annotations: true },
+                RenderOptions { rotation, annotations: true, ..RenderOptions::default() },
             )
             .unwrap();
         let v = geo.pdf_rect_to_view(&sq.rect);
@@ -543,7 +543,7 @@ fn view_rotation_matches_geometry() {
                 0,
                 w as u32,
                 h as u32,
-                RenderOptions { rotation, annotations: false },
+                RenderOptions { rotation, annotations: false, ..RenderOptions::default() },
             )
             .unwrap();
         let spot = common::average(&plain, c.x as u32 - 5, c.y as u32 - 5, c.x as u32 + 5, c.y as u32 + 5);

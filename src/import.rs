@@ -456,6 +456,88 @@ pub fn nup(src: &Source, pages: &[usize], layout: &NUpLayout) -> Result<Vec<u8>>
     })
 }
 
+/// A page placed on a sheet: `matrix` maps the upright page (0..w, 0..h,
+/// see [`upright`]) onto the sheet; drawing is clipped to `clip`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Placement {
+    pub page: usize,
+    pub matrix: Matrix,
+    pub clip: RectF,
+    pub border: bool,
+}
+
+/// A sheet of paper with the pages placed on it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SheetSpec {
+    pub size: (f32, f32),
+    pub items: Vec<Placement>,
+}
+
+/// Upright size `(w, h)` of a page of `src` (rotation applied).
+pub fn upright_size(src: &Source, page: usize) -> Result<(f32, f32)> {
+    let (bbox, rot) = src.page_box(page)?;
+    let (_, w, h) = upright(bbox, rot);
+    Ok((w, h))
+}
+
+/// Builds a PDF with one page per sheet (used for printing).
+pub fn compose_sheets(src: &Source, sheets: &[SheetSpec]) -> Result<Vec<u8>> {
+    guarded(|| {
+        if sheets.is_empty() {
+            return Err(Error::Invalid("no sheets".into()));
+        }
+        let sizes: Vec<(f32, f32)> =
+            sheets.iter().map(|s| (s.size.0.clamp(10.0, 14_400.0), s.size.1.clamp(10.0, 14_400.0))).collect();
+        let mut edit = Edit::open(&blank_pdf(&sizes)?, None)?;
+        let mut imported: HashMap<usize, (ObjectId, RectF, i32)> = HashMap::new();
+        for (index, sheet) in sheets.iter().enumerate() {
+            let sheet_id = edit.page_id(index)?;
+            let mut content = String::new();
+            let mut xobjects = Dictionary::new();
+            for (slot, item) in sheet.items.iter().enumerate() {
+                let entry = match imported.get(&item.page) {
+                    Some(e) => *e,
+                    None => {
+                        let e = import_page(&mut edit, src, item.page)?;
+                        imported.insert(item.page, e);
+                        e
+                    }
+                };
+                let (xobj, bbox, rot) = entry;
+                let (m, _, _) = upright(bbox, rot);
+                let place = m.then(item.matrix);
+                let name = format!("MrPg{slot}");
+                xobjects.set(name.clone().into_bytes(), Object::Reference(xobj));
+                let c = item.clip;
+                content.push_str(&format!(
+                    "q {} re W n {} /{name} Do Q\n",
+                    rect_ops(c.x0, c.y0, c.width(), c.height()),
+                    place.operator()
+                ));
+                if item.border {
+                    content.push_str(&format!(
+                        "q 0.5 w 0 G {} re S Q\n",
+                        rect_ops(c.x0, c.y0, c.width(), c.height())
+                    ));
+                }
+            }
+            let mut resources = Dictionary::new();
+            resources.set("XObject", Object::Dictionary(xobjects));
+            let content_id = edit.add(Stream::new(Dictionary::new(), content.into_bytes()));
+            let dict = edit.dict_mut(sheet_id)?;
+            dict.set("Resources", Object::Dictionary(resources));
+            dict.set("Contents", Object::Reference(content_id));
+        }
+        let bytes = edit.finish()?;
+        let mut doc = Document::load_mem(&bytes)?;
+        doc.trailer.remove(b"Prev");
+        doc.prune_objects();
+        let mut out = Vec::new();
+        doc.save_to(&mut out).map_err(|e| Error::Structure(e.to_string()))?;
+        Ok(out)
+    })
+}
+
 fn rect_ops(x: f32, y: f32, w: f32, h: f32) -> String {
     format!("{} {} {} {}", num(x), num(y), num(w), num(h))
 }
