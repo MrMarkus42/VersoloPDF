@@ -298,6 +298,46 @@ impl Document {
         Ok(doc)
     }
 
+    /// Creates a new, unsaved document with `count` empty pages of
+    /// `width` × `height` points ("Neues leeres Dokument").
+    pub fn new_with_pages(display_name: &str, width: f32, height: f32, count: usize) -> Result<Self> {
+        if !(1.0..=14_400.0).contains(&width)
+            || !(1.0..=14_400.0).contains(&height)
+            || !(1..=1000).contains(&count)
+        {
+            return Err(Error::Invalid("invalid page size or count".into()));
+        }
+        let pdfium = engine::pdfium()?;
+        let mut pdf = pdfium.create_new_pdf()?;
+        for _ in 0..count {
+            pdf.pages_mut().create_page_at_end(PdfPagePaperSize::new_custom(
+                PdfPoints::new(width),
+                PdfPoints::new(height),
+            ))?;
+        }
+        let bytes = pdf.save_to_bytes()?;
+        let mut doc = Self::from_bytes(bytes, display_name, None)?;
+        doc.modified = true;
+        Ok(doc)
+    }
+
+    /// Creates a new, unsaved document from generated PDF bytes plus
+    /// (page, title) bookmarks.
+    pub fn new_from_pdf(bytes: Vec<u8>, bookmarks: &[(usize, String)], display_name: &str) -> Result<Self> {
+        let mut doc = Self::from_bytes(bytes, display_name, None)?;
+        if !bookmarks.is_empty() {
+            let items: Vec<outline::NewBookmark> = bookmarks
+                .iter()
+                .map(|(p, t)| outline::NewBookmark { title: t.clone(), page: *p, level: 0 })
+                .collect();
+            doc.append_bookmarks(&items)?;
+            // The bookmarks belong to the new document, not to its history.
+            doc.history = History::default();
+        }
+        doc.modified = true;
+        Ok(doc)
+    }
+
     fn load(bytes: Vec<u8>, password: Option<&str>) -> Result<PdfDocument<'static>> {
         let pdfium = engine::pdfium()?;
         pdfium.load_pdf_from_byte_vec(bytes, password).map_err(|e| map_load_error(e, password.is_some()))

@@ -518,6 +518,47 @@ impl MrPdfApp {
                         outcome = Outcome::Close;
                     }
                 }
+                Dialog::OpenUrl { url } => {
+                    let de = self.settings.language == crate::ui::i18n::Language::German;
+                    ui.heading(if de { "Web-Seite öffnen" } else { "Open web page" });
+                    ui.label(if de { "URL eingeben:" } else { "Enter URL:" });
+                    ui.horizontal(|ui| {
+                        let edit = ui
+                            .add(egui::TextEdit::singleline(url).desired_width(380.0).hint_text("https://…"));
+                        if url.is_empty() {
+                            edit.request_focus();
+                        }
+                        egui::ComboBox::from_id_salt("url-history").selected_text("").width(24.0).show_ui(
+                            ui,
+                            |ui| {
+                                for entry in &self.settings.url_history {
+                                    if ui.selectable_label(false, entry.as_str()).clicked() {
+                                        *url = entry.clone();
+                                    }
+                                }
+                            },
+                        );
+                    });
+                    let address = url.trim().to_string();
+                    let valid = crate::download::valid_url(&address);
+                    if !address.is_empty() && !valid {
+                        ui.colored_label(
+                            egui::Color32::from_rgb(200, 40, 40),
+                            if de {
+                                "Bitte eine Adresse eingeben, die mit https:// oder http:// beginnt."
+                            } else {
+                                "Please enter an address starting with https:// or http://."
+                            },
+                        );
+                    }
+                    let (ok, cancel) = buttons(ui, t.ok, t.cancel);
+                    if ok && valid {
+                        action = Some(Box::new(move |app, ctx| app.start_download(ctx, address)));
+                        outcome = Outcome::Close;
+                    } else if cancel {
+                        outcome = Outcome::Close;
+                    }
+                }
             }
         });
 

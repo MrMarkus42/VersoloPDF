@@ -71,15 +71,32 @@ impl MrPdfApp {
 
     pub fn open_dialog(&mut self) {
         let t = self.t();
-        if let Some(files) =
-            rfd::FileDialog::new().set_title(t.open_file).add_filter("PDF", &["pdf", "PDF"]).pick_files()
-        {
+        let de = self.settings.language == crate::ui::i18n::Language::German;
+        let mut dialog = rfd::FileDialog::new().set_title(t.open_file);
+        let types = super::page_dialogs::OPEN_TYPES;
+        let all: Vec<&str> = types.iter().flat_map(|t| t.2.iter().copied()).collect();
+        for (i, (german, english, exts)) in types.iter().enumerate() {
+            dialog = dialog.add_filter(if de { *german } else { *english }, exts);
+            if i == 0 {
+                // As: "PDF-Dokument" first, then all types.
+                let label = if de { "Alle unterstützten Dateitypen" } else { "All supported file types" };
+                dialog = dialog.add_filter(label, &all);
+            }
+        }
+        if let Some(files) = dialog.pick_files() {
             self.pending_open.extend(files);
         }
     }
 
     /// Opens a document in a new tab (or activates it if already open).
+    /// Other supported files are converted into a new document.
     pub fn open_path(&mut self, ctx: &Context, path: PathBuf, password: Option<String>) {
+        if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case("pdf"))
+            && super::page_dialogs::openable(&path)
+        {
+            self.import_file(ctx, path);
+            return;
+        }
         let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
         if let Some(i) = self.tabs.iter().position(|t| {
             t.doc.path().is_some_and(|p| p.canonicalize().ok().as_deref() == Some(canonical.as_path()))

@@ -84,6 +84,127 @@ impl Default for BlankForm {
     }
 }
 
+/// Standard paper sizes of "Neues leeres Dokument": (group, name, width mm,
+/// height mm). The group names are translated by [`paper_group`].
+pub const PAPERS: &[(&str, &str, f32, f32)] = &[
+    ("ISO", "A0", 841.0, 1189.0),
+    ("ISO", "A1", 594.0, 841.0),
+    ("ISO", "A2", 420.0, 594.0),
+    ("ISO", "A3", 297.0, 420.0),
+    ("ISO", "A4", 210.0, 297.0),
+    ("ISO", "A5", 148.0, 210.0),
+    ("ISO", "B0", 1000.0, 1414.0),
+    ("ISO", "B1", 707.0, 1000.0),
+    ("ISO", "B2", 500.0, 707.0),
+    ("ISO", "B3", 353.0, 500.0),
+    ("ISO", "B4", 250.0, 353.0),
+    ("ISO", "B5", 176.0, 250.0),
+    ("ANSI", "Letter/ANSI A", 215.9, 279.4),
+    ("ANSI", "Tabloid/ANSI B", 279.4, 431.8),
+    ("ANSI", "ANSI Super B", 330.2, 482.6),
+    ("ANSI", "ANSI C", 431.8, 558.8),
+    ("ANSI", "ANSI D", 558.8, 863.6),
+    ("ANSI", "ANSI E", 863.6, 1117.6),
+    ("ANSI", "ANSI F", 711.2, 1016.0),
+    ("ANSI", "US Legal", 215.9, 355.6),
+    ("ANSI", "Statement", 139.7, 215.9),
+    ("ANSI", "Executive", 184.15, 266.7),
+    ("ANSI", "Folio", 215.9, 330.2),
+    ("ANSI", "Quarto", 215.0, 275.0),
+    ("ANSI", "Note", 215.9, 279.4),
+    ("ENV", "Envelope #9", 98.43, 225.43),
+    ("ENV", "Envelope #10", 104.78, 241.3),
+    ("ENV", "Envelope #11", 114.3, 263.53),
+    ("ENV", "Envelope #14", 127.0, 292.1),
+    ("ENV", "Envelope DL", 110.0, 220.0),
+    ("ENV", "Envelope C3", 324.0, 458.0),
+    ("ENV", "Envelope C4", 229.0, 324.0),
+    ("ENV", "Envelope C5", 162.0, 229.0),
+    ("ENV", "Envelope C6", 114.0, 162.0),
+    ("ENV", "Envelope C65", 114.0, 229.0),
+    ("ENV", "Envelope B4", 250.0, 353.0),
+    ("ENV", "Envelope B5", 176.0, 250.0),
+    ("ENV", "Envelope B6", 176.0, 125.0),
+    ("ENV", "Env. Monarch", 98.43, 190.5),
+    ("ENV", "Env. Personal", 92.08, 152.4),
+    ("JIS", "JIS B0", 1030.0, 1456.0),
+    ("JIS", "JIS B1", 728.0, 1030.0),
+    ("JIS", "JIS B2", 515.0, 728.0),
+    ("JIS", "JIS B3", 364.0, 515.0),
+    ("JIS", "JIS B4", 257.0, 364.0),
+    ("JIS", "JIS B5", 182.0, 257.0),
+    ("JIS", "JIS B6", 128.0, 182.0),
+    ("JIS", "JIS B7", 91.0, 128.0),
+    ("MISC", "18x24", 457.2, 609.6),
+    ("MISC", "24x36", 609.6, 914.4),
+    ("MISC", "30x42", 762.0, 1066.8),
+];
+
+fn paper_group(group: &str, de: bool) -> &'static str {
+    match group {
+        "ISO" => "ISO",
+        "ANSI" => "ANSI",
+        "ENV" => tr(de, "Umschlag", "Envelope"),
+        "JIS" => "JIS",
+        _ => tr(de, "Verschiedenes", "Other"),
+    }
+}
+
+/// Width and height (points) of a standard paper by name.
+pub fn paper_size(name: &str) -> Option<(f32, f32)> {
+    let mm = Unit::Mm.points();
+    PAPERS.iter().find(|p| p.1 == name).map(|p| (p.2 * mm, p.3 * mm))
+}
+
+/// Settings of "Neues leeres Dokument".
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NewBlankForm {
+    /// "Eigene" size instead of a standard paper.
+    pub custom: bool,
+    pub paper: String,
+    pub landscape: bool,
+    /// Custom size in points.
+    pub size: (f32, f32),
+    pub count: u32,
+}
+
+impl Default for NewBlankForm {
+    fn default() -> Self {
+        Self { custom: false, paper: "A4".into(), landscape: false, size: (595.28, 841.89), count: 1 }
+    }
+}
+
+impl NewBlankForm {
+    /// Page size in points.
+    pub fn page_size(&self) -> (f32, f32) {
+        if self.custom {
+            return self.size;
+        }
+        let (w, h) = paper_size(&self.paper).unwrap_or((595.28, 841.89));
+        let (short, long) = (w.min(h), w.max(h));
+        if self.landscape { (long, short) } else { (short, long) }
+    }
+}
+
+/// Source files of the text dialog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextKind {
+    Plain,
+    Rtf,
+    Markdown,
+    Csv,
+}
+
+/// "Neues Dokument" entries that open a dialog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NewKind {
+    Blank,
+    Text(TextKind),
+    Images,
+    Clipboard,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ExtractMode {
     /// All pages into one file.
@@ -150,18 +271,24 @@ pub enum PageDialog {
         error: Option<String>,
     },
     Blank(BlankForm),
+    /// "Neues leeres Dokument".
+    NewBlank(NewBlankForm),
     Clipboard {
         image: bool,
         target: Target,
+        /// Create a new document instead of inserting pages.
+        new_doc: bool,
     },
     Images {
         files: Vec<PathBuf>,
         selected: Option<usize>,
         target: Target,
         layout: ImageLayout,
+        new_doc: bool,
     },
     Text {
-        rtf: bool,
+        kind: TextKind,
+        new_doc: bool,
         files: Vec<PathBuf>,
         selected: Option<usize>,
         target: Target,
@@ -289,6 +416,35 @@ pub(super) fn paper_combo(ui: &mut Ui, de: bool, id: &str, paper: &mut PaperChoi
             ui.selectable_value(paper, p, paper_label(p, de));
         }
     });
+}
+
+/// Grouped list of all standard paper sizes ("Neues leeres Dokument").
+fn paper_list_combo(ui: &mut Ui, de: bool, id: &str, paper: &mut String, unit: Unit) {
+    let label = |name: &str| {
+        let (w, h) = paper_size(name).unwrap_or((595.28, 841.89));
+        format!("{name} {}", size_label(w, h, unit))
+    };
+    egui::ComboBox::from_id_salt(id).selected_text(label(paper)).width(230.0).height(420.0).show_ui(
+        ui,
+        |ui| {
+            let mut group = "";
+            for (g, name, ..) in PAPERS {
+                if *g != group {
+                    group = g;
+                    ui.label(RichText::new(paper_group(g, de)).strong());
+                }
+                if ui.selectable_label(paper == name, label(name)).clicked() {
+                    *paper = (*name).to_string();
+                }
+            }
+        },
+    );
+}
+
+/// Name of a document made from files: the first file's name.
+fn new_name(files: &[PathBuf]) -> String {
+    let stem = files.first().and_then(|p| p.file_stem()).map(|s| s.to_string_lossy().into_owned());
+    format!("{}.pdf", stem.unwrap_or_else(|| "Neu".into()))
 }
 
 fn size_label(w: f32, h: f32, unit: Unit) -> String {
@@ -530,6 +686,26 @@ fn decode_files(
     Ok(docs)
 }
 
+/// File types of "Öffnen": PDF is opened, the others become new documents.
+pub const OPEN_TYPES: &[(&str, &str, &[&str])] = &[
+    ("PDF-Dokument", "PDF document", &["pdf"]),
+    ("Bilder", "Images", &["png", "jpg", "jpeg"]),
+    ("Textdateien", "Text files", &["txt", "text", "log"]),
+    ("Rich-Text-Format-Dokument", "Rich text format document", &["rtf"]),
+    ("Markdown", "Markdown", &["md", "markdown"]),
+    ("CSV-Dateien", "CSV files", &["csv", "tsv"]),
+];
+
+fn extension(path: &Path) -> String {
+    path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default()
+}
+
+/// Whether "Öffnen" (or drag and drop) accepts the file.
+pub fn openable(path: &Path) -> bool {
+    let ext = extension(path);
+    OPEN_TYPES.iter().any(|(.., exts)| exts.contains(&ext.as_str()))
+}
+
 fn load_images(files: &[PathBuf]) -> crate::Result<Vec<(String, RgbaImage)>> {
     files.iter().map(|p| Ok((file_name(p), crate::document::load_image(p)?))).collect()
 }
@@ -593,16 +769,18 @@ impl MrPdfApp {
                 }
                 let image_first = image.is_some() && text.is_none();
                 self.clipboard = (text, image);
-                PageDialog::Clipboard { image: image_first, target: Target::after_current() }
+                PageDialog::Clipboard { image: image_first, target: Target::after_current(), new_doc: false }
             }
             Cmd::InsertImages => PageDialog::Images {
                 files: Vec::new(),
                 selected: None,
                 target: Target::after_current(),
                 layout: ImageLayout::default(),
+                new_doc: false,
             },
             Cmd::InsertText | Cmd::InsertRtf => PageDialog::Text {
-                rtf: cmd == Cmd::InsertRtf,
+                kind: if cmd == Cmd::InsertRtf { TextKind::Rtf } else { TextKind::Plain },
+                new_doc: false,
                 files: Vec::new(),
                 selected: None,
                 target: Target::after_current(),
@@ -663,6 +841,83 @@ impl MrPdfApp {
         };
         self.open_pages(dialog);
         true
+    }
+
+    /// "Neues Dokument → …": the page dialogs in "new document" mode.
+    pub(super) fn open_new_document_dialog(&mut self, kind: NewKind) {
+        let dialog = match kind {
+            NewKind::Blank => PageDialog::NewBlank(NewBlankForm::default()),
+            NewKind::Text(kind) => PageDialog::Text {
+                kind,
+                new_doc: true,
+                files: Vec::new(),
+                selected: None,
+                target: Target::default(),
+                layout: TextLayout { paragraphs: ParagraphMode::EachLine, ..TextLayout::default() },
+            },
+            NewKind::Images => PageDialog::Images {
+                files: Vec::new(),
+                selected: None,
+                target: Target::default(),
+                layout: ImageLayout::default(),
+                new_doc: true,
+            },
+            NewKind::Clipboard => {
+                let (text, image) = read_clipboard();
+                if text.is_none() && image.is_none() {
+                    let de = self.pd_de();
+                    self.dialog = Some(Dialog::Message {
+                        title: tr(de, "Aus Zwischenablage", "From clipboard").into(),
+                        text: tr(
+                            de,
+                            "Die Zwischenablage enthält keinen Text und kein Bild.",
+                            "The clipboard contains no text and no image.",
+                        )
+                        .into(),
+                    });
+                    return;
+                }
+                let image_first = image.is_some() && text.is_none();
+                self.clipboard = (text, image);
+                PageDialog::Clipboard { image: image_first, target: Target::default(), new_doc: true }
+            }
+        };
+        self.open_pages(dialog);
+    }
+
+    /// Opens an image, text, RTF, Markdown or CSV file as a new document.
+    pub(super) fn import_file(&mut self, ctx: &Context, path: PathBuf) {
+        let files = vec![path.clone()];
+        let layout = TextLayout::default();
+        let text = |rtf: bool| decode_files(&files, rtf, TextEncoding::Auto);
+        let result = match extension(&path).as_str() {
+            "png" | "jpg" | "jpeg" => load_images(&files)
+                .and_then(|imgs| crate::compose::images_to_pdf(&imgs, &ImageLayout::default())),
+            "rtf" => text(true).and_then(|docs| crate::compose::text_to_pdf(&docs, &layout)),
+            "md" | "markdown" => text(false).and_then(|docs| crate::compose::markdown_to_pdf(&docs, &layout)),
+            "csv" | "tsv" => text(false).and_then(|docs| crate::compose::csv_to_pdf(&docs, &layout)),
+            _ => text(false).and_then(|docs| crate::compose::text_to_pdf(&docs, &layout)),
+        };
+        if result.is_ok() {
+            self.settings.add_recent(&path);
+        }
+        self.open_generated(ctx, result, new_name(&files));
+    }
+
+    /// Opens generated pages as a new, unsaved document.
+    fn open_generated(
+        &mut self,
+        ctx: &Context,
+        result: crate::Result<crate::compose::Composed>,
+        name: String,
+    ) {
+        match result.and_then(|(pdf, marks)| Document::new_from_pdf(pdf, &marks, &name)) {
+            Ok(doc) => {
+                self.add_tab(doc);
+                ctx.request_repaint();
+            }
+            Err(err) => self.show_error(&err),
+        }
     }
 
     /// Draws a page dialog; returns the outcome and the work to do.
@@ -878,12 +1133,90 @@ impl MrPdfApp {
                     close(&mut outcome);
                 }
             }
-            PageDialog::Clipboard { image, target } => {
-                ui.heading(tr(
-                    de,
-                    "Einfügen von Seiten aus der Zwischenablage",
-                    "Insert pages from the clipboard",
-                ));
+            PageDialog::NewBlank(form) => {
+                ui.horizontal(|ui| {
+                    ui.heading(tr(de, "Neues leeres Dokument", "New blank document"));
+                    unit_combo_right(ui, de, &mut self.settings.unit);
+                });
+                section(ui, tr(de, "Seiten", "Pages"), |ui| {
+                    egui::Grid::new("new-blank").num_columns(2).spacing(vec2(8.0, 6.0)).show(ui, |ui| {
+                        ui.label(tr(de, "Typ:", "Type:"));
+                        segmented(
+                            ui,
+                            &mut form.custom,
+                            &[(false, "Standard".into()), (true, tr(de, "Eigene", "Custom").into())],
+                        );
+                        ui.end_row();
+                        if form.custom {
+                            ui.label(tr(de, "Breite:", "Width:"));
+                            ui.horizontal(|ui| {
+                                length(ui, &mut form.size.0, unit, 10.0..=14_400.0);
+                                if icon_button(
+                                    ui,
+                                    Icon::Swap,
+                                    tr(de, "Breite und Höhe tauschen", "Swap width and height"),
+                                    false,
+                                    true,
+                                )
+                                .clicked()
+                                {
+                                    form.size = (form.size.1, form.size.0);
+                                }
+                            });
+                            ui.end_row();
+                            ui.label(tr(de, "Höhe:", "Height:"));
+                            length(ui, &mut form.size.1, unit, 10.0..=14_400.0);
+                            ui.end_row();
+                        } else {
+                            ui.label(tr(de, "Größe:", "Size:"));
+                            paper_list_combo(ui, de, "new-blank-paper", &mut form.paper, unit);
+                            ui.end_row();
+                            ui.label(tr(de, "Ausrichtung:", "Orientation:"));
+                            segmented(
+                                ui,
+                                &mut form.landscape,
+                                &[
+                                    (false, tr(de, "Hochformat", "Portrait").into()),
+                                    (true, tr(de, "Querformat", "Landscape").into()),
+                                ],
+                            );
+                            ui.end_row();
+                        }
+                        ui.label(tr(de, "Anzahl:", "Count:"));
+                        ui.add(egui::DragValue::new(&mut form.count).range(1..=1000));
+                        ui.end_row();
+                    });
+                });
+                let mut name = std::mem::take(&mut state.preset_name);
+                let _ = ui
+                    .horizontal(|ui| preset_combo(ui, de, "new-blank", form, &mut self.settings, &mut name));
+                state.preset_name = name;
+                let (ok, cancel, _) = footer(ui, de, true, false, "OK");
+                if ok {
+                    let (w, h) = form.page_size();
+                    let count = form.count as usize;
+                    action = Some(Box::new(move |app, ctx| {
+                        let t = app.t();
+                        match Document::new_with_pages(t.untitled, w, h, count) {
+                            Ok(doc) => {
+                                app.add_tab(doc);
+                                ctx.request_repaint();
+                            }
+                            Err(err) => app.show_error(&err),
+                        }
+                    }));
+                    close(&mut outcome);
+                } else if cancel {
+                    close(&mut outcome);
+                }
+            }
+            PageDialog::Clipboard { image, target, new_doc } => {
+                let new_doc = *new_doc;
+                ui.heading(if new_doc {
+                    tr(de, "Neues Dokument aus der Zwischenablage", "New document from the clipboard")
+                } else {
+                    tr(de, "Einfügen von Seiten aus der Zwischenablage", "Insert pages from the clipboard")
+                });
                 ui.label(tr(de, "Datentypen in der Zwischenablage:", "Data types in the clipboard:"));
                 let has_text = self.clipboard.0.is_some();
                 let has_image = self.clipboard.1.is_some();
@@ -909,24 +1242,34 @@ impl MrPdfApp {
                 if let Some((_, doc)) = &self.dialog_doc {
                     doc_preview(ui, &mut self.preview[0], doc, 0xc1b, 0, vec2(400.0, 300.0));
                 }
-                target.ui(ui, de, n, cur);
+                if !new_doc {
+                    target.ui(ui, de, n, cur);
+                }
                 let (ok, cancel, _) = footer(ui, de, self.dialog_doc.is_some(), false, "OK");
                 if ok {
                     let at = target.insert_index(n, cur);
                     let img = *image;
                     action = Some(Box::new(move |app, ctx| {
                         let bytes = app.clipboard_pdf(img);
-                        app.edit(ctx, |tab| tab.doc.insert_pdf_bytes(at, bytes?, &[]).map(|_| ()));
+                        if new_doc {
+                            let name = app.t().untitled.to_string();
+                            app.open_generated(ctx, bytes.map(|b| (b, Vec::new())), name);
+                        } else {
+                            app.edit(ctx, |tab| tab.doc.insert_pdf_bytes(at, bytes?, &[]).map(|_| ()));
+                        }
                     }));
                     close(&mut outcome);
                 } else if cancel {
                     close(&mut outcome);
                 }
             }
-            PageDialog::Images { files, selected, target, layout } => {
+            PageDialog::Images { files, selected, target, layout, new_doc } => {
+                let new_doc = *new_doc;
                 ui.heading(tr(de, "Bilder in PDF umwandeln", "Convert images to PDF"));
                 file_list(ui, de, files, selected, &IMAGE_EXT, tr(de, "Bilder", "Images"));
-                target.ui(ui, de, n, cur);
+                if !new_doc {
+                    target.ui(ui, de, n, cur);
+                }
                 let (ok, cancel, settings) = footer(ui, de, !files.is_empty(), true, "OK");
                 open_settings = settings;
                 if ok {
@@ -936,27 +1279,36 @@ impl MrPdfApp {
                     action = Some(Box::new(move |app, ctx| {
                         let result = load_images(&files)
                             .and_then(|imgs| crate::compose::images_to_pdf(&imgs, &layout));
-                        app.edit(ctx, |tab| {
-                            let (pdf, marks) = result?;
-                            tab.doc.insert_pdf_bytes(at, pdf, &marks).map(|_| ())
-                        });
+                        if new_doc {
+                            app.open_generated(ctx, result, new_name(&files));
+                        } else {
+                            app.edit(ctx, |tab| {
+                                let (pdf, marks) = result?;
+                                tab.doc.insert_pdf_bytes(at, pdf, &marks).map(|_| ())
+                            });
+                        }
                     }));
                     close(&mut outcome);
                 } else if cancel {
                     close(&mut outcome);
                 }
             }
-            PageDialog::Text { rtf, files, selected, target, layout } => {
-                let rtf = *rtf;
-                ui.heading(if rtf {
-                    tr(de, "RTF in PDF umwandeln", "Convert RTF to PDF")
-                } else {
-                    tr(de, "Textdateien in PDF umwandeln", "Convert text files to PDF")
+            PageDialog::Text { kind, new_doc, files, selected, target, layout } => {
+                let (kind, new_doc) = (*kind, *new_doc);
+                let rtf = kind == TextKind::Rtf;
+                ui.heading(match kind {
+                    TextKind::Plain => tr(de, "Textdateien in PDF umwandeln", "Convert text files to PDF"),
+                    TextKind::Rtf => tr(de, "RTF in PDF umwandeln", "Convert RTF to PDF"),
+                    TextKind::Markdown => tr(de, "Markdown in PDF umwandeln", "Convert Markdown to PDF"),
+                    TextKind::Csv => tr(de, "CSV-Dateien in PDF umwandeln", "Convert CSV files to PDF"),
                 });
-                let (ext, filter): (&[&str], &str) = if rtf {
-                    (&["rtf"], "RTF")
-                } else {
-                    (&["txt", "text", "log", "csv", "md"], tr(de, "Textdateien", "Text files"))
+                let (ext, filter): (&[&str], &str) = match kind {
+                    TextKind::Rtf => (&["rtf"], "RTF"),
+                    TextKind::Markdown => (&["md", "markdown", "txt"], "Markdown"),
+                    TextKind::Csv => (&["csv", "tsv", "txt"], tr(de, "CSV-Dateien", "CSV files")),
+                    TextKind::Plain => {
+                        (&["txt", "text", "log", "csv", "md"], tr(de, "Textdateien", "Text files"))
+                    }
                 };
                 file_list(ui, de, files, selected, ext, filter);
                 if !rtf {
@@ -998,30 +1350,33 @@ impl MrPdfApp {
                                     );
                                 });
                             ui.end_row();
-                            ui.label(tr(de, "Modus für neue Absätze:", "New paragraph mode:"));
-                            egui::ComboBox::from_id_salt("para")
-                                .selected_text(match layout.paragraphs {
-                                    ParagraphMode::EachLine => {
-                                        tr(de, "Jeder Zeilenumbruch", "Every line break")
-                                    }
-                                    ParagraphMode::EmptyLine => {
-                                        tr(de, "Nur bei Leerzeilen", "Only at empty lines")
-                                    }
-                                })
-                                .width(240.0)
-                                .show_ui(ui, |ui| {
-                                    ui.selectable_value(
-                                        &mut layout.paragraphs,
-                                        ParagraphMode::EachLine,
-                                        tr(de, "Jeder Zeilenumbruch", "Every line break"),
-                                    );
-                                    ui.selectable_value(
-                                        &mut layout.paragraphs,
-                                        ParagraphMode::EmptyLine,
-                                        tr(de, "Nur bei Leerzeilen", "Only at empty lines"),
-                                    );
-                                });
-                            ui.end_row();
+                            // Markdown and CSV have their own paragraph rules.
+                            if kind == TextKind::Plain {
+                                ui.label(tr(de, "Modus für neue Absätze:", "New paragraph mode:"));
+                                egui::ComboBox::from_id_salt("para")
+                                    .selected_text(match layout.paragraphs {
+                                        ParagraphMode::EachLine => {
+                                            tr(de, "Jeder Zeilenumbruch", "Every line break")
+                                        }
+                                        ParagraphMode::EmptyLine => {
+                                            tr(de, "Nur bei Leerzeilen", "Only at empty lines")
+                                        }
+                                    })
+                                    .width(240.0)
+                                    .show_ui(ui, |ui| {
+                                        ui.selectable_value(
+                                            &mut layout.paragraphs,
+                                            ParagraphMode::EachLine,
+                                            tr(de, "Jeder Zeilenumbruch", "Every line break"),
+                                        );
+                                        ui.selectable_value(
+                                            &mut layout.paragraphs,
+                                            ParagraphMode::EmptyLine,
+                                            tr(de, "Nur bei Leerzeilen", "Only at empty lines"),
+                                        );
+                                    });
+                                ui.end_row();
+                            }
                             ui.label(tr(de, "Modus zum Einfügen der Dateien:", "File insert mode:"));
                             egui::ComboBox::from_id_salt("join")
                                 .selected_text(match layout.join {
@@ -1047,19 +1402,28 @@ impl MrPdfApp {
                         });
                     });
                 }
-                target.ui(ui, de, n, cur);
+                if !new_doc {
+                    target.ui(ui, de, n, cur);
+                }
                 let (ok, cancel, settings) = footer(ui, de, !files.is_empty(), true, "OK");
                 open_settings = settings;
                 if ok {
                     let (files, layout) = (files.clone(), layout.clone());
                     let at = target.insert_index(n, cur);
                     action = Some(Box::new(move |app, ctx| {
-                        let result = decode_files(&files, rtf, layout.encoding)
-                            .and_then(|docs| crate::compose::text_to_pdf(&docs, &layout));
-                        app.edit(ctx, |tab| {
-                            let (pdf, marks) = result?;
-                            tab.doc.insert_pdf_bytes(at, pdf, &marks).map(|_| ())
+                        let result = decode_files(&files, rtf, layout.encoding).and_then(|docs| match kind {
+                            TextKind::Markdown => crate::compose::markdown_to_pdf(&docs, &layout),
+                            TextKind::Csv => crate::compose::csv_to_pdf(&docs, &layout),
+                            TextKind::Plain | TextKind::Rtf => crate::compose::text_to_pdf(&docs, &layout),
                         });
+                        if new_doc {
+                            app.open_generated(ctx, result, new_name(&files));
+                        } else {
+                            app.edit(ctx, |tab| {
+                                let (pdf, marks) = result?;
+                                tab.doc.insert_pdf_bytes(at, pdf, &marks).map(|_| ())
+                            });
+                        }
                     }));
                     close(&mut outcome);
                 } else if cancel {

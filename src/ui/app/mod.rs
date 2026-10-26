@@ -209,6 +209,10 @@ pub enum Dialog {
         by_page: bool,
     },
     About,
+    /// "Von URL öffnen".
+    OpenUrl {
+        url: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -255,6 +259,14 @@ pub struct MrPdfApp {
     backstage: Option<backstage::Page>,
     /// Search text of the recent files list in the backstage.
     recent_filter: String,
+    /// Shown sub-page of "Öffnen".
+    open_view: backstage::OpenView,
+    /// Name field of "Aktuelle Sitzung speichern".
+    session_name: String,
+    /// First-page pictures of recent files (None: could not be rendered).
+    recent_thumbs: std::collections::HashMap<PathBuf, Option<egui::TextureHandle>>,
+    /// Running "Von URL öffnen" download: address and result channel.
+    download: Option<(String, std::sync::mpsc::Receiver<crate::Result<PathBuf>>)>,
 }
 
 impl MrPdfApp {
@@ -267,6 +279,12 @@ impl MrPdfApp {
     /// Creates the application without persistent storage (used by tests).
     pub fn with_settings(ctx: &Context, settings: Settings, files: Vec<PathBuf>) -> Self {
         ctx.options_mut(|o| o.zoom_with_keyboard = false);
+        // "Letzte Sitzung beim Start wiederherstellen".
+        let files = if files.is_empty() && settings.restore_session {
+            settings.last_session.files.iter().filter(|p| p.exists()).cloned().collect()
+        } else {
+            files
+        };
         Self {
             side: SidePanel::Thumbnails,
             settings,
@@ -297,6 +315,10 @@ impl MrPdfApp {
             overlay_source: None,
             backstage: None,
             recent_filter: String::new(),
+            open_view: backstage::OpenView::Recent,
+            session_name: String::new(),
+            recent_thumbs: Default::default(),
+            download: None,
         }
     }
 
@@ -306,6 +328,10 @@ impl MrPdfApp {
 
     fn tab(&mut self) -> Option<&mut DocTab> {
         self.tabs.get_mut(self.active)
+    }
+
+    pub fn settings(&self) -> &Settings {
+        &self.settings
     }
 
     pub fn tab_count(&self) -> usize {
@@ -498,7 +524,7 @@ impl MrPdfApp {
         let dropped: Vec<PathBuf> =
             ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).collect());
         for path in dropped {
-            if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("pdf")) {
+            if page_dialogs::openable(&path) {
                 self.pending_open.push_back(path);
             } else {
                 let t = self.t();
@@ -583,7 +609,7 @@ impl MrPdfApp {
             if !self.settings.recent_files.is_empty() {
                 ui.add_space(16.0);
                 ui.strong(t.recent_files);
-                for path in self.settings.recent_files.clone() {
+                for path in self.settings.recent_files.iter().take(12).cloned().collect::<Vec<_>>() {
                     let label =
                         path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                     if ui.link(label).on_hover_text(path.display().to_string()).clicked() {
@@ -613,6 +639,7 @@ impl eframe::App for MrPdfApp {
             self.open_path(&ctx, path, None);
         }
         self.handle_dropped_files(&ctx);
+        self.poll_download(&ctx);
         self.shortcuts(&ctx);
         self.handle_close_request(&ctx);
 
@@ -641,6 +668,10 @@ impl eframe::App for MrPdfApp {
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        // Called regularly and on exit: remember the open documents.
+        if let Some(session) = self.current_session(String::new()) {
+            self.settings.last_session = session;
+        }
         eframe::set_value(storage, SETTINGS_KEY, &self.settings);
     }
 }

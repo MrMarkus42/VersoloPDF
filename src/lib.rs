@@ -15,6 +15,7 @@ pub mod compare;
 pub mod compose;
 pub mod convert;
 pub mod document;
+pub mod download;
 pub mod engine;
 pub mod error;
 pub mod forms;

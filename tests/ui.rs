@@ -973,6 +973,28 @@ fn other_tools_menu() {
     assert!((h.state().active_tab().unwrap().zoom - 1.0).abs() < 1e-3);
 }
 
+#[test]
+fn open_other_file_types() {
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let md = dir.path().join("Notizen.md");
+    std::fs::write(&md, "# Überschrift\n\nText mit **fett**.\n\n- Punkt\n").unwrap();
+    let csv = dir.path().join("Tabelle.csv");
+    std::fs::write(&csv, "Name;Wert\nA;1\nB;2\n").unwrap();
+    let mut h = harness(vec![md, csv], false);
+    h.run_steps(12);
+    assert_eq!(h.state().tab_count(), 2);
+    let tab = h.state().active_tab().unwrap();
+    assert_eq!(tab.doc.display_name(), "Tabelle.pdf");
+    assert!(tab.doc.page_text(0).unwrap().all_text().contains("Wert"));
+    assert!(tab.doc.is_modified(), "converted documents are unsaved");
+    save(&mut h, "67-csv-document");
+    h.state_mut().set_active_tab(0);
+    h.run_steps(3);
+    let text = h.state().active_tab().unwrap().doc.page_text(0).unwrap().all_text();
+    assert!(text.contains("Überschrift") && text.contains("Punkt"), "{text}");
+}
+
 fn open_backstage(h: &mut Harness<'_, MrPdfApp>) {
     h.get_by_label("Datei").click();
     h.run_steps(4);
@@ -1006,10 +1028,30 @@ fn file_backstage() {
     assert!(h.query_all_by_label("Letzte Dateien").next().is_some());
     assert!(h.query_all_by_label("Beispiel").next().is_some());
     save(&mut h, "59-backstage-open");
+    // Pinning moves the entry to "Angeheftete Dokumente".
+    h.get_by_label("Anheften").click();
+    h.run_steps(4);
+    assert_eq!(h.state().settings().pinned_files.len(), 1);
+    assert!(h.query_all_by_label("Lösen").next().is_some());
+    save(&mut h, "63-backstage-pinned");
     // Entries can be removed from the list.
     h.get_by_label("Aus der Liste entfernen").click();
     h.run_steps(3);
     assert!(h.query_all_by_label("Beispiel").next().is_none());
+    assert!(h.state().settings().pinned_files.is_empty());
+    // Sessions page.
+    h.get_by_label("Sitzungen").click();
+    h.run_steps(3);
+    assert!(h.query_all_by_label("Aktuelle Sitzung speichern").next().is_some());
+    save(&mut h, "64-backstage-sessions");
+    // "Von URL öffnen" asks for the address.
+    h.get_by_label("Von URL öffnen").click();
+    h.run_steps(3);
+    assert!(matches!(h.state().dialog(), Some(mrpdf::ui::app::Dialog::OpenUrl { .. })));
+    save(&mut h, "65-open-url");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    open_backstage(&mut h);
     // Disabled entries do nothing.
     h.get_by_label("Optimiert speichern").click();
     h.run_steps(3);
@@ -1025,8 +1067,16 @@ fn file_backstage() {
     save(&mut h, "61-backstage-new");
     h.get_by_label("Mit leeren Seiten").click();
     h.run_steps(5);
+    assert!(!h.state().backstage_open(), "the dialog replaces the backstage");
+    assert!(h.query_all_by_label("Neues leeres Dokument").next().is_some());
+    h.get_by_label("Querformat").click();
+    h.run_steps(3);
+    save(&mut h, "66-new-blank-dialog");
+    h.get_by_label("OK").click();
+    h.run_steps(5);
     assert_eq!(h.state().tab_count(), 2);
-    assert!(!h.state().backstage_open(), "a new document leaves the backstage");
+    let (w, hgt) = h.state().active_tab().unwrap().doc.geometry(0).unwrap().view_size();
+    assert!(w > hgt, "landscape A4: {w} x {hgt}");
     // Esc and a ribbon tab leave the backstage.
     open_backstage(&mut h);
     h.key_press(egui::Key::Escape);

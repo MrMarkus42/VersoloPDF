@@ -10,7 +10,22 @@ use crate::ui::pickers::{PresetStore, Unit};
 use crate::ui::tools::Tool;
 use crate::ui::view::{PageLayout, ZoomMode};
 
-pub const MAX_RECENT: usize = 12;
+pub const MAX_RECENT: usize = 50;
+/// Upper bound for saved sessions and documents per session.
+pub const MAX_SESSIONS: usize = 50;
+pub const MAX_SESSION_FILES: usize = 200;
+
+/// A set of open documents ("Sitzung").
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Session {
+    pub name: String,
+    pub files: Vec<PathBuf>,
+    /// Index of the active document.
+    pub active: usize,
+    /// Date and time it was saved (for display).
+    pub saved: String,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -18,6 +33,16 @@ pub struct Settings {
     pub language: Language,
     pub author: String,
     pub recent_files: Vec<PathBuf>,
+    /// Pinned documents shown above the recent files.
+    pub pinned_files: Vec<PathBuf>,
+    /// Documents open when MrPDF was last closed.
+    pub last_session: Session,
+    /// Sessions saved by name.
+    pub sessions: Vec<Session>,
+    /// Reopen the last session at start when no files are given.
+    pub restore_session: bool,
+    /// Addresses entered in "Von URL öffnen".
+    pub url_history: Vec<String>,
     pub dark_mode: bool,
     pub show_sidebar: bool,
     pub show_properties: bool,
@@ -38,6 +63,11 @@ impl Default for Settings {
             language: Language::detect(),
             author: default_author(),
             recent_files: Vec::new(),
+            pinned_files: Vec::new(),
+            last_session: Session::default(),
+            sessions: Vec::new(),
+            restore_session: false,
+            url_history: Vec::new(),
             dark_mode: false,
             show_sidebar: true,
             show_properties: true,
@@ -91,6 +121,41 @@ impl Settings {
         self.recent_files.insert(0, path.to_path_buf());
         self.recent_files.truncate(MAX_RECENT);
     }
+
+    /// Pins or unpins a document of the recent files list.
+    pub fn toggle_pin(&mut self, path: &Path) {
+        if self.pinned_files.iter().any(|p| p == path) {
+            self.pinned_files.retain(|p| p != path);
+        } else if self.pinned_files.len() < MAX_RECENT {
+            self.pinned_files.push(path.to_path_buf());
+        }
+    }
+
+    /// Saves `session` under its name (replacing one with the same name).
+    pub fn store_session(&mut self, session: Session) {
+        self.sessions.retain(|s| s.name != session.name);
+        self.sessions.insert(0, session);
+        self.sessions.truncate(MAX_SESSIONS);
+    }
+}
+
+/// Reads a session file (RON) written by [`write_session`].
+pub fn read_session(path: &Path) -> crate::Result<Session> {
+    let len = std::fs::metadata(path).map_err(|e| crate::Error::io(path, e))?.len();
+    if len > 1024 * 1024 {
+        return Err(crate::Error::FileTooLarge { size: len, limit: 1024 * 1024 });
+    }
+    let text = std::fs::read_to_string(path).map_err(|e| crate::Error::io(path, e))?;
+    let mut session: Session = ron::from_str(&text).map_err(|e| crate::Error::Invalid(e.to_string()))?;
+    session.files.truncate(MAX_SESSION_FILES);
+    Ok(session)
+}
+
+/// Writes a session file (RON).
+pub fn write_session(path: &Path, session: &Session) -> crate::Result<()> {
+    let text = ron::ser::to_string_pretty(session, ron::ser::PrettyConfig::default())
+        .map_err(|e| crate::Error::Invalid(e.to_string()))?;
+    std::fs::write(path, text).map_err(|e| crate::Error::io(path, e))
 }
 
 #[cfg(test)]
@@ -100,13 +165,39 @@ mod tests {
     #[test]
     fn recent_files_are_unique_and_bounded() {
         let mut s = Settings::default();
-        for i in 0..20 {
+        for i in 0..60 {
             s.add_recent(Path::new(&format!("/tmp/{i}.pdf")));
         }
         s.add_recent(Path::new("/tmp/5.pdf"));
         assert_eq!(s.recent_files.len(), MAX_RECENT);
         assert_eq!(s.recent_files[0], Path::new("/tmp/5.pdf"));
         assert_eq!(s.recent_files.iter().filter(|p| p.ends_with("5.pdf")).count(), 1);
+    }
+
+    #[test]
+    fn pins_and_sessions() {
+        let mut s = Settings::default();
+        s.toggle_pin(Path::new("/a.pdf"));
+        assert_eq!(s.pinned_files, vec![PathBuf::from("/a.pdf")]);
+        s.toggle_pin(Path::new("/a.pdf"));
+        assert!(s.pinned_files.is_empty());
+        let session = Session {
+            name: "Arbeit".into(),
+            files: vec!["/a.pdf".into(), "/b.pdf".into()],
+            active: 1,
+            saved: "x".into(),
+        };
+        s.store_session(session.clone());
+        s.store_session(Session { files: vec!["/c.pdf".into()], ..session.clone() });
+        assert_eq!(s.sessions.len(), 1, "same name replaces");
+        let dir = std::env::temp_dir().join(format!("mrpdf-session-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("s.mrpdfsession");
+        write_session(&file, &session).unwrap();
+        assert_eq!(read_session(&file).unwrap(), session);
+        std::fs::write(&file, "kein ron").unwrap();
+        assert!(read_session(&file).is_err());
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

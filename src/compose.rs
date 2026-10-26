@@ -857,6 +857,503 @@ pub fn rtf_to_text(rtf: &[u8]) -> Result<String> {
     Ok(out.trim_end().to_string())
 }
 
+// ---------------------------------------------------------------------------
+// Markdown
+
+/// A styled paragraph of a generated document.
+#[derive(Debug, Clone, PartialEq)]
+struct Para {
+    /// Font resource: "F" (body), "FB" (bold) or "FC" (fixed width).
+    font: &'static str,
+    size: f32,
+    indent: f32,
+    space_before: f32,
+    /// Bullet or number drawn left of the first line.
+    prefix: Option<String>,
+    /// Horizontal line instead of text.
+    rule: bool,
+    text: String,
+}
+
+impl Para {
+    fn body(text: String, size: f32) -> Self {
+        Self { font: "F", size, indent: 0.0, space_before: size * 0.5, prefix: None, rule: false, text }
+    }
+}
+
+/// Removes inline Markdown markup (emphasis, code spans, links, images and
+/// escapes) and keeps the visible text.
+fn strip_inline(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        match c {
+            '\\' if i + 1 < chars.len() && chars[i + 1].is_ascii_punctuation() => {
+                out.push(chars[i + 1]);
+                i += 2;
+            }
+            '*' | '`' => i += 1,
+            '_' if (i + 1 < chars.len() && chars[i + 1] == '_')
+                || i == 0
+                || i + 1 == chars.len()
+                || !chars[i - 1].is_alphanumeric()
+                || !chars[i + 1].is_alphanumeric() =>
+            {
+                i += 1
+            }
+            '!' if chars.get(i + 1) == Some(&'[') => i += 1,
+            '[' => {
+                // [text](url) → text
+                let close = chars[i..].iter().position(|&c| c == ']').map(|p| p + i);
+                match close {
+                    Some(end) if chars.get(end + 1) == Some(&'(') => {
+                        let label: String = chars[i + 1..end].iter().collect();
+                        out.push_str(&strip_inline(&label));
+                        let after = chars[end + 1..].iter().position(|&c| c == ')').map(|p| p + end + 1);
+                        i = after.map_or(chars.len(), |p| p + 1);
+                    }
+                    _ => {
+                        out.push(c);
+                        i += 1;
+                    }
+                }
+            }
+            _ => {
+                out.push(c);
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
+/// Turns Markdown into styled paragraphs (headings, lists, quotes, code
+/// blocks, rules). `size` is the body font size.
+fn markdown_paras(text: &str, size: f32) -> Vec<Para> {
+    let text = text.replace("\r\n", "\n").replace('\r', "\n").replace('\t', "    ");
+    let mut paras: Vec<Para> = Vec::new();
+    let mut current: Option<Para> = None;
+    let mut code = false;
+    let flush = |current: &mut Option<Para>, paras: &mut Vec<Para>| {
+        if let Some(mut p) = current.take() {
+            p.text = strip_inline(p.text.trim());
+            paras.push(p);
+        }
+    };
+    for line in text.split('\n') {
+        let trimmed = line.trim();
+        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+            flush(&mut current, &mut paras);
+            code = !code;
+            continue;
+        }
+        if code {
+            paras.push(Para {
+                font: "FC",
+                indent: 12.0,
+                space_before: 0.0,
+                text: line.to_string(),
+                ..Para::body(String::new(), size * 0.9)
+            });
+            continue;
+        }
+        if trimmed.is_empty() {
+            flush(&mut current, &mut paras);
+            continue;
+        }
+        let level = trimmed.chars().take_while(|&c| c == '#').count();
+        if (1..=6).contains(&level) && trimmed[level..].starts_with(' ') {
+            flush(&mut current, &mut paras);
+            const SCALE: [f32; 6] = [2.0, 1.6, 1.35, 1.2, 1.1, 1.0];
+            let s = size * SCALE[level - 1];
+            let title = trimmed[level..].trim().trim_end_matches('#').trim();
+            paras.push(Para {
+                font: "FB",
+                space_before: s * 0.7,
+                text: strip_inline(title),
+                ..Para::body(String::new(), s)
+            });
+            continue;
+        }
+        let compact: String = trimmed.chars().filter(|c| !c.is_whitespace()).collect();
+        if compact.len() >= 3
+            && (compact.chars().all(|c| c == '-')
+                || compact.chars().all(|c| c == '*')
+                || compact.chars().all(|c| c == '_'))
+        {
+            flush(&mut current, &mut paras);
+            paras.push(Para { rule: true, ..Para::body(String::new(), size) });
+            continue;
+        }
+        let depth = (line.len() - line.trim_start().len()) / 2;
+        let indent = 14.0 * (depth as f32 + 1.0);
+        let bullet = ["- ", "* ", "+ "].iter().find_map(|m| trimmed.strip_prefix(m));
+        let number = trimmed
+            .split_once(". ")
+            .filter(|(n, _)| !n.is_empty() && n.len() <= 4 && n.chars().all(|c| c.is_ascii_digit()));
+        if let Some(rest) = bullet {
+            flush(&mut current, &mut paras);
+            current = Some(Para {
+                indent,
+                space_before: size * 0.2,
+                prefix: Some("•".into()),
+                text: rest.to_string(),
+                ..Para::body(String::new(), size)
+            });
+            continue;
+        }
+        if let Some((n, rest)) = number {
+            flush(&mut current, &mut paras);
+            current = Some(Para {
+                indent,
+                space_before: size * 0.2,
+                prefix: Some(format!("{n}.")),
+                text: rest.to_string(),
+                ..Para::body(String::new(), size)
+            });
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix('>') {
+            let rest = rest.trim_start_matches('>').trim();
+            match &mut current {
+                Some(p) if p.indent == 18.0 && p.prefix.is_none() => {
+                    p.text.push(' ');
+                    p.text.push_str(rest);
+                }
+                _ => {
+                    flush(&mut current, &mut paras);
+                    current = Some(Para {
+                        indent: 18.0,
+                        text: rest.to_string(),
+                        ..Para::body(String::new(), size)
+                    });
+                }
+            }
+            continue;
+        }
+        if trimmed.starts_with('|') {
+            // Table rows are kept as fixed-width lines.
+            flush(&mut current, &mut paras);
+            let cells: Vec<&str> = trimmed.trim_matches('|').split('|').map(str::trim).collect();
+            if cells.iter().all(|c| !c.is_empty() && c.chars().all(|ch| matches!(ch, '-' | ':'))) {
+                continue;
+            }
+            paras.push(Para {
+                font: "FC",
+                space_before: 0.0,
+                text: strip_inline(&cells.join(" | ")),
+                ..Para::body(String::new(), size * 0.9)
+            });
+            continue;
+        }
+        // Continuation of a paragraph or list item.
+        match &mut current {
+            Some(p) => {
+                p.text.push(' ');
+                p.text.push_str(trimmed);
+            }
+            None => current = Some(Para::body(trimmed.to_string(), size)),
+        }
+    }
+    flush(&mut current, &mut paras);
+    paras
+}
+
+/// Lays out styled paragraphs on pages; returns the page index at which
+/// each document starts.
+fn paras_to_pdf(docs: &[(String, Vec<Para>)], layout: &TextLayout, title: &str) -> Result<Composed> {
+    let (mut pw, mut ph) = layout.page_size;
+    if layout.landscape != (pw > ph) {
+        std::mem::swap(&mut pw, &mut ph);
+    }
+    let [ml, mr, mt, mb] = layout.margins;
+    let width = (pw - ml - mr).max(40.0);
+    let body = layout.font.std();
+    let font_of = |name: &str| match name {
+        "FB" if body == StdFont::Courier => StdFont::Courier,
+        "FB" => StdFont::HelveticaBold,
+        "FC" => StdFont::Courier,
+        _ => body,
+    };
+    let spacing = layout.line_spacing.clamp(0.8, 4.0);
+    let mut pages: Vec<String> = Vec::new();
+    let mut content = String::new();
+    let mut y = ph - mt;
+    let mut marks = Vec::new();
+    for (doc_index, (name, paras)) in docs.iter().enumerate() {
+        if doc_index > 0 && layout.join == JoinMode::NewPage {
+            pages.push(std::mem::take(&mut content));
+            y = ph - mt;
+        }
+        marks.push((pages.len(), expand_caption("%[FileName]", name, doc_index)));
+        for para in paras {
+            let size = para.size.clamp(4.0, 96.0);
+            let lead = size * spacing;
+            let at_top = (y - (ph - mt)).abs() < 0.01;
+            if !at_top {
+                y -= para.space_before;
+            }
+            let lines = if para.rule {
+                Vec::new()
+            } else {
+                wrap(&para.text, font_of(para.font), size, (width - para.indent).max(20.0))
+            };
+            let needed = if para.rule { size } else { lead * lines.len().max(1) as f32 };
+            for (i, line) in lines.iter().enumerate() {
+                if y - lead < mb {
+                    pages.push(std::mem::take(&mut content));
+                    if pages.len() >= MAX_PAGES {
+                        return Err(Error::Invalid("too many pages".into()));
+                    }
+                    y = ph - mt;
+                }
+                y -= lead;
+                let x = ml + para.indent;
+                let base = y + (lead - size) / 2.0;
+                if i == 0
+                    && let Some(prefix) = &para.prefix
+                {
+                    content.push_str(&text_op("F", size, layout.color, x - 12.0, base, &win_ansi(prefix)));
+                }
+                content.push_str(&text_op(para.font, size, layout.color, x, base, line));
+            }
+            if para.rule {
+                if y - needed < mb {
+                    pages.push(std::mem::take(&mut content));
+                    y = ph - mt;
+                }
+                y -= needed / 2.0;
+                let [r, g, b] = layout.line_color.to_pdf();
+                content.push_str(&format!(
+                    "{} {} {} RG {} w {} {} m {} {} l S\n",
+                    num(r),
+                    num(g),
+                    num(b),
+                    num(layout.line_width),
+                    num(ml),
+                    num(y),
+                    num(pw - mr),
+                    num(y)
+                ));
+                y -= needed / 2.0;
+            }
+        }
+    }
+    pages.push(content);
+    let mut b = Builder::new();
+    for page in pages {
+        let mut fonts = Dictionary::new();
+        fonts.set("F", font_dict(body));
+        fonts.set("FB", font_dict(font_of("FB")));
+        fonts.set("FC", font_dict(StdFont::Courier));
+        let mut resources = Dictionary::new();
+        resources.set("Font", Object::Dictionary(fonts));
+        b.add_page(pw, ph, page, resources)?;
+    }
+    if !layout.bookmark_per_file {
+        marks.clear();
+    }
+    Ok((b.finish(title)?, marks))
+}
+
+/// "Neues Dokument → Aus Markdown": headings, paragraphs, lists, quotes,
+/// code blocks, tables (as fixed-width lines) and rules. Inline markup is
+/// removed; the body font and page settings come from `layout`.
+pub fn markdown_to_pdf(docs: &[(String, String)], layout: &TextLayout) -> Result<Composed> {
+    let size = layout.font_size.clamp(4.0, 72.0);
+    let docs: Vec<(String, Vec<Para>)> =
+        docs.iter().map(|(name, text)| (name.clone(), markdown_paras(text, size))).collect();
+    paras_to_pdf(&docs, layout, "Markdown")
+}
+
+// ---------------------------------------------------------------------------
+// CSV
+
+/// Splits CSV text into rows of fields. The delimiter (`;`, `,` or tab) is
+/// detected from the first line; quoted fields may contain delimiters,
+/// doubled quotes and line breaks.
+pub fn parse_csv(text: &str) -> Vec<Vec<String>> {
+    let first = text.lines().next().unwrap_or("");
+    let count = |d: char| {
+        let mut quoted = false;
+        first
+            .chars()
+            .filter(|&c| {
+                if c == '"' {
+                    quoted = !quoted;
+                }
+                !quoted && c == d
+            })
+            .count()
+    };
+    let delimiter = [';', ',', '\t'].into_iter().max_by_key(|&d| (count(d), d == ';')).unwrap_or(';');
+    let mut rows = Vec::new();
+    let mut row = Vec::new();
+    let mut field = String::new();
+    let mut quoted = false;
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if quoted {
+            if c == '"' {
+                if chars.peek() == Some(&'"') {
+                    field.push('"');
+                    chars.next();
+                } else {
+                    quoted = false;
+                }
+            } else {
+                field.push(c);
+            }
+            continue;
+        }
+        match c {
+            '"' if field.is_empty() => quoted = true,
+            '\r' => {}
+            '\n' => {
+                row.push(std::mem::take(&mut field));
+                rows.push(std::mem::take(&mut row));
+            }
+            c if c == delimiter => row.push(std::mem::take(&mut field)),
+            c => field.push(c),
+        }
+    }
+    if !field.is_empty() || !row.is_empty() {
+        row.push(field);
+        rows.push(row);
+    }
+    rows.retain(|r| r.iter().any(|f| !f.trim().is_empty()));
+    rows
+}
+
+/// "Neues Dokument → Aus CSV-Datei": a table with grid lines; the first row
+/// is the (bold, shaded) header and is repeated on every page.
+pub fn csv_to_pdf(docs: &[(String, String)], layout: &TextLayout) -> Result<Composed> {
+    let (mut pw, mut ph) = layout.page_size;
+    if layout.landscape != (pw > ph) {
+        std::mem::swap(&mut pw, &mut ph);
+    }
+    let [ml, mr, mt, mb] = layout.margins;
+    let width = (pw - ml - mr).max(40.0);
+    let size = layout.font_size.clamp(4.0, 36.0);
+    let lead = size * layout.line_spacing.clamp(0.8, 4.0);
+    let pad = 3.0;
+    let font = layout.font.std();
+    let bold = if font == StdFont::Courier { StdFont::Courier } else { StdFont::HelveticaBold };
+    let [lr, lg, lb] = layout.line_color.to_pdf();
+    let grid = format!("{} {} {} RG 0.5 w\n", num(lr), num(lg), num(lb));
+    let mut pages: Vec<String> = Vec::new();
+    let mut marks = Vec::new();
+    let mut content = String::new();
+    for (doc_index, (name, text)) in docs.iter().enumerate() {
+        if doc_index > 0 && !content.is_empty() {
+            pages.push(std::mem::take(&mut content));
+        }
+        marks.push((pages.len(), expand_caption("%[FileName]", name, doc_index)));
+        let rows = parse_csv(text);
+        let cols = rows.iter().map(Vec::len).max().unwrap_or(0).clamp(1, 200);
+        // Natural column widths, shrunk proportionally to the page width.
+        let mut widths = vec![0.0f32; cols];
+        for (r, row) in rows.iter().enumerate() {
+            for (c, field) in row.iter().enumerate().take(cols) {
+                let f = if r == 0 { bold } else { font };
+                let w = f.text_width(&win_ansi(field.trim()), size) + 2.0 * pad;
+                widths[c] = widths[c].max(w.min(width * 0.6));
+            }
+        }
+        let min = (2.0 * pad + size).min(width / cols as f32);
+        for w in &mut widths {
+            *w = w.max(min);
+        }
+        let total: f32 = widths.iter().sum();
+        if total > width {
+            let flexible: f32 = widths.iter().map(|w| w - min).sum();
+            let excess = total - width;
+            for w in &mut widths {
+                *w -= if flexible > 0.0 { (*w - min) * excess / flexible } else { 0.0 };
+            }
+        }
+        let wrap_row = |row: &[String], f: StdFont| -> Vec<Vec<Vec<u8>>> {
+            (0..cols)
+                .map(|c| {
+                    let field = row.get(c).map(String::as_str).unwrap_or("");
+                    field
+                        .split('\n')
+                        .flat_map(|part| wrap(part.trim(), f, size, (widths[c] - 2.0 * pad).max(4.0)))
+                        .collect()
+                })
+                .collect()
+        };
+        let max_lines = (((ph - mt - mb) / lead) as usize / 2).max(1);
+        let draw_row = |content: &mut String, cells: &[Vec<Vec<u8>>], top: f32, header: bool| -> f32 {
+            let lines = cells.iter().map(Vec::len).max().unwrap_or(1).clamp(1, max_lines);
+            let h = lines as f32 * lead + 2.0 * pad;
+            if header {
+                content.push_str(&format!(
+                    "0.9 0.9 0.9 rg {} {} {} {} re f\n",
+                    num(ml),
+                    num(top - h),
+                    num(widths.iter().sum()),
+                    num(h)
+                ));
+            }
+            let mut x = ml;
+            for (c, cell) in cells.iter().enumerate() {
+                for (i, line) in cell.iter().take(lines).enumerate() {
+                    let y = top - pad - (i + 1) as f32 * lead + (lead - size) / 2.0;
+                    let f = if header { "FB" } else { "F" };
+                    content.push_str(&text_op(f, size, layout.color, x + pad, y, line));
+                }
+                content.push_str(&format!(
+                    "{grid}{} {} {} {} re S\n",
+                    num(x),
+                    num(top - h),
+                    num(widths[c]),
+                    num(h)
+                ));
+                x += widths[c];
+            }
+            h
+        };
+        let header = rows.first().map(|r| wrap_row(r, bold));
+        let mut y = ph - mt;
+        let mut fresh = true;
+        for (index, row) in rows.iter().enumerate() {
+            let is_header = index == 0;
+            let cells = wrap_row(row, if is_header { bold } else { font });
+            let lines = cells.iter().map(Vec::len).max().unwrap_or(1).clamp(1, max_lines);
+            let h = lines as f32 * lead + 2.0 * pad;
+            if y - h < mb && !fresh {
+                pages.push(std::mem::take(&mut content));
+                if pages.len() >= MAX_PAGES {
+                    return Err(Error::Invalid("too many pages".into()));
+                }
+                y = ph - mt;
+                if let Some(head) = &header {
+                    y -= draw_row(&mut content, head, y, true);
+                }
+            }
+            y -= draw_row(&mut content, &cells, y, is_header);
+            fresh = false;
+        }
+    }
+    pages.push(content);
+    let mut b = Builder::new();
+    for page in pages {
+        let mut fonts = Dictionary::new();
+        fonts.set("F", font_dict(font));
+        fonts.set("FB", font_dict(bold));
+        let mut resources = Dictionary::new();
+        resources.set("Font", Object::Dictionary(fonts));
+        b.add_page(pw, ph, page, resources)?;
+    }
+    if !layout.bookmark_per_file {
+        marks.clear();
+    }
+    Ok((b.finish("CSV")?, marks))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -918,5 +1415,70 @@ mod tests {
         assert_eq!(Document::load_mem(&pdf).unwrap().get_pages().len(), 2);
         assert_eq!(marks.len(), 5);
         assert_eq!(marks[4], (1, "bild4".to_string()));
+    }
+
+    #[test]
+    fn markdown_blocks() {
+        let md = "# Titel\n\nEin **fetter** und *kursiver* Text\nmit [Link](https://x.y) und `code`.\n\n\
+                  - eins\n- zwei\n  - tief\n1. erster\n\n> Zitat\n\n---\n```\nlet a = 1;\n```\n| A | B |\n|---|---|\n| 1 | 2 |\n";
+        let paras = markdown_paras(md, 10.0);
+        let texts: Vec<&str> = paras.iter().map(|p| p.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            vec![
+                "Titel",
+                "Ein fetter und kursiver Text mit Link und code.",
+                "eins",
+                "zwei",
+                "tief",
+                "erster",
+                "Zitat",
+                "",
+                "let a = 1;",
+                "A | B",
+                "1 | 2",
+            ]
+        );
+        assert_eq!((paras[0].font, paras[0].size), ("FB", 20.0));
+        assert_eq!(paras[2].prefix.as_deref(), Some("•"));
+        assert!(paras[4].indent > paras[3].indent, "nested list item");
+        assert_eq!(paras[5].prefix.as_deref(), Some("1."));
+        assert!(paras[7].rule);
+        assert_eq!(paras[8].font, "FC");
+        assert_eq!(strip_inline(r"snake_case \*x\* __b__ ![Bild](a.png)"), "snake_case *x* b Bild");
+
+        let long = format!("{md}\n{}", "Absatz mit Text. ".repeat(400));
+        let (pdf, marks) = markdown_to_pdf(
+            &[("a.md".into(), long)],
+            &TextLayout { bookmark_per_file: true, ..TextLayout::default() },
+        )
+        .unwrap();
+        assert!(Document::load_mem(&pdf).unwrap().get_pages().len() >= 2);
+        assert_eq!(marks, vec![(0, "a".to_string())]);
+    }
+
+    #[test]
+    fn csv_tables() {
+        let rows = parse_csv(
+            "Name;Ort;Notiz\r\nAnna;Köln;\"mit ; und \"\"Zitat\"\"\"\nBen;Bonn;\"zwei\nZeilen\"\n\n",
+        );
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[1][2], "mit ; und \"Zitat\"");
+        assert_eq!(rows[2][2], "zwei\nZeilen");
+        assert_eq!(parse_csv("a,b\n1,2")[1], vec!["1", "2"]);
+        assert_eq!(parse_csv("a\tb\n1\t2")[0], vec!["a", "b"]);
+
+        let mut csv = String::from("Nr,Beschreibung,Betrag\n");
+        for i in 0..300 {
+            csv.push_str(&format!("{i},\"Eine längere Beschreibung der Zeile {i}\",{}.50\n", i * 3));
+        }
+        let (pdf, _) = csv_to_pdf(&[("t.csv".into(), csv)], &TextLayout::default()).unwrap();
+        let doc = Document::load_mem(&pdf).unwrap();
+        let pages = doc.get_pages();
+        assert!(pages.len() >= 5, "{} pages", pages.len());
+        // The header is repeated on the second page.
+        let second = doc.get_page_content(*pages.get(&2).unwrap());
+        let text = String::from_utf8_lossy(&second);
+        assert!(text.contains("(Beschreibung) Tj"), "header repeated");
     }
 }
