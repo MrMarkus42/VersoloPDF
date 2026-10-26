@@ -24,6 +24,7 @@ pub mod geometry;
 pub mod import;
 pub mod marks;
 pub mod model;
+pub mod optimize;
 pub mod outline;
 pub mod pages;
 pub mod pdf_edit;

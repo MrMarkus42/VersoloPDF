@@ -106,6 +106,8 @@ pub enum Cmd {
     Print,
     Close,
     CloseAll,
+    SaveOptimized,
+    SpaceUsage,
     Revert,
     RenameFile,
     MoveFile,
@@ -264,6 +266,8 @@ pub const SEARCHABLE: &[Cmd] = &[
     Cmd::Print,
     Cmd::Close,
     Cmd::CloseAll,
+    Cmd::SaveOptimized,
+    Cmd::SpaceUsage,
     Cmd::Revert,
     Cmd::RenameFile,
     Cmd::MoveFile,
@@ -459,6 +463,8 @@ impl Cmd {
             Print => ("Drucken", "Print"),
             Close => ("Schließen", "Close"),
             CloseAll => ("Alle schließen", "Close all"),
+            SaveOptimized => ("Optimiert speichern", "Save optimized"),
+            SpaceUsage => ("Speicherverbrauch untersuchen", "Examine space usage"),
             Revert => ("Zurücksetzen", "Revert"),
             RenameFile => ("Umbenennen", "Rename"),
             MoveFile => ("Datei verschieben", "Move file"),
@@ -633,6 +639,8 @@ impl Cmd {
             SaveAs => Icon::SaveAs,
             Print => Icon::Print,
             Close | CloseAll => Icon::Close,
+            SaveOptimized => Icon::SaveAs,
+            SpaceUsage => Icon::Count,
             Revert => Icon::Undo,
             RenameFile => Icon::TextBox,
             MoveFile => Icon::Open,
@@ -972,6 +980,7 @@ impl MrPdfApp {
             || self.run_marks(cmd)
             || self.run_labels(cmd)
             || self.run_file_op(ctx, cmd)
+            || self.run_optimize(cmd)
         {
             return;
         }

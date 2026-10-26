@@ -518,6 +518,16 @@ impl MrPdfApp {
                         outcome = Outcome::Close;
                     }
                 }
+                Dialog::Optimize(state) => {
+                    let (o, a) = self.optimize_dialog(ui, state);
+                    outcome = o;
+                    action = a;
+                }
+                Dialog::SpaceUsage(usage) => {
+                    let (o, a) = self.space_usage_dialog(ui, usage);
+                    outcome = o;
+                    action = a;
+                }
                 Dialog::RenameFile { name, error } => {
                     let (o, a) = self.rename_dialog(ui, name, error);
                     outcome = o;

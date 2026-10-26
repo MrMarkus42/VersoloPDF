@@ -10,6 +10,7 @@ mod formdata;
 mod labels_dialog;
 mod layout_dialogs;
 mod marks_dialogs;
+mod optimize_dialog;
 mod outline_tools;
 mod page_dialogs;
 mod preview;
@@ -219,6 +220,10 @@ pub enum Dialog {
         name: String,
         error: Option<String>,
     },
+    /// "PDF optimieren".
+    Optimize(Box<optimize_dialog::OptimizeState>),
+    /// "Speicherverbrauch untersuchen".
+    SpaceUsage(Box<crate::optimize::Usage>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

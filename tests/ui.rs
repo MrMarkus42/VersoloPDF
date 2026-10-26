@@ -1063,6 +1063,46 @@ fn file_operations_and_recovery() {
     assert!(mrpdf::files::list_recovery(&recovery).is_empty());
 }
 
+#[test]
+fn optimize_and_space_usage() {
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let file = sample_file(&dir, 3);
+    let mut h = harness(vec![file], false);
+    h.run_steps(10);
+    open_backstage(&mut h);
+    h.get_by_label("Optimiert speichern").click();
+    h.run_steps(4);
+    assert!(matches!(h.state().dialog(), Some(mrpdf::ui::app::Dialog::Optimize(_))));
+    save(&mut h, "70-optimize-images");
+    for (page, shot) in [("Schriftarten", "71-optimize-fonts"), ("Aufräumen", "72-optimize-cleanup")] {
+        h.get_by_label(page).click();
+        h.run_steps(3);
+        save(&mut h, shot);
+    }
+    // "Platzverbrauch untersuchen…" shows the report.
+    h.get_by_label("Platzverbrauch untersuchen…").click();
+    h.run_steps(4);
+    assert!(matches!(h.state().dialog(), Some(mrpdf::ui::app::Dialog::SpaceUsage(_))));
+    assert!(h.query_all_by_label("Seiteninhalt").next().is_some());
+    save(&mut h, "73-space-usage");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    // Optimize into a new file; the tab shows it afterwards.
+    let out = dir.path().join("Optimiert.pdf");
+    let options = mrpdf::optimize::OptimizeOptions { metadata: true, ..Default::default() };
+    let ctx = h.ctx.clone();
+    h.state_mut().save_optimized_to(&ctx, &out, &options);
+    h.run_steps(4);
+    assert!(out.exists());
+    let tab = h.state().active_tab().unwrap();
+    assert_eq!(tab.doc.path(), Some(out.as_path()));
+    assert_eq!(tab.doc.page_count(), 3);
+    assert!(tab.doc.page_text(2).unwrap().all_text().contains("Page 3"));
+    assert!(matches!(h.state().dialog(), Some(mrpdf::ui::app::Dialog::Message { .. })));
+    save(&mut h, "74-optimize-result");
+}
+
 fn open_backstage(h: &mut Harness<'_, MrPdfApp>) {
     h.get_by_label("Datei").click();
     h.run_steps(4);
@@ -1121,7 +1161,7 @@ fn file_backstage() {
     h.run_steps(3);
     open_backstage(&mut h);
     // Disabled entries do nothing.
-    h.get_by_label("Optimiert speichern").click();
+    h.get_by_label("Alle drucken").click();
     h.run_steps(3);
     assert!(h.state().backstage_open());
     // Sub-page lists.
