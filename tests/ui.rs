@@ -481,8 +481,10 @@ fn document_structure_ui() {
         assert!(tab.doc.page_text(2).unwrap().all_text().contains("Seite 3 von 3"));
     }
 
-    // Reverse page order.
+    // Reverse page order (dialog with page range, all pages preselected).
     quick(&mut h, "Seitenreihenfolge umkehren");
+    h.get_all_by_label("OK").last().unwrap().click();
+    h.run_steps(6);
     let tab = h.state_mut().active_tab_mut().unwrap();
     assert!(tab.doc.page_text(0).unwrap().all_text().contains("Page 3"));
 }

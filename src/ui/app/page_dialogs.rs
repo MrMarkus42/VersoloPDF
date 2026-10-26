@@ -314,7 +314,8 @@ pub fn expand_file_name(pattern: &str, stem: &str, page: usize, pages: &str, dat
     let clean: String =
         name.chars().map(|c| if "/\\:*?\"<>|".contains(c) || c.is_control() { '_' } else { c }).collect();
     let clean = clean.trim().trim_end_matches(".pdf").trim_end_matches(".PDF").to_string();
-    if clean.is_empty() { "Seiten".into() } else { format!("{clean}.pdf") }
+    let clean = if clean.is_empty() { "Seiten" } else { clean.as_str() };
+    format!("{clean}.pdf")
 }
 
 /// A path that does not exist yet ("name (2).pdf" …).
