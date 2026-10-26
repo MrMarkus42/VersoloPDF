@@ -2692,6 +2692,41 @@ impl Document {
         Self::from_bytes(bytes, "preview.pdf", None)
     }
 
+    /// Properties of the "Dokumenteigenschaften" pages beyond the metadata.
+    pub fn properties(&mut self) -> Result<crate::doc_props::DocProps> {
+        self.sync_bytes()?;
+        crate::doc_props::read(&self.bytes, self.password.as_deref())
+    }
+
+    /// Fonts of the document ("Schriftarten").
+    pub fn fonts(&mut self) -> Result<Vec<crate::doc_props::FontEntry>> {
+        self.sync_bytes()?;
+        crate::doc_props::fonts(&self.bytes, self.password.as_deref())
+    }
+
+    /// Writes metadata and properties in one step (one undo entry).
+    pub fn set_properties(&mut self, meta: &Metadata, props: &crate::doc_props::DocProps) -> Result<()> {
+        self.require(self.permissions().modify)?;
+        self.edit_bytes("document properties", |b, pw| {
+            let b = pdf_edit::write_metadata(b, pw, meta)?;
+            crate::doc_props::write(&b, pw, props)
+        })
+    }
+
+    /// Security handler information of encrypted documents.
+    pub fn security(&self) -> Option<&SecurityInfo> {
+        self.security.as_ref()
+    }
+
+    /// The version from the file header ("1.7").
+    pub fn pdf_version(&self) -> String {
+        let head = &self.bytes[..self.bytes.len().min(16)];
+        let text = String::from_utf8_lossy(head);
+        text.strip_prefix("%PDF-")
+            .map(|v| v.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect())
+            .unwrap_or_default()
+    }
+
     pub fn set_metadata(&mut self, meta: &Metadata) -> Result<()> {
         self.require(self.permissions().modify)?;
         self.edit_bytes("document properties", |b, pw| pdf_edit::write_metadata(b, pw, meta))

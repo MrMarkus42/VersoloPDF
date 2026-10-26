@@ -17,6 +17,7 @@ mod page_dialogs;
 mod preview;
 mod print_dialog;
 mod properties;
+mod props_dialog;
 mod review;
 mod ribbon;
 mod shape_dialogs;
@@ -31,7 +32,6 @@ use std::time::Duration;
 use egui::{Context, Key, KeyboardShortcut, Modifiers, Ui, ViewportCommand};
 
 use crate::geometry::RectF;
-use crate::model::Metadata;
 use crate::ui::cache::Budget;
 use crate::ui::canvas::{self, CanvasCtx, CanvasEvent};
 use crate::ui::i18n::Strings;
@@ -138,9 +138,8 @@ pub enum Dialog {
     ConfirmLink {
         uri: String,
     },
-    Properties {
-        meta: Metadata,
-    },
+    /// "Dokumenteigenschaften".
+    Properties(Box<props_dialog::PropsState>),
     PageRange {
         purpose: RangePurpose,
         text: String,

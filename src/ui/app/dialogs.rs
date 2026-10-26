@@ -191,73 +191,10 @@ impl MrPdfApp {
                         outcome = Outcome::Close;
                     }
                 }
-                Dialog::Properties { meta } => {
-                    ui.heading(t.doc_properties);
-                    egui::Grid::new("props").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
-                        for (label, value) in [
-                            (t.meta_title, &mut meta.title),
-                            (t.author, &mut meta.author),
-                            (t.meta_subject, &mut meta.subject),
-                            (t.meta_keywords, &mut meta.keywords),
-                        ] {
-                            ui.label(label);
-                            ui.add(egui::TextEdit::singleline(value).desired_width(280.0));
-                            ui.end_row();
-                        }
-                        for (label, value) in [
-                            (t.meta_creator, &meta.creator),
-                            (t.meta_producer, &meta.producer),
-                            (t.meta_created, &meta.created),
-                            (t.meta_modified, &meta.modified),
-                        ] {
-                            ui.label(label);
-                            ui.label(RichText::new(value.as_str()).weak());
-                            ui.end_row();
-                        }
-                        if let Some(tab) = self.tabs.get(self.active) {
-                            let perms = tab.doc.permissions();
-                            ui.label(t.pages);
-                            ui.label(tab.doc.page_count().to_string());
-                            ui.end_row();
-                            ui.label(t.file_size);
-                            ui.label(format!("{:.1} KB", tab.doc.file_size() as f64 / 1024.0));
-                            ui.end_row();
-                            ui.label(t.security);
-                            ui.label(if perms.encrypted { t.encrypted } else { t.not_encrypted });
-                            ui.end_row();
-                            let yes_no = |b: bool| if b { t.allowed } else { t.not_allowed };
-                            for (label, value) in [
-                                (t.perm_print, perms.print),
-                                (t.perm_modify, perms.modify),
-                                (t.perm_copy, perms.copy),
-                                (t.perm_annotate, perms.annotate),
-                                (t.perm_forms, perms.fill_forms),
-                            ] {
-                                ui.label(label);
-                                ui.label(yes_no(value));
-                                ui.end_row();
-                            }
-                        }
-                    });
-                    let (ok, cancel) = buttons(ui, t.save_properties, t.cancel);
-                    if ok {
-                        let meta = meta.clone();
-                        action = Some(Box::new(move |app, ctx| {
-                            let changed = app.active_tab().is_some_and(|tab| {
-                                let cur = tab.doc.metadata();
-                                cur.title != meta.title
-                                    || cur.author != meta.author
-                                    || cur.subject != meta.subject
-                                    || cur.keywords != meta.keywords
-                            });
-                            if changed {
-                                app.edit(ctx, |tab| tab.doc.set_metadata(&meta));
-                            }
-                        }));
-                        outcome = Outcome::Close;
-                    } else if cancel {
-                        outcome = Outcome::Close;
-                    }
+                Dialog::Properties(state) => {
+                    let (o, a) = self.properties_dialog(ui, state);
+                    outcome = o;
+                    action = a;
                 }
                 Dialog::PageRange { purpose, text, error } => {
                     let title = match purpose {

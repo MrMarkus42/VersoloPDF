@@ -390,12 +390,6 @@ impl MrPdfApp {
         });
     }
 
-    pub fn open_properties(&mut self) {
-        if let Some(tab) = self.active_tab() {
-            self.dialog = Some(Dialog::Properties { meta: tab.doc.metadata() });
-        }
-    }
-
     /// MrPDF's print dialog ("Drucken").
     pub fn open_print_dialog(&mut self, _ctx: &Context) {
         self.open_print_dialog_for(false);

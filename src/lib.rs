@@ -14,6 +14,7 @@ pub mod appearance;
 pub mod compare;
 pub mod compose;
 pub mod convert;
+pub mod doc_props;
 pub mod document;
 pub mod download;
 pub mod engine;

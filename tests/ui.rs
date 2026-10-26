@@ -1144,6 +1144,55 @@ fn print_and_export_dialogs() {
     save(&mut h, "77-export-word");
 }
 
+#[test]
+fn document_properties_dialog() {
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let file = sample_file(&dir, 2);
+    let mut h = harness(vec![file], false);
+    h.run_steps(10);
+    h.key_press_modifiers(Modifiers::COMMAND, egui::Key::D);
+    h.run_steps(4);
+    assert!(matches!(h.state().dialog(), Some(mrpdf::ui::app::Dialog::Properties(_))));
+    assert!(h.query_all_by_label("Beispiel.pdf").next().is_some(), "file name shown");
+    save(&mut h, "78-properties-description");
+    for (page, shot) in [
+        ("Schriftarten", "79-properties-fonts"),
+        ("Sicherheit", "80-properties-security"),
+        ("Ansicht beim Öffnen", "81-properties-view"),
+        ("Eigene", "82-properties-custom"),
+        ("Erweitert", "83-properties-advanced"),
+        ("Aktionen", "84-properties-actions"),
+        ("JavaScript", "85-properties-javascript"),
+    ] {
+        h.get_all_by_label(page).next().unwrap().click();
+        h.run_steps(3);
+        save(&mut h, shot);
+    }
+    // Custom property: add, then OK writes it into the document.
+    h.get_by_label("Eigene").click();
+    h.run_steps(3);
+    h.get_by_label("Hinzufügen…").click();
+    h.run_steps(3);
+    assert!(h.query_by_label("Übernehmen").is_some());
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    assert!(h.state().dialog().is_none(), "Esc cancels");
+    assert!(!h.state().active_tab().unwrap().doc.is_modified());
+    // A change on "Ansicht beim Öffnen" is written with OK.
+    h.key_press_modifiers(Modifiers::COMMAND, egui::Key::D);
+    h.run_steps(4);
+    h.get_by_label("Ansicht beim Öffnen").click();
+    h.run_steps(3);
+    h.get_by_label("Fenster auf Bildschirm zentrieren").click();
+    h.run_steps(3);
+    h.get_by_label("OK").click();
+    h.run_steps(4);
+    let tab = h.state_mut().active_tab_mut().unwrap();
+    assert!(tab.doc.is_modified());
+    assert!(tab.doc.properties().unwrap().center_window);
+}
+
 fn open_backstage(h: &mut Harness<'_, MrPdfApp>) {
     h.get_by_label("Datei").click();
     h.run_steps(4);
@@ -1244,7 +1293,7 @@ fn file_backstage() {
     h.run_steps(3);
     h.key_press_modifiers(Modifiers::COMMAND, egui::Key::D);
     h.run_steps(3);
-    assert!(matches!(h.state().dialog(), Some(mrpdf::ui::app::Dialog::Properties { .. })));
+    assert!(matches!(h.state().dialog(), Some(mrpdf::ui::app::Dialog::Properties(_))));
     h.key_press(egui::Key::Escape);
     h.run_steps(3);
     // "Alle schließen" asks for the changed document, "Nein" closes all.
