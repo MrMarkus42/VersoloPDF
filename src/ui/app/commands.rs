@@ -35,6 +35,9 @@ pub enum Unavailable {
     Office,
     Barcodes,
     Guides,
+    Cloud,
+    Portfolio,
+    WebImport,
 }
 
 impl Unavailable {
@@ -77,6 +80,17 @@ impl Unavailable {
                 "MrPDF hat keine Hilfslinien. Bitte „Seiten aufteilen“ verwenden und die Trennlinien dort setzen.",
                 "MrPDF has no guides. Please use \"Split pages\" and set the split lines there.",
             ),
+            Unavailable::Cloud => (
+                "Cloud-Speicher und SharePoint werden nicht unterstützt. Bitte lokale Dateien verwenden.",
+                "Cloud storage and SharePoint are not supported. Please use local files.",
+            ),
+            Unavailable::Portfolio => {
+                ("PDF-Portfolios werden nicht unterstützt.", "PDF portfolios are not supported.")
+            }
+            Unavailable::WebImport => (
+                "Das Umwandeln von Web-Seiten und E-Mails in PDF wird nicht unterstützt.",
+                "Converting web pages and e-mails to PDF is not supported.",
+            ),
         };
         if lang == Language::German { de } else { en }
     }
@@ -91,6 +105,7 @@ pub enum Cmd {
     SaveAs,
     Print,
     Close,
+    CloseAll,
     Exit,
     DocProperties,
     Settings,
@@ -244,6 +259,7 @@ pub const SEARCHABLE: &[Cmd] = &[
     Cmd::SaveAs,
     Cmd::Print,
     Cmd::Close,
+    Cmd::CloseAll,
     Cmd::DocProperties,
     Cmd::Settings,
     Cmd::Email,
@@ -434,6 +450,7 @@ impl Cmd {
             SaveAs => ("Speichern unter", "Save as"),
             Print => ("Drucken", "Print"),
             Close => ("Schließen", "Close"),
+            CloseAll => ("Alle schließen", "Close all"),
             Exit => ("Beenden", "Exit"),
             DocProperties => ("Dokumenteigenschaften", "Document properties"),
             Settings => ("Einstellungen", "Settings"),
@@ -603,7 +620,7 @@ impl Cmd {
             Save => Icon::Save,
             SaveAs => Icon::SaveAs,
             Print => Icon::Print,
-            Close => Icon::Close,
+            Close | CloseAll => Icon::Close,
             Exit => Icon::Close,
             DocProperties => Icon::Info,
             Settings => Icon::Gear,
@@ -778,6 +795,15 @@ impl Cmd {
     pub fn shortcut(self) -> Option<(&'static str, &'static str)> {
         use Cmd::*;
         Some(match self {
+            New => ("Strg+N", "Ctrl+N"),
+            Open => ("Strg+O", "Ctrl+O"),
+            Save => ("Strg+S", "Ctrl+S"),
+            SaveAs => ("Strg+Umschalt+S", "Ctrl+Shift+S"),
+            Print => ("Strg+P", "Ctrl+P"),
+            Close => ("Strg+W", "Ctrl+W"),
+            Exit => ("Strg+Q", "Ctrl+Q"),
+            DocProperties => ("Strg+D", "Ctrl+D"),
+            Settings => ("Strg+K", "Ctrl+K"),
             InsertFromFile => ("Strg+Umschalt+I", "Ctrl+Shift+I"),
             DeletePages => ("Strg+Umschalt+D", "Ctrl+Shift+D"),
             CropPages => ("Strg+Umschalt+T", "Ctrl+Shift+T"),
@@ -941,6 +967,7 @@ impl MrPdfApp {
             }
             Print => self.open_print_dialog(ctx),
             Close => self.request_close_tab(ctx, self.active),
+            CloseAll => self.request_close_all(ctx),
             Exit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
             DocProperties => self.open_properties(),
             Settings => self.dialog = Some(Dialog::Settings { author: self.settings.author.clone() }),

@@ -1,6 +1,7 @@
 //! The main window.
 
 mod actions;
+mod backstage;
 pub mod commands;
 mod dialogs;
 mod features;
@@ -67,6 +68,7 @@ pub enum SidePanel {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AfterSave {
     CloseTab,
+    CloseAll,
     Exit,
 }
 
@@ -249,6 +251,10 @@ pub struct MrPdfApp {
     clipboard: (Option<String>, Option<crate::pdf_edit::RgbaImage>),
     /// Source document of the overlay dialog.
     overlay_source: Option<(PathBuf, crate::import::Source)>,
+    /// Open page of the "Datei" backstage (None: documents are shown).
+    backstage: Option<backstage::Page>,
+    /// Search text of the recent files list in the backstage.
+    recent_filter: String,
 }
 
 impl MrPdfApp {
@@ -289,6 +295,8 @@ impl MrPdfApp {
             dialog_doc: None,
             clipboard: (None, None),
             overlay_source: None,
+            backstage: None,
+            recent_filter: String::new(),
         }
     }
 
@@ -346,6 +354,15 @@ impl MrPdfApp {
         let cmd = Modifiers::COMMAND;
         let pressed =
             |m: Modifiers, k: Key| ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(m, k)));
+        if self.backstage_open() && pressed(Modifiers::NONE, Key::Escape) {
+            self.close_backstage();
+        }
+        if pressed(cmd, Key::K) {
+            self.run(ctx, commands::Cmd::Settings);
+        }
+        if pressed(cmd, Key::Q) {
+            self.run(ctx, commands::Cmd::Exit);
+        }
         if pressed(cmd, Key::O) {
             self.open_dialog();
         }
@@ -600,17 +617,21 @@ impl eframe::App for MrPdfApp {
         self.handle_close_request(&ctx);
 
         self.ribbon_ui(ui);
-        self.status_bar(ui);
-        self.tab_bar(ui);
-        if !self.tabs.is_empty() {
-            if self.settings.show_sidebar {
-                self.sidebar(ui);
+        if self.backstage_open() {
+            self.backstage_ui(ui);
+        } else {
+            self.status_bar(ui);
+            self.tab_bar(ui);
+            if !self.tabs.is_empty() {
+                if self.settings.show_sidebar {
+                    self.sidebar(ui);
+                }
+                if self.settings.show_properties {
+                    self.properties_panel(ui);
+                }
             }
-            if self.settings.show_properties {
-                self.properties_panel(ui);
-            }
+            egui::CentralPanel::no_frame().show(ui, |ui| self.central(ui));
         }
-        egui::CentralPanel::no_frame().show(ui, |ui| self.central(ui));
         self.dialogs(&ctx);
         self.process_events(&ctx);
         self.update_title(&ctx);

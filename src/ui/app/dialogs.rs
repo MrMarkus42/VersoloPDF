@@ -66,28 +66,53 @@ impl MrPdfApp {
                     }
                 }
                 Dialog::Unsaved { tab_id, then } => {
-                    let name = self
-                        .tabs
-                        .iter()
-                        .find(|tab| tab.id == *tab_id)
-                        .map(|tab| tab.doc.display_name().to_string())
-                        .unwrap_or_default();
-                    ui.heading(t.unsaved_title);
-                    ui.label(format!("{} „{name}“?", t.unsaved_question));
-                    ui.add_space(8.0);
-                    ui.horizontal(|ui| {
-                        let (id, then) = (*tab_id, *then);
-                        if ui.button(RichText::new(t.save).strong()).clicked() {
-                            action = Some(Box::new(move |app, ctx| app.after_unsaved(ctx, id, then, true)));
-                            outcome = Outcome::Close;
+                    // Task dialog: page picture, question and one
+                    // full-width button per answer.
+                    let (id, then) = (*tab_id, *then);
+                    let tab = self.tabs.iter().find(|tab| tab.id == id);
+                    let name = tab.map(|tab| tab.doc.display_name().to_string()).unwrap_or_default();
+                    ui.horizontal_top(|ui| {
+                        if let Some(tab) = tab {
+                            super::preview::doc_preview(
+                                ui,
+                                &mut self.preview[0],
+                                &tab.doc,
+                                tab.id,
+                                tab.current_page,
+                                egui::vec2(96.0, 128.0),
+                            );
                         }
-                        if ui.button(t.dont_save).clicked() {
-                            action = Some(Box::new(move |app, ctx| app.after_unsaved(ctx, id, then, false)));
-                            outcome = Outcome::Close;
-                        }
-                        if ui.button(t.cancel).clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                            outcome = Outcome::Close;
-                        }
+                        ui.vertical(|ui| {
+                            ui.set_width(330.0);
+                            ui.label(
+                                RichText::new(format!("{} „{name}“ {}", t.unsaved_doc, t.unsaved_changed))
+                                    .size(15.0)
+                                    .color(ui.visuals().strong_text_color()),
+                            );
+                            ui.label(t.unsaved_question);
+                            ui.add_space(6.0);
+                            let answer = |ui: &mut Ui, text: &str| {
+                                ui.add_sized(
+                                    [ui.available_width(), 28.0],
+                                    egui::Button::new(format!("›  {text}"))
+                                        .wrap_mode(egui::TextWrapMode::Truncate),
+                                )
+                                .clicked()
+                            };
+                            if answer(ui, t.yes) {
+                                action =
+                                    Some(Box::new(move |app, ctx| app.after_unsaved(ctx, id, then, true)));
+                                outcome = Outcome::Close;
+                            }
+                            if answer(ui, t.no) {
+                                action =
+                                    Some(Box::new(move |app, ctx| app.after_unsaved(ctx, id, then, false)));
+                                outcome = Outcome::Close;
+                            }
+                            if answer(ui, t.cancel) || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                                outcome = Outcome::Close;
+                            }
+                        });
                     });
                 }
                 Dialog::TextInput { page, tool, template, text, edit } => {
@@ -498,6 +523,8 @@ impl MrPdfApp {
 
         if matches!(outcome, Outcome::Keep) {
             self.dialog = Some(dialog);
+        } else if matches!(dialog, Dialog::Unsaved { .. }) {
+            self.clear_previews();
         }
         if let Some(action) = action {
             action(self, ctx);

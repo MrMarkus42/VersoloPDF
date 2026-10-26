@@ -972,3 +972,101 @@ fn other_tools_menu() {
     h.run_steps(3);
     assert!((h.state().active_tab().unwrap().zoom - 1.0).abs() < 1e-3);
 }
+
+fn open_backstage(h: &mut Harness<'_, MrPdfApp>) {
+    h.get_by_label("Datei").click();
+    h.run_steps(4);
+    assert!(h.state().backstage_open());
+}
+
+#[test]
+fn file_backstage() {
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let file = sample_file(&dir, 2);
+    let mut h = harness(vec![file], false);
+    h.run_steps(10);
+    open_backstage(&mut h);
+    // Left column; later steps are visible but disabled.
+    for label in [
+        "Speichern",
+        "Optimiert speichern",
+        "Drucken",
+        "Alle drucken",
+        "Exportieren",
+        "Teilen",
+        "Dokumenteigenschaften",
+        "Alle schließen",
+        "Einstellungen verwalten",
+        "Beenden",
+    ] {
+        assert!(h.query_all_by_label(label).next().is_some(), "{label} missing");
+    }
+    // "Öffnen" shows the recent files; the opened sample is listed.
+    assert!(h.query_all_by_label("Letzte Dateien").next().is_some());
+    assert!(h.query_all_by_label("Beispiel").next().is_some());
+    save(&mut h, "59-backstage-open");
+    // Entries can be removed from the list.
+    h.get_by_label("Aus der Liste entfernen").click();
+    h.run_steps(3);
+    assert!(h.query_all_by_label("Beispiel").next().is_none());
+    // Disabled entries do nothing.
+    h.get_by_label("Optimiert speichern").click();
+    h.run_steps(3);
+    assert!(h.state().backstage_open());
+    // Sub-page lists.
+    h.get_by_label("Exportieren").click();
+    h.run_steps(3);
+    assert!(h.query_by_label("In Microsoft-Word-Dokument").is_some());
+    save(&mut h, "60-backstage-export");
+    h.get_all_by_label("Neues Dokument").next().unwrap().click();
+    h.run_steps(3);
+    assert!(h.query_by_label("Aus Markdown").is_some());
+    save(&mut h, "61-backstage-new");
+    h.get_by_label("Mit leeren Seiten").click();
+    h.run_steps(5);
+    assert_eq!(h.state().tab_count(), 2);
+    assert!(!h.state().backstage_open(), "a new document leaves the backstage");
+    // Esc and a ribbon tab leave the backstage.
+    open_backstage(&mut h);
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    assert!(!h.state().backstage_open());
+    open_backstage(&mut h);
+    tab(&mut h, "Ansicht");
+    assert!(!h.state().backstage_open());
+    // Strg+K opens the settings, Strg+D the document properties.
+    h.key_press_modifiers(Modifiers::COMMAND, egui::Key::K);
+    h.run_steps(3);
+    assert!(matches!(h.state().dialog(), Some(mrpdf::ui::app::Dialog::Settings { .. })));
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    h.key_press_modifiers(Modifiers::COMMAND, egui::Key::D);
+    h.run_steps(3);
+    assert!(matches!(h.state().dialog(), Some(mrpdf::ui::app::Dialog::Properties { .. })));
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    // "Alle schließen" asks for the changed document, "Nein" closes all.
+    h.state_mut().set_active_tab(0);
+    h.state_mut().active_tab_mut().unwrap().doc.rotate_pages(&[0], 90).unwrap();
+    open_backstage(&mut h);
+    h.get_by_label("Alle schließen").click();
+    h.run_steps(4);
+    assert!(matches!(h.state().dialog(), Some(mrpdf::ui::app::Dialog::Unsaved { .. })));
+    save(&mut h, "62-close-all-question");
+    h.get_by_label("›  Abbrechen").click();
+    h.run_steps(3);
+    assert_eq!(h.state().tab_count(), 2, "cancel keeps the documents");
+    open_backstage(&mut h);
+    h.get_by_label("Alle schließen").click();
+    h.run_steps(4);
+    h.get_by_label("›  Nein").click();
+    h.run_steps(5);
+    // The new blank document is unsaved too: second question.
+    assert_eq!(h.state().tab_count(), 1);
+    assert!(matches!(h.state().dialog(), Some(mrpdf::ui::app::Dialog::Unsaved { .. })));
+    h.get_by_label("›  Nein").click();
+    h.run_steps(5);
+    assert_eq!(h.state().tab_count(), 0);
+    assert!(h.state().dialog().is_none());
+}

@@ -244,11 +244,16 @@ impl MrPdfApp {
                         if tab == RibbonTab::Format {
                             text = text.color(egui::Color32::from_rgb(160, 110, 0)).strong();
                         }
-                        if ui.selectable_label(self.ribbon == tab, text).clicked() {
+                        let selected = self.ribbon == tab && !self.backstage_open();
+                        if ui.selectable_label(selected, text).clicked() {
                             self.ribbon = tab;
+                            self.close_backstage();
                         }
                     }
                 });
+                if self.backstage_open() {
+                    return;
+                }
                 ui.add_space(2.0);
                 egui::ScrollArea::horizontal()
                     .id_salt("ribbon-scroll")
@@ -338,54 +343,17 @@ impl MrPdfApp {
         }
     }
 
+    /// The "Datei" button: opens and closes the backstage view.
     fn file_menu(&mut self, ui: &mut Ui) {
         let t = self.t();
-        let ctx = ui.ctx().clone();
-        let lang = self.settings.language;
+        let open = self.backstage_open();
+        let fill = if open { theme::BRAND.gamma_multiply(0.8) } else { theme::BRAND };
         let button = egui::Button::new(RichText::new(t.menu_file).color(egui::Color32::WHITE).strong())
-            .fill(theme::BRAND);
-        egui::containers::menu::MenuButton::from_button(button).ui(ui, |ui| {
-            ui.set_min_width(220.0);
-            let mut chosen = None;
-            for cmd in [Cmd::New, Cmd::Open] {
-                if ui.button(cmd.label(lang)).clicked() {
-                    chosen = Some(cmd);
-                }
-            }
-            ui.menu_button(t.recent_files, |ui| {
-                if self.settings.recent_files.is_empty() {
-                    ui.label(t.none);
-                }
-                for path in self.settings.recent_files.clone() {
-                    if ui.button(path.display().to_string()).clicked() {
-                        self.pending_open.push_back(path);
-                        ui.close();
-                    }
-                }
-            });
-            ui.separator();
-            for cmd in [Cmd::Save, Cmd::SaveAs, Cmd::Print, Cmd::ExportImages, Cmd::Email] {
-                if ui.add_enabled(self.cmd_enabled(cmd), egui::Button::new(cmd.label(lang))).clicked() {
-                    chosen = Some(cmd);
-                }
-            }
-            ui.separator();
-            for cmd in [Cmd::DocProperties, Cmd::Settings] {
-                if ui.add_enabled(self.cmd_enabled(cmd), egui::Button::new(cmd.label(lang))).clicked() {
-                    chosen = Some(cmd);
-                }
-            }
-            ui.separator();
-            for cmd in [Cmd::Close, Cmd::Exit] {
-                if ui.add_enabled(self.cmd_enabled(cmd), egui::Button::new(cmd.label(lang))).clicked() {
-                    chosen = Some(cmd);
-                }
-            }
-            if let Some(cmd) = chosen {
-                ui.close();
-                self.run(&ctx, cmd);
-            }
-        });
+            .fill(fill)
+            .selected(open);
+        if ui.add(button).clicked() {
+            self.toggle_backstage();
+        }
     }
 
     fn stamp_picker(&mut self, ui: &mut Ui) {

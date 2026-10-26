@@ -112,6 +112,8 @@ impl MrPdfApp {
         let tab = DocTab::new(doc, self.settings.zoom_mode, self.settings.layout);
         self.tabs.push(tab);
         self.active = self.tabs.len() - 1;
+        // A new or opened document is shown at once (leaves the backstage).
+        self.backstage = None;
     }
 
     pub fn new_document(&mut self, ctx: &Context) {
@@ -188,6 +190,21 @@ impl MrPdfApp {
         }
     }
 
+    /// "Alle schließen": asks for every changed document, then closes all.
+    pub fn request_close_all(&mut self, ctx: &Context) {
+        match self.tabs.iter().position(|t| t.doc.is_modified()) {
+            Some(i) => {
+                self.active = i;
+                self.dialog = Some(Dialog::Unsaved { tab_id: self.tabs[i].id, then: AfterSave::CloseAll });
+            }
+            None => {
+                self.tabs.clear();
+                self.active = 0;
+                ctx.request_repaint();
+            }
+        }
+    }
+
     pub fn close_tab(&mut self, ctx: &Context, tab_id: u64) {
         if let Some(i) = self.tabs.iter().position(|t| t.id == tab_id) {
             self.tabs.remove(i);
@@ -205,6 +222,10 @@ impl MrPdfApp {
         }
         match then {
             AfterSave::CloseTab => self.close_tab(ctx, tab_id),
+            AfterSave::CloseAll => {
+                self.close_tab(ctx, tab_id);
+                self.request_close_all(ctx);
+            }
             AfterSave::Exit => {
                 if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) {
                     // Discard: mark as handled so the next check moves on.

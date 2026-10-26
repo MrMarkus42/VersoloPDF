@@ -304,8 +304,12 @@ strings! {
     password_title: "Kennwort erforderlich", "Password required";
     password: "Kennwort", "Password";
     unsaved_title: "Ungespeicherte Änderungen", "Unsaved changes";
-    unsaved_question: "Änderungen speichern in", "Save changes to";
-    dont_save: "Nicht speichern", "Don't save";
+    unsaved_doc: "Das Dokument", "The document";
+    unsaved_changed: "wurde verändert.", "has been changed.";
+    unsaved_question: "Möchten Sie die Änderungen vor dem Schließen des Dokuments speichern?",
+        "Do you want to save the changes before closing the document?";
+    yes: "Ja", "Yes";
+    no: "Nein", "No";
     meta_title: "Titel", "Title";
     meta_subject: "Thema", "Subject";
     meta_keywords: "Stichwörter", "Keywords";
