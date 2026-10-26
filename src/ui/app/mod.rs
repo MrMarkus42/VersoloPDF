@@ -5,6 +5,7 @@ pub mod commands;
 mod dialogs;
 mod features;
 mod formdata;
+mod labels_dialog;
 mod layout_dialogs;
 mod marks_dialogs;
 mod outline_tools;
@@ -221,6 +222,7 @@ pub enum Dialog {
     Layout(Box<layout_dialogs::LayoutState>),
     Shape(Box<shape_dialogs::ShapeState>),
     Marks(Box<marks_dialogs::MarksState>),
+    Labels(Box<labels_dialog::LabelsState>),
     SearchRedact {
         query: String,
         match_case: bool,

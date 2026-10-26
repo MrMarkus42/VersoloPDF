@@ -919,3 +919,25 @@ fn page_marks_ui() {
     h.key_press(egui::Key::Escape);
     h.run_steps(3);
 }
+
+#[test]
+fn page_labels_ui() {
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let file = sample_file(&dir, 12);
+    let mut h = harness(vec![file], false);
+    h.run_steps(10);
+    quick(&mut h, "Seiten nummerieren");
+    h.run_steps(3);
+    // A second range from page 4 (via "Neuer Bereich…" between page 1 and the end).
+    h.get_by_label("Neuer Bereich…").click();
+    h.run_steps(3);
+    save(&mut h, "57-page-labels-dialog");
+    h.get_all_by_label("OK").last().unwrap().click();
+    h.run_steps(6);
+    let tab = h.state_mut().active_tab_mut().unwrap();
+    let ranges = tab.doc.page_label_ranges().unwrap();
+    assert_eq!(ranges.len(), 2, "{ranges:?}");
+    assert_eq!(ranges[1].start, 6);
+    assert_eq!(tab.doc.page_label(7).as_deref(), Some("2"));
+}

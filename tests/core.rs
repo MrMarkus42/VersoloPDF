@@ -1400,3 +1400,30 @@ fn managed_page_marks() {
     let t = text(&f, 0);
     assert!(!t.contains("FREMD") && t.contains("Body text"), "{t}");
 }
+
+#[test]
+fn page_label_ranges() {
+    use mrpdf::pages::{LabelRange, LabelStyle};
+    let _guard = common::lock();
+    let mut d = open(6);
+    assert_eq!(d.page_label_ranges().unwrap().len(), 1);
+    let ranges = vec![
+        LabelRange { start: 0, style: LabelStyle::RomanLower, prefix: String::new(), first: 1 },
+        LabelRange { start: 2, style: LabelStyle::LettersUpper, prefix: "A-".into(), first: 26 },
+        LabelRange { start: 4, style: LabelStyle::Decimal, prefix: String::new(), first: 1 },
+    ];
+    d.set_page_label_ranges(&ranges).unwrap();
+    assert_eq!(d.page_label_ranges().unwrap(), ranges);
+    assert_eq!(d.page_label(1).as_deref(), Some("ii"));
+    assert_eq!(d.page_label(3).as_deref(), Some("A-AA"));
+    assert_eq!(d.page_label(5).as_deref(), Some("2"));
+    assert_eq!(LabelStyle::RomanUpper.format(1994), "MCMXCIV");
+    d.set_page_label_ranges(&[LabelRange {
+        start: 0,
+        style: LabelStyle::Decimal,
+        prefix: String::new(),
+        first: 1,
+    }])
+    .unwrap();
+    assert_eq!(d.page_label_ranges().unwrap().len(), 1);
+}

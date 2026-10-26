@@ -507,6 +507,160 @@ impl LabelStyle {
             LabelStyle::None => None,
         }
     }
+
+    fn from_pdf_name(name: Option<&[u8]>) -> LabelStyle {
+        match name {
+            Some(b"D") => LabelStyle::Decimal,
+            Some(b"R") => LabelStyle::RomanUpper,
+            Some(b"r") => LabelStyle::RomanLower,
+            Some(b"A") => LabelStyle::LettersUpper,
+            Some(b"a") => LabelStyle::LettersLower,
+            _ => LabelStyle::None,
+        }
+    }
+
+    /// The number `n` (≥ 1) in this style.
+    pub fn format(self, n: u32) -> String {
+        fn roman(mut n: u32) -> String {
+            const TABLE: [(u32, &str); 13] = [
+                (1000, "M"),
+                (900, "CM"),
+                (500, "D"),
+                (400, "CD"),
+                (100, "C"),
+                (90, "XC"),
+                (50, "L"),
+                (40, "XL"),
+                (10, "X"),
+                (9, "IX"),
+                (5, "V"),
+                (4, "IV"),
+                (1, "I"),
+            ];
+            let mut s = String::new();
+            for (v, r) in TABLE {
+                while n >= v && s.len() < 64 {
+                    s.push_str(r);
+                    n -= v;
+                }
+            }
+            s
+        }
+        // Letters as in the PDF specification: A..Z, AA..ZZ, AAA…
+        let letters = |n: u32| {
+            let n = n.max(1) - 1;
+            let ch = char::from(b'A' + (n % 26) as u8);
+            std::iter::repeat_n(ch, (n / 26 + 1).min(64) as usize).collect::<String>()
+        };
+        match self {
+            LabelStyle::Decimal => n.to_string(),
+            LabelStyle::RomanUpper => roman(n),
+            LabelStyle::RomanLower => roman(n).to_lowercase(),
+            LabelStyle::LettersUpper => letters(n),
+            LabelStyle::LettersLower => letters(n).to_lowercase(),
+            LabelStyle::None => String::new(),
+        }
+    }
+}
+
+/// One range of page labels ("Seiten nummerieren").
+#[derive(Debug, Clone, PartialEq)]
+pub struct LabelRange {
+    /// First page (0-based) of the range.
+    pub start: usize,
+    pub style: LabelStyle,
+    pub prefix: String,
+    /// Number of the first page of the range.
+    pub first: u32,
+}
+
+impl LabelRange {
+    /// Label of `page` (which must lie in this range).
+    pub fn label(&self, page: usize) -> String {
+        let n = self.first.max(1) + (page.saturating_sub(self.start)) as u32;
+        format!("{}{}", self.prefix, self.style.format(n))
+    }
+}
+
+/// The label ranges of a document (one decimal range if none are set).
+pub fn read_page_labels(bytes: &[u8], password: Option<&str>) -> Result<Vec<LabelRange>> {
+    guarded(|| {
+        let edit = Edit::open(bytes, password)?;
+        let catalog_id = edit.prev().trailer.get(b"Root")?.as_reference()?;
+        let mut out = Vec::new();
+        if let Ok(tree) = edit.object(catalog_id)?.as_dict()?.get(b"PageLabels") {
+            let tree = edit.resolve(tree)?.as_dict()?.clone();
+            if let Ok(nums) = tree.get(b"Nums") {
+                let nums = edit.resolve(nums)?.as_array()?.clone();
+                for pair in nums.as_chunks::<2>().0.iter().take(10_000) {
+                    let (Ok(start), Ok(d)) =
+                        (pair[0].as_i64(), edit.resolve(&pair[1]).and_then(|o| Ok(o.as_dict()?)))
+                    else {
+                        continue;
+                    };
+                    out.push(LabelRange {
+                        start: start.max(0) as usize,
+                        style: LabelStyle::from_pdf_name(d.get(b"S").ok().and_then(|s| s.as_name().ok())),
+                        prefix: crate::pdf_edit::string(d, b"P").unwrap_or_default(),
+                        first: d
+                            .get(b"St")
+                            .ok()
+                            .and_then(|s| s.as_i64().ok())
+                            .unwrap_or(1)
+                            .clamp(1, 1_000_000) as u32,
+                    });
+                }
+            }
+        }
+        out.sort_by_key(|r| r.start);
+        out.dedup_by_key(|r| r.start);
+        if out.first().is_none_or(|r| r.start > 0) {
+            out.insert(
+                0,
+                LabelRange { start: 0, style: LabelStyle::Decimal, prefix: String::new(), first: 1 },
+            );
+        }
+        Ok(out)
+    })
+}
+
+/// Replaces all page label ranges.
+pub fn write_page_labels(bytes: &[u8], password: Option<&str>, ranges: &[LabelRange]) -> Result<Vec<u8>> {
+    guarded(|| {
+        let mut edit = Edit::open(bytes, password)?;
+        let catalog_id = edit.prev().trailer.get(b"Root")?.as_reference()?;
+        let mut ranges = ranges.to_vec();
+        ranges.sort_by_key(|r| r.start);
+        ranges.dedup_by_key(|r| r.start);
+        let simple = ranges.len() == 1
+            && ranges[0].style == LabelStyle::Decimal
+            && ranges[0].prefix.is_empty()
+            && ranges[0].first == 1;
+        if ranges.is_empty() || simple {
+            edit.dict_mut(catalog_id)?.remove(b"PageLabels");
+            return edit.finish();
+        }
+        let mut nums = Vec::new();
+        for r in &ranges {
+            let mut d = Dictionary::new();
+            d.set("Type", Object::Name(b"PageLabel".to_vec()));
+            if let Some(s) = r.style.pdf_name() {
+                d.set("S", Object::Name(s.to_vec()));
+            }
+            if !r.prefix.is_empty() {
+                d.set("P", text_string(&r.prefix));
+            }
+            if r.first > 1 {
+                d.set("St", Object::Integer(i64::from(r.first)));
+            }
+            nums.push(Object::Integer(r.start as i64));
+            nums.push(Object::Dictionary(d));
+        }
+        let mut tree = Dictionary::new();
+        tree.set("Nums", Object::Array(nums));
+        edit.dict_mut(catalog_id)?.set("PageLabels", Object::Dictionary(tree));
+        edit.finish()
+    })
 }
 
 /// Starts a page label range at `start_page` (replacing a range starting there).

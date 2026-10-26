@@ -1072,6 +1072,21 @@ impl Document {
         self.edit_bytes("page labels", |b, pw| pages::set_page_labels(b, pw, start, style, prefix, first))
     }
 
+    /// All page label ranges ("Seiten nummerieren").
+    pub fn page_label_ranges(&mut self) -> Result<Vec<pages::LabelRange>> {
+        self.sync_bytes()?;
+        pages::read_page_labels(&self.bytes, self.password.as_deref())
+    }
+
+    /// Replaces all page label ranges.
+    pub fn set_page_label_ranges(&mut self, ranges: &[pages::LabelRange]) -> Result<()> {
+        self.require(self.permissions().modify)?;
+        if ranges.iter().any(|r| r.start >= self.page_count().max(1)) {
+            return Err(Error::Invalid("label range outside the document".into()));
+        }
+        self.edit_bytes("page labels", |b, pw| pages::write_page_labels(b, pw, ranges))
+    }
+
     // -----------------------------------------------------------------
     // Bookmarks
 

@@ -924,6 +924,7 @@ impl MrPdfApp {
             || self.run_layout_dialog(cmd)
             || self.run_shape(ctx, cmd)
             || self.run_marks(cmd)
+            || self.run_labels(cmd)
         {
             return;
         }
