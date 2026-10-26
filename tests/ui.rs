@@ -941,3 +941,34 @@ fn page_labels_ui() {
     assert_eq!(ranges[1].start, 6);
     assert_eq!(tab.doc.page_label(7).as_deref(), Some("2"));
 }
+
+#[test]
+fn other_tools_menu() {
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let file = sample_file(&dir, 1);
+    let mut h = harness(vec![file], false);
+    h.run_steps(10);
+    tab(&mut h, "Dokumentaufbau");
+    h.get_all_by_label("Andere Werkzeuge").next().unwrap().click();
+    h.run_steps(3);
+    for label in [
+        "Tatsächliche Größe",
+        "An Seitengröße anpassen",
+        "An Breite anpassen",
+        "An Inhalt anpassen",
+        "Vergrößerung",
+    ] {
+        assert!(h.query_by_label(label).is_some(), "{label} missing");
+    }
+    save(&mut h, "58-other-tools-menu");
+    let before = h.state().active_tab().unwrap().zoom;
+    h.get_by_label("An Inhalt anpassen").click();
+    h.run_steps(6);
+    let after = h.state().active_tab().unwrap().zoom;
+    assert!(after > before * 1.3, "zoomed to the printed area: {before} -> {after}");
+    // Strg+1 returns to 100 %.
+    h.key_press_modifiers(Modifiers::COMMAND, egui::Key::Num1);
+    h.run_steps(3);
+    assert!((h.state().active_tab().unwrap().zoom - 1.0).abs() < 1e-3);
+}

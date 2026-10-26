@@ -13,7 +13,7 @@ use crate::ui::tab::AnnotRef;
 use crate::ui::tools::Tool;
 
 /// Commands that are not implemented yet; they are shown greyed out.
-pub const PENDING: &[Cmd] = &[Cmd::FitContent];
+pub const PENDING: &[Cmd] = &[];
 
 /// Files above this size are refused as attachments.
 const MAX_ATTACHMENT: u64 = 100 * 1024 * 1024;

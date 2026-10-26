@@ -153,18 +153,31 @@ impl MrPdfApp {
                 } else {
                     "Other tools"
                 };
-                self.menu(
+                self.small_menu(
                     ui,
                     ctx,
                     Icon::Gear,
-                    other,
+                    (other, other),
                     &[
-                        Cmd::Tool(Tool::SelectAnnot),
-                        Cmd::Tool(Tool::Zoom),
-                        Cmd::Tool(Tool::Snapshot),
-                        Cmd::Tool(Tool::Eraser),
-                        Cmd::Tool(Tool::Link),
-                        Cmd::Tool(Tool::MeasureDistance),
+                        Entry::C(Cmd::Tool(Tool::SelectAnnot)),
+                        Entry::Sub(
+                            Icon::Camera,
+                            ("Bildschirmfoto", "Snapshot"),
+                            &[Cmd::Tool(Tool::Snapshot)],
+                        ),
+                        Entry::Sub(
+                            Icon::Copy,
+                            ("Zwischenablage", "Clipboard"),
+                            &[Cmd::CopyText, Cmd::SelectAll],
+                        ),
+                        Entry::Sub(Icon::Search, ("Suche", "Search"), &[Cmd::Search]),
+                        Entry::Sep,
+                        Entry::C(Cmd::ActualSize),
+                        Entry::C(Cmd::FitPage),
+                        Entry::C(Cmd::FitWidth),
+                        Entry::C(Cmd::FitContent),
+                        Entry::Sep,
+                        Entry::C(Cmd::Tool(Tool::Zoom)),
                     ],
                 );
             });

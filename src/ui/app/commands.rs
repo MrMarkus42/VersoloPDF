@@ -5,7 +5,7 @@
 use egui::Context;
 
 use super::structure::MarkKind;
-use super::{Dialog, InsertPosition, MrPdfApp, PaperChoice, RangePurpose, SidePanel};
+use super::{Dialog, InsertPosition, MrPdfApp, RangePurpose, SidePanel};
 use crate::ui::i18n::Language;
 use crate::ui::icons::Icon;
 use crate::ui::tools::Tool;
@@ -768,6 +768,8 @@ impl Cmd {
             SplitPages => ("Seiten aufteilen…", "Split pages…"),
             CropPages => ("Seiten zuschneiden…", "Crop pages…"),
             RotatePages => ("Seiten drehen…", "Rotate pages…"),
+            FitPage => ("An Seitengröße anpassen", "Fit page"),
+            FitWidth => ("An Breite anpassen", "Fit width"),
             other => other.names(),
         }
     }
@@ -976,6 +978,7 @@ impl MrPdfApp {
             NextPage => self.navigate(|cur, n| (cur + 1).min(n.saturating_sub(1))),
             LastPage => self.navigate(|_, n| n.saturating_sub(1)),
             ActualSize => self.set_zoom(1.0),
+            FitContent => self.fit_content(),
             FitPage => self.set_zoom_mode(ZoomMode::FitPage),
             FitWidth => self.set_zoom_mode(ZoomMode::FitWidth),
             ZoomIn => self.zoom_step(true),
@@ -1025,19 +1028,7 @@ impl MrPdfApp {
                 self.set_status(ctx, t.protection_removed);
             }
             HighlightFields => self.settings.highlight_fields = !self.settings.highlight_fields,
-            InsertBlank => {
-                self.dialog = Some(Dialog::InsertBlank {
-                    count: 1,
-                    paper: PaperChoice::SameAsCurrent,
-                    landscape: false,
-                    position: InsertPosition::After,
-                })
-            }
-            InsertFromFile => self.insert_from_file(ctx, InsertPosition::After),
             AppendFile => self.insert_from_file(ctx, InsertPosition::End),
-            DeletePages => self.range_dialog(RangePurpose::Delete, true),
-            ExtractPages => self.range_dialog(RangePurpose::Extract, true),
-            RotatePages => self.range_dialog(RangePurpose::Rotate(90), false),
             MovePageUp => self.move_current_page(ctx, true),
             MovePageDown => self.move_current_page(ctx, false),
             RotateLeft => self.rotate_current(ctx, -90),
@@ -1077,17 +1068,6 @@ impl MrPdfApp {
         if let Some(tab) = self.tab() {
             let page = target(tab.current_page, tab.doc.page_count());
             tab.jump_to_page(page);
-        }
-    }
-
-    fn range_dialog(&mut self, purpose: RangePurpose, current_only: bool) {
-        if let Some(tab) = self.active_tab() {
-            let text = if current_only {
-                (tab.current_page + 1).to_string()
-            } else {
-                format!("1-{}", tab.doc.page_count())
-            };
-            self.dialog = Some(Dialog::PageRange { purpose, text, error: false });
         }
     }
 

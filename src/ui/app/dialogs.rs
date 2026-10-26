@@ -3,8 +3,7 @@
 use egui::{Context, Id, Modal, RichText, Ui};
 
 use super::actions::parse_page_range;
-use super::{Dialog, InsertPosition, MrPdfApp, PaperChoice, RangePurpose};
-use crate::ui::i18n::Strings;
+use super::{Dialog, MrPdfApp, RangePurpose};
 
 /// Work to do after the modal closed (needs `&mut MrPdfApp`).
 pub(super) type Action = Box<dyn FnOnce(&mut MrPdfApp, &Context)>;
@@ -24,17 +23,6 @@ pub(super) fn buttons(ui: &mut Ui, ok: &str, cancel: &str) -> (bool, bool) {
     let enter = ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift);
     let esc = ui.input(|i| i.key_pressed(egui::Key::Escape));
     (result.0 || enter, result.1 || esc)
-}
-
-pub(super) fn paper_name(t: &Strings, p: PaperChoice) -> &'static str {
-    match p {
-        PaperChoice::SameAsCurrent => t.same_as_current,
-        PaperChoice::A4 => "A4",
-        PaperChoice::A3 => "A3",
-        PaperChoice::A5 => "A5",
-        PaperChoice::Letter => "Letter",
-        PaperChoice::Legal => "Legal",
-    }
 }
 
 impl MrPdfApp {
@@ -246,73 +234,15 @@ impl MrPdfApp {
                         outcome = Outcome::Close;
                     }
                 }
-                Dialog::InsertBlank { count, paper, landscape, position } => {
-                    ui.heading(t.insert_blank);
-                    egui::Grid::new("insert").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
-                        ui.label(t.count);
-                        ui.add(egui::DragValue::new(count).range(1..=500));
-                        ui.end_row();
-                        ui.label(t.paper_size);
-                        egui::ComboBox::from_id_salt("paper").selected_text(paper_name(t, *paper)).show_ui(
-                            ui,
-                            |ui| {
-                                for p in [
-                                    PaperChoice::SameAsCurrent,
-                                    PaperChoice::A4,
-                                    PaperChoice::A3,
-                                    PaperChoice::A5,
-                                    PaperChoice::Letter,
-                                    PaperChoice::Legal,
-                                ] {
-                                    ui.selectable_value(paper, p, paper_name(t, p));
-                                }
-                            },
-                        );
-                        ui.end_row();
-                        ui.label(t.orientation);
-                        ui.horizontal(|ui| {
-                            ui.radio_value(landscape, false, t.portrait);
-                            ui.radio_value(landscape, true, t.landscape);
-                        });
-                        ui.end_row();
-                        ui.label(t.position);
-                        ui.vertical(|ui| {
-                            ui.radio_value(position, InsertPosition::Before, t.before_current);
-                            ui.radio_value(position, InsertPosition::After, t.after_current);
-                            ui.radio_value(position, InsertPosition::End, t.at_end);
-                        });
-                        ui.end_row();
-                    });
-                    let (ok, cancel) = buttons(ui, t.insert, t.cancel);
-                    if ok {
-                        let (c, p, l, pos) = (*count, *paper, *landscape, *position);
-                        action = Some(Box::new(move |app, ctx| app.insert_blank(ctx, c, p, l, pos)));
-                        outcome = Outcome::Close;
-                    } else if cancel {
-                        outcome = Outcome::Close;
-                    }
-                }
                 Dialog::PageRange { purpose, text, error } => {
                     let title = match purpose {
                         RangePurpose::Extract => t.extract_pages,
-                        RangePurpose::Delete => t.delete_pages,
-                        RangePurpose::Rotate(_) => t.rotate_range,
                         RangePurpose::Flatten => t.flatten,
-                        RangePurpose::Duplicate => {
-                            super::commands::Cmd::DuplicatePages.label(self.settings.language)
-                        }
                         RangePurpose::ToImages => {
                             super::commands::Cmd::ContentsToImages.label(self.settings.language)
                         }
                     };
                     ui.heading(title);
-                    if let RangePurpose::Rotate(delta) = purpose {
-                        ui.horizontal(|ui| {
-                            ui.radio_value(delta, -90, t.rotate_left);
-                            ui.radio_value(delta, 90, t.rotate_right);
-                            ui.radio_value(delta, 180, "180°");
-                        });
-                    }
                     if *purpose == RangePurpose::Flatten {
                         ui.label(RichText::new(t.flatten_hint).weak());
                     }
@@ -499,14 +429,7 @@ impl MrPdfApp {
                         outcome = Outcome::Close;
                     }
                 }
-                other @ (Dialog::Split { .. }
-                | Dialog::Replace { .. }
-                | Dialog::Swap { .. }
-                | Dialog::Resize { .. }
-                | Dialog::Margins { .. }
-                | Dialog::PageMark(_)
-                | Dialog::PageLabels { .. }
-                | Dialog::Duplicates { .. }) => {
+                other @ (Dialog::Swap { .. } | Dialog::Duplicates { .. }) => {
                     let (o, a) = self.structure_dialog(ui, other);
                     outcome = o;
                     action = a;

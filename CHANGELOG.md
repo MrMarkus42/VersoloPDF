@@ -22,6 +22,12 @@ First version:
 * Document structure: merge, split, duplicate, replace, swap, reverse,
   find duplicates, crop, resize, margins, watermark, background,
   header/footer, Bates numbering, page labels
+* Page dialogs: page range / target / unit pickers,
+  presets and live previews; insert from clipboard, images, text and RTF;
+  delete blank pages; several pages per sheet; split documents and pages;
+  overlay pages; crop with handles, remove cropped content, trim white
+  margins; page marks that can be removed and managed later; Bates for several
+  files; page label ruler; "Fit content" (Ctrl+3)
 * Secure redaction (mark, search and redact, apply)
 * Bookmark tools and table of contents
 * Review and convert: word count, document comparison, accessibility report,

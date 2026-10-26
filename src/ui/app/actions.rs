@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use egui::Context;
 
-use super::{AfterSave, Dialog, InsertPosition, MrPdfApp, PaperChoice, RangePurpose};
+use super::{AfterSave, Dialog, InsertPosition, MrPdfApp, RangePurpose};
 use crate::document::Document;
 use crate::error::Error;
 use crate::model::AnnotKind;
@@ -249,6 +249,24 @@ impl MrPdfApp {
         }
     }
 
+    /// "An Inhalt anpassen": zooms so the printed area of the current page
+    /// (without white margins) fills the window width.
+    pub fn fit_content(&mut self) {
+        let Some(tab) = self.tab() else { return };
+        let page = tab.current_page;
+        let Some(geo) = tab.doc.geometry(page).copied() else { return };
+        let Ok(m) = tab.doc.white_margins(page, true) else { return };
+        let (w, h) = geo.view_size();
+        let content_w = (w - m[0] - m[1]).max(20.0);
+        let viewport_w = tab.viewport.width().max(100.0) - 24.0;
+        tab.zoom = (viewport_w / (content_w * view::PT_TO_SCREEN)).clamp(view::MIN_ZOOM, view::MAX_ZOOM);
+        tab.zoom_mode = ZoomMode::Custom;
+        // Centre on the middle of the printed area.
+        let centre =
+            crate::geometry::PointF::new(m[0] + content_w / 2.0, m[2] + (h - m[2] - m[3]).max(0.0) / 2.0);
+        tab.pending_scroll = Some(crate::ui::tab::ScrollRequest::Point(page, centre));
+    }
+
     pub fn set_zoom_mode(&mut self, mode: ZoomMode) {
         self.settings.zoom_mode = mode;
         if let Some(tab) = self.tab() {
@@ -437,42 +455,9 @@ impl MrPdfApp {
         });
     }
 
-    pub fn insert_blank(
-        &mut self,
-        ctx: &Context,
-        count: u32,
-        paper: PaperChoice,
-        landscape: bool,
-        position: InsertPosition,
-    ) {
-        self.edit(ctx, |tab| {
-            let (mut w, mut h) = paper.size().unwrap_or_else(|| {
-                tab.doc
-                    .geometry(tab.current_page)
-                    .map_or((595.28, 841.89), |g| (g.crop.width(), g.crop.height()))
-            });
-            if landscape != (w > h) {
-                std::mem::swap(&mut w, &mut h);
-            }
-            let at = match position {
-                InsertPosition::Before => tab.current_page,
-                InsertPosition::After => tab.current_page + 1,
-                InsertPosition::End => tab.doc.page_count(),
-            };
-            for _ in 0..count.clamp(1, 500) {
-                tab.doc.insert_blank_page(at, w, h)?;
-            }
-            tab.go_to_page(at);
-            Ok(())
-        });
-    }
-
     pub fn apply_range(&mut self, ctx: &Context, purpose: RangePurpose, pages: Vec<usize>) {
         match purpose {
-            RangePurpose::Delete => self.edit(ctx, |tab| tab.doc.delete_pages(&pages)),
-            RangePurpose::Rotate(delta) => self.edit(ctx, |tab| tab.doc.rotate_pages(&pages, delta)),
             RangePurpose::Flatten => self.edit(ctx, |tab| tab.doc.flatten_pages(&pages)),
-            RangePurpose::Duplicate => self.edit(ctx, |tab| tab.doc.duplicate_pages(&pages)),
             RangePurpose::ToImages => {
                 self.edit(ctx, |tab| tab.doc.contents_to_images(&pages, 200.0).map(|_| ()))
             }
