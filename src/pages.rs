@@ -58,7 +58,7 @@ fn page_resources(edit: &mut Edit, page_id: ObjectId) -> Result<&mut Dictionary>
 }
 
 /// Adds an entry to a resource category (`Font`, `ExtGState`, …) of a page.
-fn add_resource(
+pub(crate) fn add_resource(
     edit: &mut Edit,
     page_id: ObjectId,
     category: &[u8],
@@ -79,7 +79,7 @@ fn add_resource(
 }
 
 /// Adds content before (`behind`) or after the existing page content.
-fn add_content(edit: &mut Edit, page_id: ObjectId, content: Vec<u8>, behind: bool) -> Result<()> {
+pub(crate) fn add_content(edit: &mut Edit, page_id: ObjectId, content: Vec<u8>, behind: bool) -> Result<()> {
     let existing = edit.object(page_id)?.as_dict()?.get(b"Contents").ok().cloned();
     let mut list: Vec<Object> = match existing {
         Some(Object::Array(items)) => items,
@@ -558,6 +558,125 @@ pub fn set_page_labels(
         let mut tree = Dictionary::new();
         tree.set("Nums", Object::Array(nums));
         edit.dict_mut(catalog_id)?.set("PageLabels", Object::Dictionary(tree));
+        edit.finish()
+    })
+}
+
+/// Inserts the new page `new_id` directly after `after_id` in the page tree.
+fn insert_page_after(edit: &mut Edit, after_id: ObjectId, new_id: ObjectId) -> Result<()> {
+    let parent = edit.object(after_id)?.as_dict()?.get(b"Parent")?.as_reference()?;
+    let kids_obj = edit.object(parent)?.as_dict()?.get(b"Kids")?.clone();
+    let mut kids = edit.resolve(&kids_obj)?.as_array()?.clone();
+    let pos = kids.iter().position(|k| k.as_reference().ok() == Some(after_id)).map_or(kids.len(), |p| p + 1);
+    kids.insert(pos, Object::Reference(new_id));
+    edit.dict_mut(parent)?.set("Kids", Object::Array(kids));
+    edit.dict_mut(new_id)?.set("Parent", Object::Reference(parent));
+    // Every ancestor counts one page more.
+    let mut node = Some(parent);
+    for _ in 0..MAX_DEPTH {
+        let Some(id) = node else { break };
+        let dict = edit.dict_mut(id)?;
+        let count = dict.get(b"Count").ok().and_then(|c| c.as_i64().ok()).unwrap_or(0);
+        dict.set("Count", Object::Integer(count + 1));
+        node = dict.get(b"Parent").ok().and_then(|p| p.as_reference().ok());
+    }
+    Ok(())
+}
+
+/// How "Seiten aufteilen" cuts a page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum SplitMethod {
+    /// Only the visible area (crop box) of each piece is set; the whole
+    /// original content stays in the file ("Originalinhalt erhalten").
+    #[default]
+    CropBox,
+    /// The page size (media box) is set to the piece as well.
+    MediaBox,
+}
+
+/// Cuts each of `pages` along vertical lines at `xs` (fractions of the
+/// displayed width from the left) and horizontal lines at `ys` (fractions
+/// from the top). Pieces follow each other row by row (right to left with
+/// `rtl`). Comments stay on the first piece.
+pub fn split_pages(
+    bytes: &[u8],
+    password: Option<&str>,
+    pages: &[usize],
+    xs: &[f32],
+    ys: &[f32],
+    rtl: bool,
+    method: SplitMethod,
+) -> Result<Vec<u8>> {
+    guarded(|| {
+        let clean = |v: &[f32]| {
+            let mut v: Vec<f32> = v.iter().copied().filter(|x| *x > 0.001 && *x < 0.999).collect();
+            v.sort_by(f32::total_cmp);
+            v.dedup_by(|a, b| (*a - *b).abs() < 0.001);
+            v
+        };
+        let (xs, ys) = (clean(xs), clean(ys));
+        if xs.is_empty() && ys.is_empty() {
+            return Err(Error::Invalid("no split lines".into()));
+        }
+        let mut edit = Edit::open(bytes, password)?;
+        let ids: Vec<ObjectId> = pages.iter().map(|&p| edit.page_id(p)).collect::<Result<_>>()?;
+        for page_id in ids {
+            let vb = visible_box(&edit, page_id);
+            let rot = page_rotation(&edit, page_id);
+            let (up, w, h) = crate::import::upright(vb, rot);
+            let back = up.invert();
+            let mut xb = vec![0.0];
+            xb.extend(xs.iter().map(|x| x * w));
+            xb.push(w);
+            let mut yb = vec![0.0];
+            yb.extend(ys.iter().map(|y| y * h));
+            yb.push(h);
+            // Cells in display space (y from the top), reading order.
+            let mut cells = Vec::new();
+            for r in 0..yb.len() - 1 {
+                let mut row: Vec<RectF> = (0..xb.len() - 1)
+                    .map(|c| RectF::new(xb[c], h - yb[r + 1], xb[c + 1], h - yb[r]))
+                    .collect();
+                if rtl {
+                    row.reverse();
+                }
+                cells.extend(row);
+            }
+            let to_user = |r: &RectF| {
+                let corners =
+                    [(r.x0, r.y0), (r.x1, r.y0), (r.x0, r.y1), (r.x1, r.y1)].map(|(x, y)| back.apply(x, y));
+                RectF::bounding(corners.iter().map(|(x, y)| crate::geometry::PointF::new(*x, *y)))
+                    .unwrap_or(*r)
+            };
+            // A complete, standalone copy of the page dictionary.
+            let mut base = edit.object(page_id)?.as_dict()?.clone();
+            for key in INHERITABLE {
+                if !base.has(key)
+                    && let Some(v) = page_attr(&edit, page_id, key)
+                {
+                    base.set(key.to_vec(), v);
+                }
+            }
+            base.remove(b"Annots");
+            base.remove(b"StructParents");
+            let mut previous = page_id;
+            for (i, cell) in cells.iter().enumerate() {
+                let user = to_user(cell);
+                let target = if i == 0 {
+                    page_id
+                } else {
+                    let id = edit.add(Object::Dictionary(base.clone()));
+                    insert_page_after(&mut edit, previous, id)?;
+                    id
+                };
+                let dict = edit.dict_mut(target)?;
+                dict.set("CropBox", rect_array(&user));
+                if method == SplitMethod::MediaBox {
+                    dict.set("MediaBox", rect_array(&user));
+                }
+                previous = target;
+            }
+        }
         edit.finish()
     })
 }

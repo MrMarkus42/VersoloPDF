@@ -5,6 +5,7 @@ pub mod commands;
 mod dialogs;
 mod features;
 mod formdata;
+mod layout_dialogs;
 mod outline_tools;
 mod page_dialogs;
 mod preview;
@@ -215,6 +216,7 @@ pub enum Dialog {
     },
     NewField(Box<formdata::FieldForm>),
     Pages(Box<page_dialogs::PageDialogState>),
+    Layout(Box<layout_dialogs::LayoutState>),
     SearchRedact {
         query: String,
         match_case: bool,
@@ -276,6 +278,8 @@ pub struct MrPdfApp {
     dialog_doc: Option<(String, crate::Document)>,
     /// Clipboard content read for "Seiten aus der Zwischenablage einfügen".
     clipboard: (Option<String>, Option<crate::pdf_edit::RgbaImage>),
+    /// Source document of the overlay dialog.
+    overlay_source: Option<(PathBuf, crate::import::Source)>,
 }
 
 impl MrPdfApp {
@@ -315,6 +319,7 @@ impl MrPdfApp {
             preview: Default::default(),
             dialog_doc: None,
             clipboard: (None, None),
+            overlay_source: None,
         }
     }
 

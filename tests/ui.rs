@@ -755,3 +755,53 @@ fn page_dialogs_ui() {
     h.run_steps(3);
     assert!(h.state().dialog().is_none());
 }
+
+#[test]
+fn combine_split_overlay_ui() {
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let file = sample_file(&dir, 7);
+    let mut h = harness(vec![file], false);
+    h.run_steps(10);
+    let ok = |h: &mut Harness<'_, MrPdfApp>| {
+        h.get_all_by_label("OK").last().unwrap().click();
+        h.run_steps(8);
+    };
+
+    // N-up: 7 pages, 6 per sheet -> new document with 2 sheets.
+    quick(&mut h, "Seiten zusammenführen");
+    h.run_steps(4);
+    save(&mut h, "42-nup-dialog");
+    ok(&mut h);
+    assert_eq!(h.state().tab_count(), 2);
+    assert_eq!(h.state().active_tab().unwrap().doc.page_count(), 2);
+    save(&mut h, "43-nup-result");
+    h.state_mut().set_active_tab(0);
+    h.run_steps(3);
+
+    // Split every page in the middle.
+    quick(&mut h, "Seiten aufteilen");
+    h.get_by_label("Senkrecht teilen").click();
+    h.run_steps(4);
+    save(&mut h, "44-split-pages-dialog");
+    ok(&mut h);
+    assert_eq!(h.state().active_tab().unwrap().doc.page_count(), 14);
+    assert!(h.state_mut().active_tab_mut().unwrap().doc.undo().unwrap());
+
+    // Split the document into files of three pages.
+    quick(&mut h, "Dokument aufteilen");
+    save(&mut h, "45-split-document-dialog");
+    let before = std::fs::read_dir(dir.path()).unwrap().count();
+    h.get_by_label("Öffne Zielordner und wähle Dateien aus").click();
+    h.run_steps(2);
+    ok(&mut h);
+    let after = std::fs::read_dir(dir.path()).unwrap().count();
+    assert_eq!(after - before, 7, "one file per page by default");
+
+    // Overlay dialog with preview.
+    quick(&mut h, "Überlagern");
+    h.run_steps(3);
+    save(&mut h, "46-overlay-dialog");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+}

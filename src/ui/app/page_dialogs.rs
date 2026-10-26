@@ -22,7 +22,7 @@ use crate::ui::i18n::Language;
 use crate::ui::icons::Icon;
 use crate::ui::pickers::{
     PageRange, PresetAction, RangeMode, Target, TargetPage, Unit, length, preset_combo, section, segmented,
-    unit_combo,
+    unit_combo, unit_combo_right,
 };
 use crate::ui::widgets::{icon_button, small_button};
 
@@ -32,7 +32,7 @@ const IMAGE_EXT: [&str; 7] = ["png", "jpg", "jpeg", "gif", "bmp", "tif", "tiff"]
 const MAX_FILES: usize = 1000;
 const MAX_TEXT_FILE: u64 = 32 * 1024 * 1024;
 
-fn tr(de: bool, german: &'static str, english: &'static str) -> &'static str {
+pub(super) fn tr(de: bool, german: &'static str, english: &'static str) -> &'static str {
     if de { german } else { english }
 }
 
@@ -241,7 +241,7 @@ impl PageDialogState {
 }
 
 /// Footer with optional "Einstellungen" button; returns (ok, cancel, settings).
-fn footer(
+pub(super) fn footer(
     ui: &mut Ui,
     de: bool,
     ok_enabled: bool,
@@ -282,7 +282,7 @@ fn paper_label(p: PaperChoice, de: bool) -> String {
     }
 }
 
-fn paper_combo(ui: &mut Ui, de: bool, id: &str, paper: &mut PaperChoice) {
+pub(super) fn paper_combo(ui: &mut Ui, de: bool, id: &str, paper: &mut PaperChoice) {
     egui::ComboBox::from_id_salt(id).selected_text(paper_label(*paper, de)).width(190.0).show_ui(ui, |ui| {
         for p in [PaperChoice::A4, PaperChoice::A3, PaperChoice::A5, PaperChoice::Letter, PaperChoice::Legal]
         {
@@ -299,13 +299,13 @@ fn size_label(w: f32, h: f32, unit: Unit) -> String {
     format!("({} x {} {})", f(w), f(h), unit.suffix())
 }
 
-fn file_name(path: &Path) -> String {
+pub(super) fn file_name(path: &Path) -> String {
     path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
 /// Replaces macros in output file names: %[FileName], %[Page], %[Pages],
 /// %[Date]. Characters not allowed in file names are replaced.
-pub fn expand_file_name(pattern: &str, stem: &str, page: usize, pages: &str, date: &str) -> String {
+pub(super) fn expand_file_name(pattern: &str, stem: &str, page: usize, pages: &str, date: &str) -> String {
     let name = pattern
         .replace("%[FileName]", stem)
         .replace("%[Page]", &page.to_string())
@@ -319,7 +319,7 @@ pub fn expand_file_name(pattern: &str, stem: &str, page: usize, pages: &str, dat
 }
 
 /// A path that does not exist yet ("name (2).pdf" …).
-fn unique_path(dir: &Path, name: &str) -> PathBuf {
+pub(super) fn unique_path(dir: &Path, name: &str) -> PathBuf {
     let path = dir.join(name);
     if !path.exists() {
         return path;
@@ -329,7 +329,12 @@ fn unique_path(dir: &Path, name: &str) -> PathBuf {
 }
 
 /// Macro menu "[···] ▾" next to file name and caption fields.
-fn macro_menu(ui: &mut Ui, de: bool, text: &mut String, macros: &[(&str, &'static str, &'static str)]) {
+pub(super) fn macro_menu(
+    ui: &mut Ui,
+    de: bool,
+    text: &mut String,
+    macros: &[(&str, &'static str, &'static str)],
+) {
     ui.menu_button("[···]", |ui| {
         for (code, german, english) in macros {
             if ui.button(format!("{} – {code}", tr(de, german, english))).clicked() {
@@ -468,7 +473,7 @@ fn settings_nav(ui: &mut Ui, page: &mut usize, names: &[&str]) {
     });
 }
 
-fn margins_ui(ui: &mut Ui, de: bool, m: &mut [f32; 4], unit: Unit) {
+pub(super) fn margins_ui(ui: &mut Ui, de: bool, m: &mut [f32; 4], unit: Unit) {
     section(ui, tr(de, "Ränder", "Margins"), |ui| {
         egui::Grid::new("margins4").num_columns(4).spacing(vec2(10.0, 6.0)).show(ui, |ui| {
             ui.label(tr(de, "Links:", "Left:"));
@@ -485,7 +490,7 @@ fn margins_ui(ui: &mut Ui, de: bool, m: &mut [f32; 4], unit: Unit) {
     });
 }
 
-fn align_combo(ui: &mut Ui, de: bool, id: &str, value: &mut Align, vertical: bool) {
+pub(super) fn align_combo(ui: &mut Ui, de: bool, id: &str, value: &mut Align, vertical: bool) {
     let names = if vertical {
         [tr(de, "Oben", "Top"), tr(de, "Mittig", "Middle"), tr(de, "Unten", "Bottom")]
     } else {
@@ -765,9 +770,7 @@ impl MrPdfApp {
             PageDialog::Blank(form) => {
                 ui.horizontal(|ui| {
                     ui.heading(Cmd::InsertBlank.label(lang));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.horizontal(|ui| unit_combo(ui, de, &mut self.settings.unit));
-                    });
+                    unit_combo_right(ui, de, &mut self.settings.unit);
                 });
                 let size = self.blank_size(form, n, cur);
                 section(ui, tr(de, "Seiten", "Pages"), |ui| {
@@ -2187,54 +2190,7 @@ impl MrPdfApp {
             }
             PageDialog::Extract(form) => {
                 ui.heading(tr(de, "Einstellungen", "Settings"));
-                let handling = |ui: &mut Ui, id: &str, label: &str, value: &mut Handling| {
-                    ui.label(label);
-                    let names = [
-                        (Handling::Copy, tr(de, "Kopieren", "Copy")),
-                        (Handling::Flatten, tr(de, "Einbetten", "Flatten")),
-                        (Handling::Remove, tr(de, "Nicht kopieren", "Do not copy")),
-                    ];
-                    egui::ComboBox::from_id_salt(id)
-                        .selected_text(names.iter().find(|x| x.0 == *value).map_or("", |x| x.1))
-                        .width(200.0)
-                        .show_ui(ui, |ui| {
-                            for (h, name) in names {
-                                ui.selectable_value(value, h, name);
-                            }
-                        });
-                    ui.end_row();
-                };
-                egui::Grid::new("extract-settings").num_columns(2).spacing(vec2(8.0, 8.0)).show(ui, |ui| {
-                    handling(
-                        ui,
-                        "ex-comments",
-                        tr(de, "Kommentare:", "Comments:"),
-                        &mut form.options.comments,
-                    );
-                    handling(
-                        ui,
-                        "ex-forms",
-                        tr(de, "Formularfelder:", "Form fields:"),
-                        &mut form.options.forms,
-                    );
-                    ui.label(tr(de, "Lesezeichen:", "Bookmarks:"));
-                    let names = [
-                        (BookmarkCopy::All, tr(de, "Alle kopieren", "Copy all")),
-                        (BookmarkCopy::Related, tr(de, "Zugehörige kopieren", "Copy related")),
-                        (BookmarkCopy::None, tr(de, "Nicht kopieren", "Do not copy")),
-                    ];
-                    egui::ComboBox::from_id_salt("ex-bm")
-                        .selected_text(
-                            names.iter().find(|x| x.0 == form.options.bookmarks).map_or("", |x| x.1),
-                        )
-                        .width(200.0)
-                        .show_ui(ui, |ui| {
-                            for (b, name) in names {
-                                ui.selectable_value(&mut form.options.bookmarks, b, name);
-                            }
-                        });
-                    ui.end_row();
-                });
+                extract_options_ui(ui, de, &mut form.options);
                 ui.label(RichText::new(tr(de, "Ebenen und Sprungmarken werden mit den Seiten übernommen, soweit sie zu ihnen gehören.", "Layers and named destinations are taken over with the pages they belong to.")).weak().small());
             }
             PageDialog::Duplicate { comments, forms, .. } => {
@@ -2276,8 +2232,48 @@ impl MrPdfApp {
     }
 }
 
+/// Kommentare / Formularfelder / Lesezeichen of extracted files.
+pub(super) fn extract_options_ui(ui: &mut Ui, de: bool, options: &mut ExtractOptions) {
+    let handling = |ui: &mut Ui, id: &str, label: &str, value: &mut Handling| {
+        ui.label(label);
+        let names = [
+            (Handling::Copy, tr(de, "Kopieren", "Copy")),
+            (Handling::Flatten, tr(de, "Einbetten", "Flatten")),
+            (Handling::Remove, tr(de, "Nicht kopieren", "Do not copy")),
+        ];
+        egui::ComboBox::from_id_salt(id)
+            .selected_text(names.iter().find(|x| x.0 == *value).map_or("", |x| x.1))
+            .width(200.0)
+            .show_ui(ui, |ui| {
+                for (h, name) in names {
+                    ui.selectable_value(value, h, name);
+                }
+            });
+        ui.end_row();
+    };
+    egui::Grid::new("extract-settings").num_columns(2).spacing(vec2(8.0, 8.0)).show(ui, |ui| {
+        handling(ui, "ex-comments", tr(de, "Kommentare:", "Comments:"), &mut options.comments);
+        handling(ui, "ex-forms", tr(de, "Formularfelder:", "Form fields:"), &mut options.forms);
+        ui.label(tr(de, "Lesezeichen:", "Bookmarks:"));
+        let names = [
+            (BookmarkCopy::All, tr(de, "Alle kopieren", "Copy all")),
+            (BookmarkCopy::Related, tr(de, "Zugehörige kopieren", "Copy related")),
+            (BookmarkCopy::None, tr(de, "Nicht kopieren", "Do not copy")),
+        ];
+        egui::ComboBox::from_id_salt("ex-bm")
+            .selected_text(names.iter().find(|x| x.0 == options.bookmarks).map_or("", |x| x.1))
+            .width(200.0)
+            .show_ui(ui, |ui| {
+                for (b, name) in names {
+                    ui.selectable_value(&mut options.bookmarks, b, name);
+                }
+            });
+        ui.end_row();
+    });
+}
+
 /// "1-3,7" for a sorted page list (1-based).
-fn pages_text(pages: &[usize]) -> String {
+pub(super) fn pages_text(pages: &[usize]) -> String {
     let mut parts = Vec::new();
     let mut i = 0;
     while i < pages.len() {

@@ -1115,3 +1115,76 @@ fn page_dialog_operations() {
     assert!(out.annotations(1).unwrap().is_empty());
     std::fs::remove_file(&src).ok();
 }
+
+#[test]
+fn combine_split_and_overlay() {
+    use mrpdf::import::{NUpLayout, OverlayOptions};
+    use mrpdf::outline::NewBookmark;
+    let _guard = common::lock();
+
+    // Six pages on one A4 sheet (2 x 3), seven pages need two sheets.
+    let mut doc = open(7);
+    let nup = doc.nup_document(&(0..6).collect::<Vec<_>>(), &NUpLayout::default()).unwrap();
+    assert_eq!(nup.page_count(), 1);
+    let text = nup.page_text(0).unwrap().all_text();
+    for i in 1..=6 {
+        assert!(text.contains(&format!("Page {i} Hello")), "{text}");
+    }
+    let (w, h) = nup.geometry(0).unwrap().view_size();
+    assert!((w - 595.3).abs() < 1.0 && (h - 841.9).abs() < 1.0);
+    let layout = NUpLayout { columns: 2, rows: 2, landscape: true, border: true, ..NUpLayout::default() };
+    let nup = doc.nup_document(&(0..7).collect::<Vec<_>>(), &layout).unwrap();
+    assert_eq!(nup.page_count(), 2);
+    assert!(nup.geometry(0).unwrap().view_size().0 > 800.0, "landscape sheet");
+
+    // Parts for "Dokument aufteilen".
+    assert_eq!(doc.parts_every(3), vec![vec![0, 1, 2], vec![3, 4, 5], vec![6]]);
+    let single = doc.extract_pages_to_bytes(&[0]).unwrap().len();
+    let parts = doc.parts_by_size(single * 2 + 10).unwrap();
+    assert!(parts.len() >= 3 && parts.iter().all(|p| !p.is_empty()));
+    assert_eq!(parts.concat(), (0..7).collect::<Vec<_>>());
+    doc.append_bookmarks(&[
+        NewBookmark { title: "A".into(), page: 2, level: 0 },
+        NewBookmark { title: "A1".into(), page: 3, level: 1 },
+        NewBookmark { title: "B".into(), page: 5, level: 0 },
+    ])
+    .unwrap();
+    let parts = doc.parts_by_bookmarks(1);
+    assert_eq!(
+        parts,
+        vec![(vec![0, 1], String::new()), (vec![2, 3, 4], "A".into()), (vec![5, 6], "B".into())]
+    );
+    assert_eq!(doc.parts_by_bookmarks(2).len(), 4);
+
+    // Split pages into a left and a right half.
+    let mut d = open(2);
+    d.split_pages_at(&[0], &[0.5], &[], false, mrpdf::pages::SplitMethod::CropBox).unwrap();
+    assert_eq!(d.page_count(), 3);
+    let (w0, _) = d.geometry(0).unwrap().view_size();
+    let (w1, _) = d.geometry(1).unwrap().view_size();
+    assert!((w0 - 297.6).abs() < 1.0 && (w1 - 297.6).abs() < 1.0, "{w0} {w1}");
+    assert!(d.page_text(2).unwrap().all_text().contains("Page 2"), "order kept");
+    let reopened = Document::from_bytes(d.to_bytes().unwrap(), "s.pdf", None).unwrap();
+    assert_eq!(reopened.page_count(), 3);
+
+    // Overlay page 3 of another PDF on all pages, on a new layer.
+    let src = temp_file("overlay.pdf");
+    std::fs::write(&src, common::text_pdf(3)).unwrap();
+    let mut d = open(2);
+    let opts = OverlayOptions {
+        opacity: 0.5,
+        layer: Some("Overlay".into()),
+        repeat: true,
+        ..OverlayOptions::default()
+    };
+    assert_eq!(d.overlay_from(&[0, 1], &src, &[2], &opts).unwrap(), 2);
+    let t = d.page_text(1).unwrap().all_text();
+    assert!(t.contains("Page 2") && t.contains("Page 3"), "{t}");
+    let bytes = d.to_bytes().unwrap();
+    assert!(bytes.windows(12).any(|w| w == b"OCProperties"));
+    // Without repeat only as many pages as source pages are changed.
+    let mut d = open(3);
+    let opts = OverlayOptions { repeat: false, ..OverlayOptions::default() };
+    assert_eq!(d.overlay_from(&[0, 1, 2], &src, &[0, 1], &opts).unwrap(), 2);
+    std::fs::remove_file(&src).ok();
+}

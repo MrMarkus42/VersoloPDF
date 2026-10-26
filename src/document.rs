@@ -2158,6 +2158,136 @@ impl Document {
         doc.to_bytes()
     }
 
+    // -----------------------------------------------------------------
+    // Combining, splitting and overlaying (step C)
+
+    /// A new document with `pages` placed several per sheet.
+    pub fn nup_document(&mut self, pages: &[usize], layout: &crate::import::NUpLayout) -> Result<Document> {
+        for &p in pages {
+            self.check_page(p)?;
+        }
+        self.sync_bytes()?;
+        let src = crate::import::Source::load(&self.bytes, self.password.as_deref())?;
+        let bytes = crate::import::nup(&src, pages, layout)?;
+        let stem = self.display_name.trim_end_matches(".pdf").trim_end_matches(".PDF").to_string();
+        let mut doc = Self::from_bytes(bytes, &format!("{stem} (zusammengeführt).pdf"), None)?;
+        doc.modified = true;
+        Ok(doc)
+    }
+
+    /// Parts of `every` pages.
+    pub fn parts_every(&self, every: usize) -> Vec<Vec<usize>> {
+        let n = self.page_count();
+        let every = every.max(1);
+        (0..n).step_by(every).map(|s| (s..(s + every).min(n)).collect()).collect()
+    }
+
+    /// Parts no larger than about `max_bytes` (estimated from single pages;
+    /// every part has at least one page).
+    pub fn parts_by_size(&self, max_bytes: usize) -> Result<Vec<Vec<usize>>> {
+        let mut parts: Vec<Vec<usize>> = Vec::new();
+        let mut current: Vec<usize> = Vec::new();
+        let mut size = 0usize;
+        for page in 0..self.page_count() {
+            let s = self.extract_pages_to_bytes(&[page])?.len();
+            if !current.is_empty() && size + s > max_bytes {
+                parts.push(std::mem::take(&mut current));
+                size = 0;
+            }
+            current.push(page);
+            size += s;
+        }
+        if !current.is_empty() {
+            parts.push(current);
+        }
+        Ok(parts)
+    }
+
+    /// Parts starting at the bookmarks of the levels 1..=`level` (1 = top
+    /// level). Returns (part pages, title of the bookmark starting it).
+    pub fn parts_by_bookmarks(&self, level: usize) -> Vec<(Vec<usize>, String)> {
+        fn walk(items: &[Bookmark], depth: usize, max: usize, out: &mut Vec<(usize, String)>) {
+            for b in items {
+                if let Some(p) = b.page {
+                    out.push((p, b.title.clone()));
+                }
+                if depth + 1 < max {
+                    walk(&b.children, depth + 1, max, out);
+                }
+            }
+        }
+        let mut starts = Vec::new();
+        walk(&self.bookmarks(), 0, level.max(1), &mut starts);
+        starts.sort_by_key(|s| s.0);
+        starts.dedup_by_key(|s| s.0);
+        if starts.first().is_none_or(|s| s.0 > 0) {
+            starts.insert(0, (0, String::new()));
+        }
+        let n = self.page_count();
+        let mut parts = Vec::new();
+        for (i, (start, title)) in starts.iter().enumerate() {
+            let end = starts.get(i + 1).map_or(n, |s| s.0).min(n);
+            if *start < end {
+                parts.push(((*start..end).collect(), title.clone()));
+            }
+        }
+        parts
+    }
+
+    /// Cuts pages along lines (see [`pages::split_pages`]).
+    pub fn split_pages_at(
+        &mut self,
+        pages: &[usize],
+        xs: &[f32],
+        ys: &[f32],
+        rtl: bool,
+        method: pages::SplitMethod,
+    ) -> Result<()> {
+        for &p in pages {
+            self.check_page(p)?;
+        }
+        self.require(self.permissions().assemble)?;
+        self.edit_bytes("split pages", |b, pw| pages::split_pages(b, pw, pages, xs, ys, rtl, method))
+    }
+
+    /// Overlays pages of another PDF; returns the number of changed pages.
+    pub fn overlay_from(
+        &mut self,
+        targets: &[usize],
+        source: &Path,
+        sources: &[usize],
+        opts: &crate::import::OverlayOptions,
+    ) -> Result<usize> {
+        for &p in targets {
+            self.check_page(p)?;
+        }
+        self.require(self.permissions().modify)?;
+        let src = crate::import::Source::load(&read_pdf_file(source)?, None)?;
+        if sources.iter().any(|&p| p >= src.page_count()) {
+            return Err(Error::Invalid("the other document has not enough pages".into()));
+        }
+        let mut changed = 0;
+        self.edit_bytes("overlay pages", |b, pw| {
+            let (bytes, n) = crate::import::overlay(b, pw, targets, &src, sources, opts)?;
+            changed = n;
+            Ok(bytes)
+        })?;
+        Ok(changed)
+    }
+
+    /// A one-page document showing `page` with the overlay applied (preview).
+    pub fn overlay_preview(
+        &self,
+        page: usize,
+        src: &crate::import::Source,
+        source_page: usize,
+        opts: &crate::import::OverlayOptions,
+    ) -> Result<Document> {
+        let bytes = self.extract_pages_to_bytes(&[page])?;
+        let (bytes, _) = crate::import::overlay(&bytes, None, &[0], src, &[source_page], opts)?;
+        Self::from_bytes(bytes, "preview.pdf", None)
+    }
+
     pub fn set_metadata(&mut self, meta: &Metadata) -> Result<()> {
         self.require(self.permissions().modify)?;
         self.edit_bytes("document properties", |b, pw| pdf_edit::write_metadata(b, pw, meta))

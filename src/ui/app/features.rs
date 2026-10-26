@@ -15,9 +15,6 @@ use crate::ui::tools::Tool;
 
 /// Commands that are not implemented yet; they are shown greyed out.
 pub const PENDING: &[Cmd] = &[
-    Cmd::NUp,
-    Cmd::SplitPages,
-    Cmd::Overlay,
     Cmd::Tool(Tool::Crop),
     Cmd::RemoveCropped,
     Cmd::TrimWhite(Side::All),

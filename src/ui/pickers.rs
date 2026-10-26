@@ -360,6 +360,22 @@ pub fn unit_combo(ui: &mut Ui, de: bool, unit: &mut Unit) {
     });
 }
 
+/// "Einheit: mm ▾" at the right edge of a row.
+pub fn unit_combo_right(ui: &mut Ui, de: bool, unit: &mut Unit) {
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        // Right to left: the combo first, then its label to the left of it.
+        egui::ComboBox::from_id_salt(ui.id().with("unit-r"))
+            .selected_text(unit.suffix())
+            .width(50.0)
+            .show_ui(ui, |ui| {
+                for u in Unit::ALL {
+                    ui.selectable_value(unit, u, u.suffix());
+                }
+            });
+        ui.label(RichText::new(if de { "Einheit:" } else { "Unit:" }).weak());
+    });
+}
+
 /// A length entry: the value is stored in points and shown in `unit`.
 pub fn length(
     ui: &mut Ui,
