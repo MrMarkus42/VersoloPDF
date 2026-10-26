@@ -18,6 +18,7 @@ pub mod document;
 pub mod download;
 pub mod engine;
 pub mod error;
+pub mod files;
 pub mod forms;
 pub mod geometry;
 pub mod import;

@@ -795,6 +795,34 @@ impl Document {
     }
 
     /// Saves to the current file.
+    /// "Zurücksetzen": discards all changes and reloads the file from disk.
+    pub fn revert(&mut self) -> Result<()> {
+        let path = self.path.clone().ok_or_else(|| Error::Invalid("document has no file name yet".into()))?;
+        let bytes = read_pdf_file(&path)?;
+        self.reload(bytes)?;
+        self.history = History::default();
+        self.refresh_security();
+        self.modified = false;
+        Ok(())
+    }
+
+    /// Points the document to its file after it was renamed or moved on disk.
+    pub fn set_file_path(&mut self, path: &Path) {
+        self.path = Some(path.to_path_buf());
+        if let Some(name) = path.file_name() {
+            self.display_name = name.to_string_lossy().into_owned();
+        }
+    }
+
+    /// A document restored from a recovery copy: unsaved, but "Speichern"
+    /// writes to the original file again.
+    pub fn recovered(bytes: Vec<u8>, display_name: &str, original: Option<&Path>) -> Result<Self> {
+        let mut doc = Self::from_bytes(bytes, display_name, None)?;
+        doc.path = original.map(Path::to_path_buf);
+        doc.modified = true;
+        Ok(doc)
+    }
+
     pub fn save(&mut self) -> Result<()> {
         let path = self.path.clone().ok_or_else(|| Error::Invalid("document has no file name yet".into()))?;
         self.save_as(&path)

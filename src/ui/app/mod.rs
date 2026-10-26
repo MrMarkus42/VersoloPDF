@@ -5,6 +5,7 @@ mod backstage;
 pub mod commands;
 mod dialogs;
 mod features;
+mod file_ops;
 mod formdata;
 mod labels_dialog;
 mod layout_dialogs;
@@ -213,6 +214,11 @@ pub enum Dialog {
     OpenUrl {
         url: String,
     },
+    /// "Umbenennen".
+    RenameFile {
+        name: String,
+        error: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -267,6 +273,12 @@ pub struct MrPdfApp {
     recent_thumbs: std::collections::HashMap<PathBuf, Option<egui::TextureHandle>>,
     /// Running "Von URL öffnen" download: address and result channel.
     download: Option<(String, std::sync::mpsc::Receiver<crate::Result<PathBuf>>)>,
+    /// Folder of recovery copies (None: switched off).
+    recovery_dir: Option<PathBuf>,
+    /// Recovery copies of an earlier session (None: not looked for yet).
+    recovery_offer: Option<Vec<(String, crate::files::RecoveryEntry)>>,
+    /// Time of the last recovery copy.
+    last_recovery: f64,
 }
 
 impl MrPdfApp {
@@ -319,6 +331,9 @@ impl MrPdfApp {
             session_name: String::new(),
             recent_thumbs: Default::default(),
             download: None,
+            recovery_dir: crate::files::default_recovery_dir(),
+            recovery_offer: None,
+            last_recovery: 0.0,
         }
     }
 
@@ -640,6 +655,7 @@ impl eframe::App for MrPdfApp {
         }
         self.handle_dropped_files(&ctx);
         self.poll_download(&ctx);
+        self.recovery_tick(&ctx);
         self.shortcuts(&ctx);
         self.handle_close_request(&ctx);
 
@@ -647,6 +663,7 @@ impl eframe::App for MrPdfApp {
         if self.backstage_open() {
             self.backstage_ui(ui);
         } else {
+            self.recovery_bar(ui);
             self.status_bar(ui);
             self.tab_bar(ui);
             if !self.tabs.is_empty() {

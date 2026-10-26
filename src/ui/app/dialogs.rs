@@ -518,6 +518,11 @@ impl MrPdfApp {
                         outcome = Outcome::Close;
                     }
                 }
+                Dialog::RenameFile { name, error } => {
+                    let (o, a) = self.rename_dialog(ui, name, error);
+                    outcome = o;
+                    action = a;
+                }
                 Dialog::OpenUrl { url } => {
                     let de = self.settings.language == crate::ui::i18n::Language::German;
                     ui.heading(if de { "Web-Seite öffnen" } else { "Open web page" });

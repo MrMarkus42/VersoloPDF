@@ -37,11 +37,14 @@ fn harness(files: Vec<PathBuf>, dark: bool) -> Harness<'static, MrPdfApp> {
         dark_mode: dark,
         ..Settings::default()
     };
-    Harness::builder()
-        .with_size(egui::vec2(1280.0, 820.0))
-        .with_max_steps(64)
-        .wgpu()
-        .build_eframe(move |cc| MrPdfApp::with_settings(&cc.egui_ctx, settings, files))
+    Harness::builder().with_size(egui::vec2(1280.0, 820.0)).with_max_steps(64).wgpu().build_eframe(
+        move |cc| {
+            let mut app = MrPdfApp::with_settings(&cc.egui_ctx, settings, files);
+            // Tests never touch the user's recovery folder.
+            app.set_recovery_dir(None);
+            app
+        },
+    )
 }
 
 fn sample_file(dir: &tempfile::TempDir, pages: usize) -> PathBuf {
@@ -993,6 +996,71 @@ fn open_other_file_types() {
     h.run_steps(3);
     let text = h.state().active_tab().unwrap().doc.page_text(0).unwrap().all_text();
     assert!(text.contains("Überschrift") && text.contains("Punkt"), "{text}");
+}
+
+#[test]
+fn file_operations_and_recovery() {
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let file = sample_file(&dir, 2);
+    let recovery = dir.path().join("recovery");
+    let mut h = harness(vec![file.clone()], false);
+    h.state_mut().set_recovery_dir(Some(recovery.clone()));
+    h.run_steps(10);
+    // Umbenennen: type a new name into the focused field.
+    open_backstage(&mut h);
+    h.get_by_label("Umbenennen").click();
+    h.run_steps(4);
+    assert!(matches!(h.state().dialog(), Some(mrpdf::ui::app::Dialog::RenameFile { .. })));
+    // One frame: delete the old name, type the new one.
+    for _ in 0.."Beispiel".len() {
+        h.input_mut().events.push(Event::Key {
+            key: egui::Key::Backspace,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        });
+    }
+    h.input_mut().events.push(Event::Text("Umbenannt".into()));
+    h.run_steps(3);
+    save(&mut h, "68-rename-dialog");
+    h.get_by_label("OK").click();
+    h.run_steps(4);
+    let renamed = dir.path().join("Umbenannt.pdf");
+    assert!(renamed.exists() && !file.exists());
+    assert_eq!(h.state().active_tab().unwrap().doc.path(), Some(renamed.as_path()));
+    assert_eq!(h.state().active_tab().unwrap().doc.display_name(), "Umbenannt.pdf");
+    // Zurücksetzen discards a change after a confirmation.
+    h.state_mut().active_tab_mut().unwrap().doc.rotate_pages(&[0], 90).unwrap();
+    open_backstage(&mut h);
+    h.get_by_label("Zurücksetzen").click();
+    h.run_steps(3);
+    assert!(matches!(h.state().dialog(), Some(mrpdf::ui::app::Dialog::Confirm { .. })));
+    h.get_by_label("OK").click();
+    h.run_steps(4);
+    assert!(!h.state().active_tab().unwrap().doc.is_modified());
+    let (w, hgt) = h.state().active_tab().unwrap().doc.geometry(0).unwrap().view_size();
+    assert!(w < hgt, "rotation undone");
+    // A recovery copy of the changed document …
+    h.state_mut().active_tab_mut().unwrap().doc.rotate_pages(&[1], 90).unwrap();
+    h.state_mut().write_recovery_now();
+    assert_eq!(mrpdf::files::list_recovery(&recovery).len(), 1);
+    // … is offered by the next start (as after a crash).
+    drop(h);
+    let mut h = harness(Vec::new(), false);
+    h.state_mut().set_recovery_dir(Some(recovery.clone()));
+    h.run_steps(5);
+    save(&mut h, "69-recovery-bar");
+    h.get_by_label("Wiederherstellen").click();
+    h.run_steps(6);
+    assert_eq!(h.state().tab_count(), 1);
+    let tab = h.state().active_tab().unwrap();
+    assert!(tab.doc.is_modified());
+    assert_eq!(tab.doc.path(), Some(renamed.as_path()), "saving writes the original file");
+    let (w, hgt) = tab.doc.geometry(1).unwrap().view_size();
+    assert!(w > hgt, "the change is restored");
+    assert!(mrpdf::files::list_recovery(&recovery).is_empty());
 }
 
 fn open_backstage(h: &mut Harness<'_, MrPdfApp>) {

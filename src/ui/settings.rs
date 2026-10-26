@@ -43,6 +43,11 @@ pub struct Settings {
     pub restore_session: bool,
     /// Addresses entered in "Von URL öffnen".
     pub url_history: Vec<String>,
+    /// "Informationen zum Wiederherstellen speichern alle n Minute(n)".
+    pub recovery: bool,
+    pub recovery_minutes: u32,
+    /// "Wiederherstellungsleiste anzeigen, wenn Daten verfügbar sind".
+    pub recovery_bar: bool,
     pub dark_mode: bool,
     pub show_sidebar: bool,
     pub show_properties: bool,
@@ -68,6 +73,9 @@ impl Default for Settings {
             sessions: Vec::new(),
             restore_session: false,
             url_history: Vec::new(),
+            recovery: true,
+            recovery_minutes: 5,
+            recovery_bar: true,
             dark_mode: false,
             show_sidebar: true,
             show_properties: true,

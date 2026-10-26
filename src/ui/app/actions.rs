@@ -158,6 +158,7 @@ impl MrPdfApp {
             Ok(()) => {
                 let t = self.t();
                 self.set_status(ctx, t.saved);
+                self.forget_recovery(self.tabs[index].id);
                 true
             }
             Err(err) => {
@@ -174,20 +175,44 @@ impl MrPdfApp {
         };
         let Some(index) = index else { return false };
         let t = self.t();
+        let de = self.settings.language == crate::ui::i18n::Language::German;
         let name = self.tabs[index].doc.display_name().to_string();
-        let mut dialog =
-            rfd::FileDialog::new().set_title(t.save_as).add_filter("PDF", &["pdf"]).set_file_name(name);
+        // File types that MrPDF can write; the type is taken
+        // from the extension of the chosen name.
+        let mut dialog = rfd::FileDialog::new()
+            .set_title(t.save_as)
+            .add_filter(if de { "PDF-Dokument" } else { "PDF document" }, &["pdf"])
+            .add_filter(if de { "Einfache Textdatei" } else { "Plain text file" }, &["txt"])
+            .add_filter("MS Word Document", &["docx"])
+            .set_file_name(name);
         if let Some(dir) = self.tabs[index].doc.path().and_then(Path::parent) {
             dialog = dialog.set_directory(dir);
         }
         let Some(path) = dialog.save_file() else {
             return false;
         };
+        let ext = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+        if ext == "txt" || ext == "docx" {
+            let doc = &self.tabs[index].doc;
+            let result = if ext == "txt" { doc.export_text(&path) } else { doc.export_word(&path) };
+            return match result {
+                Ok(()) => {
+                    let msg = if de { "Exportiert: " } else { "Exported: " };
+                    self.set_status(ctx, format!("{msg}{}", path.display()));
+                    true
+                }
+                Err(err) => {
+                    self.show_error(&err);
+                    false
+                }
+            };
+        }
         let path = ensure_pdf_extension(path);
         match self.tabs[index].doc.save_as(&path) {
             Ok(()) => {
                 self.settings.add_recent(&path);
                 self.set_status(ctx, t.saved);
+                self.forget_recovery(self.tabs[index].id);
                 true
             }
             Err(err) => {
@@ -215,6 +240,9 @@ impl MrPdfApp {
                 self.dialog = Some(Dialog::Unsaved { tab_id: self.tabs[i].id, then: AfterSave::CloseAll });
             }
             None => {
+                for id in self.tabs.iter().map(|t| t.id).collect::<Vec<_>>() {
+                    self.forget_recovery(id);
+                }
                 self.tabs.clear();
                 self.active = 0;
                 ctx.request_repaint();
@@ -223,6 +251,7 @@ impl MrPdfApp {
     }
 
     pub fn close_tab(&mut self, ctx: &Context, tab_id: u64) {
+        self.forget_recovery(tab_id);
         if let Some(i) = self.tabs.iter().position(|t| t.id == tab_id) {
             self.tabs.remove(i);
             if self.active >= self.tabs.len() {

@@ -80,6 +80,9 @@ impl MrPdfApp {
 
     /// Runs a command after the user confirmed it.
     pub(super) fn run_confirmed(&mut self, ctx: &Context, cmd: Cmd) {
+        if self.run_file_op_confirmed(ctx, cmd) {
+            return;
+        }
         let de = self.lang_de();
         match cmd {
             Cmd::DeleteAllComments => {

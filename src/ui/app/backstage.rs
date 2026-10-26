@@ -69,15 +69,15 @@ const LEFT: &[Left] = &[
     Left::Page(Page::Export),
     Left::Page(Page::Share),
     Left::Separator,
-    Left::Planned("Zurücksetzen", "Revert", 'I'),
+    Left::Run(Cmd::Revert),
     Left::Separator,
     Left::Run(Cmd::DocProperties),
     Left::Planned("Speicherverbrauch untersuchen", "Examine space usage", 'J'),
     Left::Separator,
-    Left::Planned("Umbenennen", "Rename", 'I'),
-    Left::Planned("Datei verschieben", "Move file", 'I'),
+    Left::Run(Cmd::RenameFile),
+    Left::Run(Cmd::MoveFile),
     Left::Separator,
-    Left::Planned("In den Papierkorb werfen", "Move to recycle bin", 'I'),
+    Left::Run(Cmd::TrashFile),
     Left::Separator,
     Left::Run(Cmd::Close),
     Left::Run(Cmd::CloseAll),
@@ -882,7 +882,7 @@ const THUMB: Vec2 = Vec2::new(30.0, 40.0);
 const SESSION_EXT: &str = "mrpdfsession";
 
 /// Current date and time for display ("26.10.2026, 15:31").
-fn now_text(lang: Language) -> String {
+pub(super) fn now_text(lang: Language) -> String {
     let d = crate::pdf_edit::pdf_date_now();
     let digits: String = d.chars().filter(|c| c.is_ascii_digit()).take(12).collect();
     if digits.len() < 12 {

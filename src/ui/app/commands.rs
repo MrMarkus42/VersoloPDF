@@ -106,6 +106,10 @@ pub enum Cmd {
     Print,
     Close,
     CloseAll,
+    Revert,
+    RenameFile,
+    MoveFile,
+    TrashFile,
     Exit,
     DocProperties,
     Settings,
@@ -260,6 +264,10 @@ pub const SEARCHABLE: &[Cmd] = &[
     Cmd::Print,
     Cmd::Close,
     Cmd::CloseAll,
+    Cmd::Revert,
+    Cmd::RenameFile,
+    Cmd::MoveFile,
+    Cmd::TrashFile,
     Cmd::DocProperties,
     Cmd::Settings,
     Cmd::Email,
@@ -451,6 +459,10 @@ impl Cmd {
             Print => ("Drucken", "Print"),
             Close => ("Schließen", "Close"),
             CloseAll => ("Alle schließen", "Close all"),
+            Revert => ("Zurücksetzen", "Revert"),
+            RenameFile => ("Umbenennen", "Rename"),
+            MoveFile => ("Datei verschieben", "Move file"),
+            TrashFile => ("In den Papierkorb werfen", "Move to recycle bin"),
             Exit => ("Beenden", "Exit"),
             DocProperties => ("Dokumenteigenschaften", "Document properties"),
             Settings => ("Einstellungen", "Settings"),
@@ -621,6 +633,10 @@ impl Cmd {
             SaveAs => Icon::SaveAs,
             Print => Icon::Print,
             Close | CloseAll => Icon::Close,
+            Revert => Icon::Undo,
+            RenameFile => Icon::TextBox,
+            MoveFile => Icon::Open,
+            TrashFile => Icon::Delete,
             Exit => Icon::Close,
             DocProperties => Icon::Info,
             Settings => Icon::Gear,
@@ -899,7 +915,9 @@ impl MrPdfApp {
             MovePageUp => tab.is_some_and(|t| t.current_page > 0),
             MovePageDown => tab.is_some_and(|t| t.current_page + 1 < t.doc.page_count()),
             DeletePages | SwapPages => tab.is_some_and(|t| t.doc.page_count() > 1),
-            Email | OpenFolder => tab.is_some_and(|t| t.doc.path().is_some()),
+            Email | OpenFolder | Revert | RenameFile | MoveFile | TrashFile => {
+                tab.is_some_and(|t| t.doc.path().is_some())
+            }
             _ => has_doc,
         }
     }
@@ -953,6 +971,7 @@ impl MrPdfApp {
             || self.run_shape(ctx, cmd)
             || self.run_marks(cmd)
             || self.run_labels(cmd)
+            || self.run_file_op(ctx, cmd)
         {
             return;
         }
