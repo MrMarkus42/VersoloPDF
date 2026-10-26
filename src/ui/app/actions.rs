@@ -32,31 +32,7 @@ pub fn error_text(t: &Strings, err: &Error) -> String {
 
 /// Parses page ranges like `1-3, 5, 8-` (1-based) into zero-based indices.
 pub fn parse_page_range(text: &str, page_count: usize) -> Option<Vec<usize>> {
-    let mut pages = Vec::new();
-    for part in text.split([',', ';']) {
-        let part = part.trim();
-        if part.is_empty() {
-            continue;
-        }
-        let (a, b) = match part.split_once('-') {
-            Some((a, b)) => {
-                let a = if a.trim().is_empty() { 1 } else { a.trim().parse::<usize>().ok()? };
-                let b = if b.trim().is_empty() { page_count } else { b.trim().parse::<usize>().ok()? };
-                (a, b)
-            }
-            None => {
-                let n = part.parse::<usize>().ok()?;
-                (n, n)
-            }
-        };
-        if a == 0 || b == 0 || a > b || b > page_count {
-            return None;
-        }
-        pages.extend((a - 1)..b);
-    }
-    pages.sort_unstable();
-    pages.dedup();
-    (!pages.is_empty()).then_some(pages)
+    crate::ui::pickers::parse_pages(text, page_count)
 }
 
 fn ensure_pdf_extension(mut path: PathBuf) -> PathBuf {

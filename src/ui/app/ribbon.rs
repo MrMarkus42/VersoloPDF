@@ -4,7 +4,9 @@
 
 use egui::{Context, Frame, Margin, Panel, RichText, Ui};
 
+use super::commands::Side;
 use super::commands::{Cmd, SEARCHABLE, Unavailable};
+use super::structure::MarkKind;
 use super::{MrPdfApp, RibbonTab, SidePanel};
 use crate::model::{Rgba, StampPreset};
 use crate::pdf_edit::AnnotUpdate;
@@ -12,9 +14,19 @@ use crate::ui::i18n::Language;
 use crate::ui::icons::Icon;
 use crate::ui::theme;
 use crate::ui::tools::{PALETTE, Tool};
-use crate::ui::widgets::{big_button, group, icon_button, small_button, swatch};
+use crate::ui::widgets::{
+    big_button, big_menu_button, group, icon_button, menu_item, small_button, small_menu_button, swatch,
+};
 
 const UA: fn(Unavailable, &'static str, &'static str, Icon) -> Cmd = Cmd::Unavailable;
+
+/// An entry of a ribbon drop-down menu.
+pub(super) enum Entry {
+    C(Cmd),
+    Sep,
+    /// Sub menu: icon, (German, English) label, commands.
+    Sub(Icon, (&'static str, &'static str), &'static [Cmd]),
+}
 
 impl MrPdfApp {
     fn big(&mut self, ui: &mut Ui, ctx: &Context, cmd: Cmd) {
@@ -58,29 +70,76 @@ impl MrPdfApp {
 
     /// A small button opening a drop-down menu of commands.
     fn menu(&mut self, ui: &mut Ui, ctx: &Context, icon: Icon, label: &str, cmds: &[Cmd]) {
-        let has_doc = !self.tabs.is_empty();
+        let entries: Vec<Entry> = cmds.iter().map(|c| Entry::C(*c)).collect();
+        let enabled = !self.tabs.is_empty();
+        let resp = small_menu_button(ui, icon, label, enabled, false);
+        self.popup_menu(ctx, &resp, &entries);
+    }
+
+    /// Large button with drop-down ("Einfügen ▾").
+    fn big_menu(&mut self, ui: &mut Ui, ctx: &Context, icon: Icon, label: (&str, &str), entries: &[Entry]) {
+        let label = if self.settings.language == Language::German { label.0 } else { label.1 };
+        let enabled = entries.iter().any(|e| match e {
+            Entry::C(c) => self.cmd_enabled(*c),
+            Entry::Sub(_, _, cmds) => cmds.iter().any(|c| self.cmd_enabled(*c)),
+            Entry::Sep => false,
+        });
+        let resp = big_menu_button(ui, icon, label, enabled || !self.tabs.is_empty(), false);
+        self.popup_menu(ctx, &resp, entries);
+    }
+
+    /// Small button with drop-down ("Aufteilen ▾").
+    fn small_menu(&mut self, ui: &mut Ui, ctx: &Context, icon: Icon, label: (&str, &str), entries: &[Entry]) {
+        let label = if self.settings.language == Language::German { label.0 } else { label.1 };
+        let resp = small_menu_button(ui, icon, label, !self.tabs.is_empty(), false);
+        self.popup_menu(ctx, &resp, entries);
+    }
+
+    fn popup_menu(&mut self, ctx: &Context, resp: &egui::Response, entries: &[Entry]) {
         let mut chosen = None;
-        ui.add_enabled_ui(has_doc, |ui| {
-            ui.menu_button(format!("{label}…"), |ui| {
-                for &cmd in cmds {
-                    let text = cmd.label(self.settings.language);
-                    if ui
-                        .add_enabled(self.cmd_enabled(cmd), egui::Button::new(text))
-                        .on_hover_text(self.cmd_tooltip(cmd))
-                        .clicked()
-                    {
-                        chosen = Some(cmd);
-                        ui.close();
+        egui::Popup::menu(resp).show(|ui| {
+            ui.set_min_width(260.0);
+            for entry in entries {
+                match entry {
+                    Entry::Sep => {
+                        ui.separator();
+                    }
+                    Entry::C(cmd) => {
+                        if self.menu_row(ui, *cmd) {
+                            chosen = Some(*cmd);
+                            ui.close();
+                        }
+                    }
+                    Entry::Sub(icon, label, cmds) => {
+                        let text = if self.settings.language == Language::German { label.0 } else { label.1 };
+                        let _ = icon;
+                        ui.menu_button(text, |ui| {
+                            ui.set_min_width(180.0);
+                            for cmd in *cmds {
+                                if self.menu_row(ui, *cmd) {
+                                    chosen = Some(*cmd);
+                                    ui.close();
+                                }
+                            }
+                        });
                     }
                 }
-            })
-            .response
-            .on_hover_text(label);
+            }
         });
-        let _ = icon;
         if let Some(cmd) = chosen {
             self.run(ctx, cmd);
         }
+    }
+
+    /// One command row of a drop-down; returns true if clicked.
+    fn menu_row(&self, ui: &mut Ui, cmd: Cmd) -> bool {
+        let lang = self.settings.language;
+        let (de, en) = cmd.menu_names();
+        let label = if lang == Language::German { de } else { en };
+        let shortcut = cmd.shortcut().map(|(de, en)| if lang == Language::German { de } else { en });
+        menu_item(ui, cmd.icon(), label, shortcut, self.cmd_enabled(cmd), self.cmd_selected(cmd), false)
+            .on_hover_text(self.cmd_tooltip(cmd))
+            .clicked()
     }
 
     fn tools_group(&mut self, ui: &mut Ui, ctx: &Context) {
@@ -688,25 +747,135 @@ impl MrPdfApp {
         let de = self.settings.language == Language::German;
         self.tools_group(ui, ctx);
         group(ui, if de { "Seiten" } else { "Pages" }, |ui| {
+            self.big_menu(
+                ui,
+                ctx,
+                Icon::InsertPage,
+                ("Einfügen", "Insert"),
+                &[
+                    Entry::C(Cmd::InsertFromFile),
+                    Entry::C(Cmd::InsertBlank),
+                    Entry::C(Cmd::InsertClipboard),
+                    Entry::C(Cmd::InsertImages),
+                    Entry::C(UA(
+                        Unavailable::Scanner,
+                        "Gescannte Seiten einfügen…",
+                        "Insert scanned pages…",
+                        Icon::Camera,
+                    )),
+                    Entry::C(Cmd::InsertText),
+                    Entry::C(Cmd::InsertRtf),
+                ],
+            );
+            self.big_menu(
+                ui,
+                ctx,
+                Icon::DeletePage,
+                ("Löschen", "Delete"),
+                &[Entry::C(Cmd::DeletePages), Entry::C(Cmd::DeleteBlankPages)],
+            );
+            self.big(ui, ctx, Cmd::ExtractPages);
+            self.big(ui, ctx, Cmd::MovePages);
             ui.vertical(|ui| {
-                self.big(ui, ctx, Cmd::InsertBlank);
+                self.small(ui, ctx, Cmd::NUp);
+                self.small_menu(
+                    ui,
+                    ctx,
+                    Icon::Split,
+                    ("Aufteilen", "Split"),
+                    &[
+                        Entry::C(Cmd::SplitDocument),
+                        Entry::C(Cmd::SplitPages),
+                        Entry::C(UA(
+                            Unavailable::Guides,
+                            "Seiten an Hilfslinien aufteilen",
+                            "Split pages at guides",
+                            Icon::Split,
+                        )),
+                    ],
+                );
+                self.small(ui, ctx, Cmd::DuplicatePages);
             });
-            self.smalls(ui, ctx, &[Cmd::InsertFromFile, Cmd::AppendFile, Cmd::DeletePages]);
-            self.smalls(ui, ctx, &[Cmd::ExtractPages, Cmd::MovePageUp, Cmd::MovePageDown]);
-            self.smalls(ui, ctx, &[Cmd::MergeFiles, Cmd::SplitDocument, Cmd::DuplicatePages]);
-            self.smalls(ui, ctx, &[Cmd::ReplacePages, Cmd::SwapPages, Cmd::ReversePages]);
-            self.smalls(ui, ctx, &[Cmd::NormalizePages, Cmd::FindDuplicatePages]);
+            self.smalls(ui, ctx, &[Cmd::ReplacePages, Cmd::SwapPages, Cmd::Overlay]);
+            self.smalls(ui, ctx, &[Cmd::NormalizePages, Cmd::FindDuplicatePages, Cmd::ReversePages]);
         });
         group(ui, if de { "Form der Seite ändern" } else { "Page shape" }, |ui| {
-            self.smalls(ui, ctx, &[Cmd::RotateLeft, Cmd::RotateRight, Cmd::RotatePages]);
-            self.big(ui, ctx, Cmd::CropPages);
+            self.big_menu(
+                ui,
+                ctx,
+                Icon::RotateRight,
+                ("Drehen", "Rotate"),
+                &[
+                    Entry::C(Cmd::RotatePages),
+                    Entry::Sep,
+                    Entry::C(Cmd::RotateLeft),
+                    Entry::C(Cmd::RotateRight),
+                    Entry::C(Cmd::Rotate180),
+                ],
+            );
+            self.big_menu(
+                ui,
+                ctx,
+                Icon::Crop,
+                ("Zuschneiden", "Crop"),
+                &[
+                    Entry::C(Cmd::CropPages),
+                    Entry::C(Cmd::Tool(Tool::Crop)),
+                    Entry::C(Cmd::RemoveCropped),
+                    Entry::Sub(
+                        Icon::Margins,
+                        ("Weiße Ränder abschneiden", "Trim white margins"),
+                        &[
+                            Cmd::TrimWhite(Side::All),
+                            Cmd::TrimWhite(Side::Left),
+                            Cmd::TrimWhite(Side::Right),
+                            Cmd::TrimWhite(Side::Top),
+                            Cmd::TrimWhite(Side::Bottom),
+                        ],
+                    ),
+                ],
+            );
             self.big(ui, ctx, Cmd::ResizePages);
             self.big(ui, ctx, Cmd::Margins);
         });
         group(ui, if de { "Seitenmarkierungen" } else { "Page marks" }, |ui| {
-            for cmd in [Cmd::Watermark, Cmd::Background, Cmd::HeaderFooter, Cmd::Bates, Cmd::PageLabels] {
-                self.big(ui, ctx, cmd);
+            for (cmd, kind, icon, label) in [
+                (Cmd::Watermark, MarkKind::Watermark, Icon::Watermark, ("Wasserzeichen", "Watermark")),
+                (Cmd::Background, MarkKind::Background, Icon::Background, ("Hintergrund", "Background")),
+                (
+                    Cmd::HeaderFooter,
+                    MarkKind::HeaderFooter,
+                    Icon::HeaderFooter,
+                    ("Kopf- und Fußzeilen", "Header and footer"),
+                ),
+            ] {
+                self.big_menu(
+                    ui,
+                    ctx,
+                    icon,
+                    label,
+                    &[
+                        Entry::C(cmd),
+                        Entry::C(Cmd::RemoveMarks(kind)),
+                        Entry::Sep,
+                        Entry::C(Cmd::ManageMarks(kind)),
+                    ],
+                );
             }
+            self.big_menu(
+                ui,
+                ctx,
+                Icon::Numbering,
+                ("Paginierung", "Bates numbering"),
+                &[
+                    Entry::C(Cmd::Bates),
+                    Entry::C(Cmd::BatesFiles),
+                    Entry::C(Cmd::RemoveMarks(MarkKind::Bates)),
+                    Entry::Sep,
+                    Entry::C(Cmd::ManageMarks(MarkKind::Bates)),
+                ],
+            );
+            self.big(ui, ctx, Cmd::PageLabels);
         });
     }
 
@@ -716,6 +885,7 @@ impl MrPdfApp {
         group(ui, if de { "Erstellen" } else { "Create" }, |ui| {
             self.big(ui, ctx, UA(Unavailable::Scanner, "Scannen", "Scan", Icon::Camera));
             self.big(ui, ctx, Cmd::FromFiles);
+            self.big(ui, ctx, Cmd::MergeFiles);
             self.big(ui, ctx, Cmd::New);
         });
         group(ui, if de { "Ändern" } else { "Change" }, |ui| {

@@ -5,6 +5,7 @@ pub mod cache;
 pub mod canvas;
 pub mod i18n;
 pub mod icons;
+pub mod pickers;
 pub mod settings;
 pub mod tab;
 pub mod theme;

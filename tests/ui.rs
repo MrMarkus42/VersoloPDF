@@ -194,7 +194,11 @@ fn search_and_sidebar_panels() {
     tab(&mut h, "Dokumentaufbau");
     h.run_steps(3);
     save(&mut h, "08-organize-ribbon");
-    h.get_by_label("Rechts drehen").click();
+    // "Drehen ▾" opens a drop-down menu.
+    h.get_by_label("Drehen").click();
+    h.run_steps(3);
+    save(&mut h, "08b-rotate-menu");
+    h.get_by_label("90° im Uhrzeigersinn").click();
     h.run_steps(6);
     let tab = h.state().active_tab().unwrap();
     let page = tab.current_page;
@@ -630,4 +634,36 @@ fn review_tools_ui() {
     h.get_by_label("OK").click();
     h.run_steps(4);
     assert!(h.state().active_tab().unwrap().doc.is_modified());
+}
+
+#[test]
+fn organize_ribbon_menus() {
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let file = sample_file(&dir, 2);
+    let mut h = harness(vec![file], false);
+    h.run_steps(10);
+    tab(&mut h, "Dokumentaufbau");
+    h.get_by_label("Einfügen").click();
+    h.run_steps(3);
+    // The insert menu lists the entries; scanning is offered but disabled.
+    for label in [
+        "Seiten einfügen…",
+        "Leere Seiten einfügen…",
+        "Bilder einfügen…",
+        "Gescannte Seiten einfügen…",
+        "RTF einfügen…",
+    ] {
+        assert!(h.query_by_label(label).is_some(), "{label} missing");
+    }
+    save(&mut h, "30-insert-menu");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    // The page mark group lies beyond the visible ribbon width.
+    h.get_by_label("Wasserzeichen").scroll_to_me();
+    h.run_steps(3);
+    h.get_by_label("Wasserzeichen").click();
+    h.run_steps(3);
+    assert!(h.query_by_label("Verwalten…").is_some());
+    save(&mut h, "31-watermark-menu");
 }

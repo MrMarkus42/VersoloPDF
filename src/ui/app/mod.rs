@@ -6,6 +6,7 @@ mod dialogs;
 mod features;
 mod formdata;
 mod outline_tools;
+mod preview;
 mod properties;
 mod review;
 mod ribbon;
@@ -267,6 +268,8 @@ pub struct MrPdfApp {
     quick_focus: bool,
     /// Last radio group and number of buttons placed in it.
     last_radio: (String, u32),
+    /// Page preview shown in the current dialog.
+    preview: Option<preview::PreviewCache>,
 }
 
 impl MrPdfApp {
@@ -303,6 +306,7 @@ impl MrPdfApp {
             quick_query: String::new(),
             quick_focus: false,
             last_radio: ("RadioGroup1".into(), 0),
+            preview: None,
         }
     }
 
@@ -383,8 +387,17 @@ impl MrPdfApp {
             self.side = SidePanel::Search;
             self.focus_search = true;
         }
-        if pressed(cmd, Key::D) {
+        // Shift variants first: Ctrl+D would also match Ctrl+Shift+D.
+        if pressed(cmd | Modifiers::SHIFT, Key::I) {
+            self.run(ctx, commands::Cmd::InsertFromFile);
+        }
+        if pressed(cmd | Modifiers::SHIFT, Key::D) {
+            self.run(ctx, commands::Cmd::DeletePages);
+        } else if pressed(cmd, Key::D) {
             self.open_properties();
+        }
+        if pressed(cmd | Modifiers::SHIFT, Key::T) {
+            self.run(ctx, commands::Cmd::CropPages);
         }
         if pressed(cmd, Key::Plus) || pressed(cmd, Key::Equals) {
             self.zoom_step(true);
@@ -400,6 +413,9 @@ impl MrPdfApp {
         }
         if pressed(cmd, Key::Num2) {
             self.set_zoom_mode(crate::ui::view::ZoomMode::FitWidth);
+        }
+        if pressed(cmd, Key::Num3) {
+            self.run(ctx, commands::Cmd::FitContent);
         }
         if pressed(cmd, Key::Period) {
             self.quick_focus = true;

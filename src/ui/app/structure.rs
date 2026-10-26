@@ -15,7 +15,7 @@ use crate::ui::widgets::{from_color32, to_color32};
 
 const MM: f32 = 72.0 / 25.4;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MarkKind {
     Watermark,
     Background,

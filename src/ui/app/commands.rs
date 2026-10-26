@@ -4,11 +4,22 @@
 
 use egui::Context;
 
+use super::structure::MarkKind;
 use super::{Dialog, InsertPosition, MrPdfApp, PaperChoice, RangePurpose, SidePanel};
 use crate::ui::i18n::Language;
 use crate::ui::icons::Icon;
 use crate::ui::tools::Tool;
 use crate::ui::view::{PageLayout, ZoomMode};
+
+/// Page side for "Weiße Ränder abschneiden".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Side {
+    All,
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
 
 /// Why a command is not offered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -23,6 +34,7 @@ pub enum Unavailable {
     Speech,
     Office,
     Barcodes,
+    Guides,
 }
 
 impl Unavailable {
@@ -61,6 +73,10 @@ impl Unavailable {
                 "Export to Excel/PowerPoint is not supported (text and Word export are available).",
             ),
             Unavailable::Barcodes => ("Barcodes werden nicht unterstützt.", "Barcodes are not supported."),
+            Unavailable::Guides => (
+                "MrPDF hat keine Hilfslinien. Bitte „Seiten aufteilen“ verwenden und die Trennlinien dort setzen.",
+                "MrPDF has no guides. Please use \"Split pages\" and set the split lines there.",
+            ),
         };
         if lang == Language::German { de } else { en }
     }
@@ -100,6 +116,7 @@ pub enum Cmd {
     ActualSize,
     FitPage,
     FitWidth,
+    FitContent,
     ZoomIn,
     ZoomOut,
     RotateViewLeft,
@@ -161,6 +178,22 @@ pub enum Cmd {
     HeaderFooter,
     Bates,
     PageLabels,
+    InsertClipboard,
+    InsertImages,
+    InsertText,
+    InsertRtf,
+    DeleteBlankPages,
+    MovePages,
+    /// Several pages per sheet (Seiten zusammenfuehren).
+    NUp,
+    SplitPages,
+    Overlay,
+    Rotate180,
+    RemoveCropped,
+    TrimWhite(Side),
+    RemoveMarks(MarkKind),
+    ManageMarks(MarkKind),
+    BatesFiles,
     // Convert
     FromFiles,
     ContentsToImages,
@@ -273,6 +306,7 @@ pub const SEARCHABLE: &[Cmd] = &[
     Cmd::ActualSize,
     Cmd::FitPage,
     Cmd::FitWidth,
+    Cmd::FitContent,
     Cmd::ZoomIn,
     Cmd::ZoomOut,
     Cmd::RotateViewLeft,
@@ -329,6 +363,32 @@ pub const SEARCHABLE: &[Cmd] = &[
     Cmd::HeaderFooter,
     Cmd::Bates,
     Cmd::PageLabels,
+    Cmd::InsertClipboard,
+    Cmd::InsertImages,
+    Cmd::InsertText,
+    Cmd::InsertRtf,
+    Cmd::DeleteBlankPages,
+    Cmd::MovePages,
+    Cmd::NUp,
+    Cmd::SplitPages,
+    Cmd::Overlay,
+    Cmd::Rotate180,
+    Cmd::Tool(Tool::Crop),
+    Cmd::RemoveCropped,
+    Cmd::TrimWhite(Side::All),
+    Cmd::TrimWhite(Side::Left),
+    Cmd::TrimWhite(Side::Right),
+    Cmd::TrimWhite(Side::Top),
+    Cmd::TrimWhite(Side::Bottom),
+    Cmd::RemoveMarks(MarkKind::Watermark),
+    Cmd::RemoveMarks(MarkKind::Background),
+    Cmd::RemoveMarks(MarkKind::HeaderFooter),
+    Cmd::RemoveMarks(MarkKind::Bates),
+    Cmd::ManageMarks(MarkKind::Watermark),
+    Cmd::ManageMarks(MarkKind::Background),
+    Cmd::ManageMarks(MarkKind::HeaderFooter),
+    Cmd::ManageMarks(MarkKind::Bates),
+    Cmd::BatesFiles,
     Cmd::FromFiles,
     Cmd::ContentsToImages,
     Cmd::ExportImages,
@@ -433,14 +493,50 @@ impl Cmd {
             ExportFormData => ("Formulardaten exportieren", "Export form data"),
             ImportFormData => ("Formulardaten importieren", "Import form data"),
             InsertBlank => ("Leere Seiten einfügen", "Insert blank pages"),
-            InsertFromFile => ("Seiten aus Datei einfügen", "Insert pages from file"),
+            InsertFromFile => ("Seiten einfügen", "Insert pages"),
             AppendFile => ("Datei anhängen", "Append file"),
-            DeletePages => ("Löschen", "Delete"),
+            DeletePages => ("Seiten löschen", "Delete pages"),
             ExtractPages => ("Seiten extrahieren", "Extract pages"),
             MovePageUp => ("Seite nach vorne", "Move page up"),
             MovePageDown => ("Seite nach hinten", "Move page down"),
-            MergeFiles => ("Seiten zusammenführen", "Merge files"),
-            SplitDocument => ("Aufteilen", "Split"),
+            MergeFiles => ("Dateien zusammenführen", "Merge files"),
+            SplitDocument => ("Dokument aufteilen", "Split document"),
+            InsertClipboard => ("Seiten aus der Zwischenablage einfügen", "Insert pages from clipboard"),
+            InsertImages => ("Bilder einfügen", "Insert images"),
+            InsertText => ("Text einfügen", "Insert text file"),
+            InsertRtf => ("RTF einfügen", "Insert RTF"),
+            DeleteBlankPages => ("Leere Seiten löschen", "Delete blank pages"),
+            MovePages => ("Seiten verschieben", "Move pages"),
+            NUp => ("Seiten zusammenführen", "Combine pages (n-up)"),
+            SplitPages => ("Seiten aufteilen", "Split pages"),
+            Overlay => ("Überlagern", "Overlay"),
+            Rotate180 => ("Um 180° drehen", "Rotate 180°"),
+            RemoveCropped => ("Abgeschnittene Inhalte entfernen", "Remove cropped content"),
+            TrimWhite(Side::All) => ("Weiße Ränder abschneiden", "Trim white margins"),
+            TrimWhite(Side::Left) => ("Weiße Ränder abschneiden: nur links", "Trim white margins: left only"),
+            TrimWhite(Side::Right) => {
+                ("Weiße Ränder abschneiden: nur rechts", "Trim white margins: right only")
+            }
+            TrimWhite(Side::Top) => ("Weiße Ränder abschneiden: nur oben", "Trim white margins: top only"),
+            TrimWhite(Side::Bottom) => {
+                ("Weiße Ränder abschneiden: nur unten", "Trim white margins: bottom only")
+            }
+            RemoveMarks(MarkKind::Watermark) => ("Alle Wasserzeichen entfernen", "Remove all watermarks"),
+            RemoveMarks(MarkKind::Background) => ("Hintergrund entfernen", "Remove background"),
+            RemoveMarks(MarkKind::HeaderFooter) => {
+                ("Alle Kopf- und Fußzeilen entfernen", "Remove all headers and footers")
+            }
+            RemoveMarks(MarkKind::Bates) => ("Alle Paginierungen entfernen", "Remove all Bates numbers"),
+            ManageMarks(MarkKind::Watermark) => ("Wasserzeichen verwalten", "Manage watermarks"),
+            ManageMarks(MarkKind::Background) => ("Hintergründe verwalten", "Manage backgrounds"),
+            ManageMarks(MarkKind::HeaderFooter) => {
+                ("Kopf- und Fußzeilen verwalten", "Manage headers and footers")
+            }
+            ManageMarks(MarkKind::Bates) => ("Paginierung verwalten", "Manage Bates numbering"),
+            BatesFiles => {
+                ("Paginierung zu mehreren Dateien hinzufügen", "Add Bates numbering to several files")
+            }
+            FitContent => ("An Inhalt anpassen", "Fit content"),
             DuplicatePages => ("Seiten duplizieren", "Duplicate pages"),
             ReplacePages => ("Seiten ersetzen", "Replace pages"),
             SwapPages => ("Seiten austauschen", "Swap pages"),
@@ -449,8 +545,8 @@ impl Cmd {
             ReversePages => ("Seitenreihenfolge umkehren", "Reverse page order"),
             RotateLeft => ("Links drehen", "Rotate left"),
             RotateRight => ("Rechts drehen", "Rotate right"),
-            RotatePages => ("Drehen", "Rotate"),
-            CropPages => ("Zuschneiden", "Crop"),
+            RotatePages => ("Seiten drehen", "Rotate pages"),
+            CropPages => ("Seiten zuschneiden", "Crop pages"),
             ResizePages => ("Größe ändern", "Resize"),
             Margins => ("Ränder", "Margins"),
             Watermark => ("Wasserzeichen", "Watermark"),
@@ -622,8 +718,73 @@ impl Cmd {
             About => Icon::Logo,
             FileAssociation => Icon::Gear,
             Homepage => Icon::Web,
+            InsertClipboard => Icon::Copy,
+            InsertImages => Icon::Image,
+            InsertText => Icon::TextFile,
+            InsertRtf => Icon::WordFile,
+            DeleteBlankPages => Icon::DeletePage,
+            MovePages => Icon::MoveDown,
+            NUp => Icon::Merge,
+            SplitPages => Icon::Split,
+            Overlay => Icon::Background,
+            Rotate180 => Icon::RotateRight,
+            RemoveCropped => Icon::Crop,
+            TrimWhite(_) => Icon::Margins,
+            RemoveMarks(_) => Icon::Delete,
+            ManageMarks(_) => Icon::Gear,
+            BatesFiles => Icon::InsertFile,
+            FitContent => Icon::FitPage,
             Unavailable(_, _, _, icon) => icon,
         }
+    }
+
+    /// Label inside drop-down menus with a shorter text.
+    pub fn menu_names(self) -> (&'static str, &'static str) {
+        use Cmd::*;
+        match self {
+            Watermark | Background | HeaderFooter | Bates => ("Hinzufügen…", "Add…"),
+            RemoveMarks(MarkKind::Background) => ("Entfernen…", "Remove…"),
+            RemoveMarks(_) => ("Alle entfernen…", "Remove all…"),
+            ManageMarks(_) => ("Verwalten…", "Manage…"),
+            BatesFiles => ("Zu mehreren Dateien hinzufügen…", "Add to several files…"),
+            TrimWhite(Side::All) => ("Alle Ränder", "All margins"),
+            TrimWhite(Side::Left) => ("Nur links", "Left only"),
+            TrimWhite(Side::Right) => ("Nur rechts", "Right only"),
+            TrimWhite(Side::Top) => ("Nur oben", "Top only"),
+            TrimWhite(Side::Bottom) => ("Nur unten", "Bottom only"),
+            Tool(crate::ui::tools::Tool::Crop) => ("Seite zuschneiden", "Crop page"),
+            RotateLeft => ("90° gegen den Uhrzeigersinn", "90° counter-clockwise"),
+            RotateRight => ("90° im Uhrzeigersinn", "90° clockwise"),
+            Rotate180 => ("180°", "180°"),
+            InsertFromFile => ("Seiten einfügen…", "Insert pages…"),
+            InsertBlank => ("Leere Seiten einfügen…", "Insert blank pages…"),
+            InsertClipboard => ("Seiten aus der Zwischenablage einfügen…", "Insert pages from clipboard…"),
+            InsertImages => ("Bilder einfügen…", "Insert images…"),
+            InsertText => ("Text einfügen…", "Insert text…"),
+            InsertRtf => ("RTF einfügen…", "Insert RTF…"),
+            DeletePages => ("Seiten löschen…", "Delete pages…"),
+            DeleteBlankPages => ("Leere Seiten löschen…", "Delete blank pages…"),
+            SplitDocument => ("Dokument aufteilen…", "Split document…"),
+            SplitPages => ("Seiten aufteilen…", "Split pages…"),
+            CropPages => ("Seiten zuschneiden…", "Crop pages…"),
+            RotatePages => ("Seiten drehen…", "Rotate pages…"),
+            other => other.names(),
+        }
+    }
+
+    /// Keyboard shortcut shown in menus.
+    pub fn shortcut(self) -> Option<(&'static str, &'static str)> {
+        use Cmd::*;
+        Some(match self {
+            InsertFromFile => ("Strg+Umschalt+I", "Ctrl+Shift+I"),
+            DeletePages => ("Strg+Umschalt+D", "Ctrl+Shift+D"),
+            CropPages => ("Strg+Umschalt+T", "Ctrl+Shift+T"),
+            FitPage => ("Strg+0", "Ctrl+0"),
+            ActualSize => ("Strg+1", "Ctrl+1"),
+            FitWidth => ("Strg+2", "Ctrl+2"),
+            FitContent => ("Strg+3", "Ctrl+3"),
+            _ => return None,
+        })
     }
 }
 
@@ -670,6 +831,7 @@ pub fn tool_names(tool: Tool) -> (&'static str, &'static str) {
         Tool::FieldList => ("Liste", "List box"),
         Tool::FieldCombo => ("Menü", "Combo box"),
         Tool::FieldSignature => ("Signatur", "Signature field"),
+        Tool::Crop => ("Seite zuschneiden (Werkzeug)", "Crop page (tool)"),
     }
 }
 
@@ -871,6 +1033,7 @@ impl MrPdfApp {
             MovePageDown => self.move_current_page(ctx, false),
             RotateLeft => self.rotate_current(ctx, -90),
             RotateRight => self.rotate_current(ctx, 90),
+            Rotate180 => self.rotate_current(ctx, 180),
             ExportImages => {
                 if let Some(tab) = self.active_tab() {
                     self.dialog = Some(Dialog::ExportImage {

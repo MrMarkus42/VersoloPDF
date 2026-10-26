@@ -2,7 +2,8 @@
 
 use egui::Context;
 
-use super::commands::Cmd;
+use super::commands::{Cmd, Side};
+use super::structure::MarkKind;
 use super::{Dialog, MrPdfApp};
 use crate::geometry::RectF;
 use crate::model::AnnotKind;
@@ -13,7 +14,34 @@ use crate::ui::tab::AnnotRef;
 use crate::ui::tools::Tool;
 
 /// Commands that are not implemented yet; they are shown greyed out.
-pub const PENDING: &[Cmd] = &[];
+pub const PENDING: &[Cmd] = &[
+    Cmd::InsertClipboard,
+    Cmd::InsertImages,
+    Cmd::InsertText,
+    Cmd::InsertRtf,
+    Cmd::DeleteBlankPages,
+    Cmd::MovePages,
+    Cmd::NUp,
+    Cmd::SplitPages,
+    Cmd::Overlay,
+    Cmd::Tool(Tool::Crop),
+    Cmd::RemoveCropped,
+    Cmd::TrimWhite(Side::All),
+    Cmd::TrimWhite(Side::Left),
+    Cmd::TrimWhite(Side::Right),
+    Cmd::TrimWhite(Side::Top),
+    Cmd::TrimWhite(Side::Bottom),
+    Cmd::RemoveMarks(MarkKind::Watermark),
+    Cmd::RemoveMarks(MarkKind::Background),
+    Cmd::RemoveMarks(MarkKind::HeaderFooter),
+    Cmd::RemoveMarks(MarkKind::Bates),
+    Cmd::ManageMarks(MarkKind::Watermark),
+    Cmd::ManageMarks(MarkKind::Background),
+    Cmd::ManageMarks(MarkKind::HeaderFooter),
+    Cmd::ManageMarks(MarkKind::Bates),
+    Cmd::BatesFiles,
+    Cmd::FitContent,
+];
 
 /// Files above this size are refused as attachments.
 const MAX_ATTACHMENT: u64 = 100 * 1024 * 1024;

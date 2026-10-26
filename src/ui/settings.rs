@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::model::{AnnotStyle, StampPreset};
 use crate::ui::i18n::{Language, Strings};
+use crate::ui::pickers::{PresetStore, Unit};
 use crate::ui::tools::Tool;
 use crate::ui::view::{PageLayout, ZoomMode};
 
@@ -25,6 +26,10 @@ pub struct Settings {
     pub styles: Vec<(Tool, AnnotStyle)>,
     pub stamp: StampPreset,
     pub highlight_fields: bool,
+    /// Length unit of page dialogs.
+    pub unit: Unit,
+    /// Saved dialog settings (see [crate::ui::pickers::preset_combo]).
+    pub presets: PresetStore,
 }
 
 impl Default for Settings {
@@ -41,6 +46,8 @@ impl Default for Settings {
             styles: Vec::new(),
             stamp: StampPreset::Approved,
             highlight_fields: true,
+            unit: Unit::Mm,
+            presets: Vec::new(),
         }
     }
 }

@@ -57,6 +57,142 @@ pub fn big_button(ui: &mut Ui, icon: Icon, label: &str, selected: bool, enabled:
     response
 }
 
+fn paint_chevron(ui: &Ui, center: egui::Pos2, color: Color32) {
+    let w = 3.5;
+    ui.painter().line(
+        vec![center + vec2(-w, -1.5), center + vec2(0.0, 2.0), center + vec2(w, -1.5)],
+        Stroke::new(1.3, color),
+    );
+}
+
+/// Large ribbon button that opens a drop-down menu (label with ▾ below).
+pub fn big_menu_button(ui: &mut Ui, icon: Icon, label: &str, enabled: bool, open: bool) -> Response {
+    let font = FontId::proportional(11.5);
+    let widest_word = label
+        .split_whitespace()
+        .map(|w| ui.painter().layout_no_wrap(w.to_string(), font.clone(), Color32::WHITE).size().x)
+        .fold(0.0, f32::max);
+    let size = vec2((widest_word + 10.0).max(54.0), 64.0);
+    let sense = if enabled { Sense::click() } else { Sense::hover() };
+    let (rect, response) = ui.allocate_exact_size(size, sense);
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, label));
+    if ui.is_rect_visible(rect) {
+        button_frame(ui, rect, &response, open);
+        let icon_rect = Rect::from_center_size(rect.center_top() + vec2(0.0, 17.0), Vec2::splat(26.0));
+        let mut painter = ui.painter_at(rect);
+        if !enabled {
+            painter.multiply_opacity(0.4);
+        }
+        icons::paint(&painter, icon_rect, icon, icon_tint(ui, enabled));
+        let text_color = if enabled { ui.visuals().text_color() } else { ui.visuals().weak_text_color() };
+        let galley = ui.painter().layout(label.to_string(), font, text_color, size.x - 4.0);
+        let pos = rect.center_top() + vec2(-galley.size().x / 2.0, 33.0);
+        let text_bottom = pos.y + galley.size().y;
+        ui.painter().galley(pos, galley, text_color);
+        paint_chevron(
+            ui,
+            egui::pos2(rect.center().x, (text_bottom + 4.0).min(rect.bottom() - 3.0)),
+            text_color,
+        );
+    }
+    response
+}
+
+/// Small ribbon button with ▾ that opens a drop-down menu.
+pub fn small_menu_button(ui: &mut Ui, icon: Icon, label: &str, enabled: bool, open: bool) -> Response {
+    let font = FontId::proportional(12.5);
+    let text_w = ui.painter().layout_no_wrap(label.to_string(), font.clone(), Color32::WHITE).size().x;
+    let size = vec2(text_w + 42.0, 21.0);
+    let sense = if enabled { Sense::click() } else { Sense::hover() };
+    let (rect, response) = ui.allocate_exact_size(size, sense);
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, label));
+    if ui.is_rect_visible(rect) {
+        button_frame(ui, rect, &response, open);
+        let mut painter = ui.painter_at(rect);
+        if !enabled {
+            painter.multiply_opacity(0.4);
+        }
+        icons::paint(
+            &painter,
+            Rect::from_min_size(rect.min + vec2(3.0, 2.5), Vec2::splat(16.0)),
+            icon,
+            icon_tint(ui, enabled),
+        );
+        let color = if enabled { ui.visuals().text_color() } else { ui.visuals().weak_text_color() };
+        ui.painter().text(rect.left_center() + vec2(24.0, 0.0), Align2::LEFT_CENTER, label, font, color);
+        paint_chevron(ui, egui::pos2(rect.right() - 8.0, rect.center().y), color);
+    }
+    response
+}
+
+/// One row of a drop-down menu: icon, label, optional shortcut and ▸ for
+/// sub menus.
+pub fn menu_item(
+    ui: &mut Ui,
+    icon: Icon,
+    label: &str,
+    shortcut: Option<&str>,
+    enabled: bool,
+    checked: bool,
+    submenu: bool,
+) -> Response {
+    let font = FontId::proportional(13.0);
+    let text_w = ui.painter().layout_no_wrap(label.to_string(), font.clone(), Color32::WHITE).size().x;
+    let sc_w = shortcut.map_or(0.0, |s| {
+        ui.painter().layout_no_wrap(s.to_string(), FontId::proportional(12.0), Color32::WHITE).size().x + 24.0
+    });
+    // Rows share one width (popups offer a large available width).
+    let width = (text_w + sc_w + 52.0).max(ui.available_width().min(330.0)).max(220.0);
+    let sense = if enabled { Sense::click() } else { Sense::hover() };
+    let (rect, response) = ui.allocate_exact_size(vec2(width, 26.0), sense);
+    response.widget_info(|| WidgetInfo::selected(WidgetType::Button, enabled, checked, label));
+    if ui.is_rect_visible(rect) {
+        if enabled && response.hovered() {
+            ui.painter().rect_filled(rect, 2.0, theme::ACCENT.gamma_multiply(0.18));
+        }
+        let mut painter = ui.painter_at(rect);
+        if !enabled {
+            painter.multiply_opacity(0.4);
+        }
+        if checked {
+            ui.painter().text(
+                rect.left_center() + vec2(4.0, 0.0),
+                Align2::LEFT_CENTER,
+                "✔",
+                FontId::proportional(11.0),
+                ui.visuals().text_color(),
+            );
+        }
+        icons::paint(
+            &painter,
+            Rect::from_min_size(rect.min + vec2(16.0, 4.0), Vec2::splat(18.0)),
+            icon,
+            icon_tint(ui, enabled),
+        );
+        let color = if enabled { ui.visuals().text_color() } else { ui.visuals().weak_text_color() };
+        ui.painter().text(rect.left_center() + vec2(42.0, 0.0), Align2::LEFT_CENTER, label, font, color);
+        if let Some(sc) = shortcut {
+            ui.painter().text(
+                rect.right_center() - vec2(10.0, 0.0),
+                Align2::RIGHT_CENTER,
+                sc.to_uppercase(),
+                FontId::proportional(11.5),
+                ui.visuals().weak_text_color(),
+            );
+        }
+        if submenu {
+            ui.painter().text(
+                rect.right_center() - vec2(8.0, 0.0),
+                Align2::RIGHT_CENTER,
+                "›",
+                FontId::proportional(15.0),
+                color,
+            );
+        }
+    }
+    response
+}
+
 /// Small ribbon button with icon and label in one row.
 pub fn small_button(ui: &mut Ui, icon: Icon, label: &str, selected: bool, enabled: bool) -> Response {
     let font = FontId::proportional(12.5);

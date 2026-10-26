@@ -48,6 +48,8 @@ pub enum Tool {
     FieldList,
     FieldCombo,
     FieldSignature,
+    /// Draw a rectangle to crop the page (Seite zuschneiden).
+    Crop,
 }
 
 /// How a tool is operated on the page.
@@ -112,6 +114,7 @@ impl Tool {
             Tool::FieldList => Icon::ListBox,
             Tool::FieldCombo => Icon::ComboBox,
             Tool::FieldSignature => Icon::Signature,
+            Tool::Crop => Icon::Crop,
         }
     }
 
@@ -138,7 +141,8 @@ impl Tool {
             | Tool::FieldRadio
             | Tool::FieldList
             | Tool::FieldCombo
-            | Tool::FieldSignature => Gesture::Rect,
+            | Tool::FieldSignature
+            | Tool::Crop => Gesture::Rect,
             Tool::Line | Tool::Arrow | Tool::MeasureDistance | Tool::Callout => Gesture::Line,
             Tool::Pencil | Tool::Signature => Gesture::Freehand,
             Tool::Polygon | Tool::Polyline | Tool::Cloud | Tool::MeasurePerimeter | Tool::MeasureArea => {
