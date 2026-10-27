@@ -37,12 +37,9 @@ pub enum Unavailable {
     Barcodes,
     Guides,
     Cloud,
-    Portfolio,
     WebImport,
     ThinLines,
-    Transitions,
     SnapObjects,
-    Windows,
     Pane,
     Highlighting,
 }
@@ -91,9 +88,6 @@ impl Unavailable {
                 "Cloud-Speicher und SharePoint werden nicht unterstützt. Bitte lokale Dateien verwenden.",
                 "Cloud storage and SharePoint are not supported. Please use local files.",
             ),
-            Unavailable::Portfolio => {
-                ("PDF-Portfolios werden nicht unterstützt.", "PDF portfolios are not supported.")
-            }
             Unavailable::WebImport => (
                 "Das Umwandeln von Web-Seiten und E-Mails in PDF wird nicht unterstützt.",
                 "Converting web pages and e-mails to PDF is not supported.",
@@ -102,17 +96,9 @@ impl Unavailable {
                 "Die Darstellung mit dünnen Linien bietet die verwendete PDF-Bibliothek nicht an.",
                 "The PDF library used does not offer thin line display.",
             ),
-            Unavailable::Transitions => (
-                "MrPDF hat keinen Präsentationsmodus mit Seitenübergängen.",
-                "MrPDF has no presentation mode with page transitions.",
-            ),
             Unavailable::SnapObjects => (
                 "Einrasten ist am Gitter und an Hilfslinien möglich, nicht an Objekten.",
                 "Snapping works at the grid and guides, not at objects.",
-            ),
-            Unavailable::Windows => (
-                "MrPDF zeigt alle Dokumente als Tabs in einem Fenster.",
-                "MrPDF shows all documents as tabs in one window.",
             ),
             Unavailable::Pane => ("Diese Leiste gibt es in MrPDF nicht.", "MrPDF does not have this pane."),
             Unavailable::Highlighting => (
@@ -1152,8 +1138,15 @@ impl MrPdfApp {
             ToggleSidebar => self.settings.show_sidebar = !self.settings.show_sidebar,
             ToggleProperties => self.settings.show_properties = !self.settings.show_properties,
             Fullscreen => {
-                let full = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
-                ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!full));
+                // "Vollbild" shows the document page by page (with transitions).
+                if self.presentation.is_some() {
+                    self.stop_presentation(ctx);
+                } else if !self.tabs.is_empty() {
+                    self.start_presentation(ctx);
+                } else {
+                    let full = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!full));
+                }
             }
             DarkMode => {
                 // The button decides by itself: it ends "Dunkler Modus aus System".

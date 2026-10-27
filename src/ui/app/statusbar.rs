@@ -4,70 +4,21 @@ use egui::{Panel, RichText, Ui};
 
 use super::MrPdfApp;
 use crate::ui::icons::Icon;
-use crate::ui::theme;
 use crate::ui::view::{self, ZoomMode};
 use crate::ui::widgets::icon_button;
 
 impl MrPdfApp {
     pub(super) fn tab_bar(&mut self, ui: &mut Ui) {
-        // "Tab-Leiste verbergen, wenn nur ein Dokument geöffnet ist".
-        if self.tabs.is_empty() || (self.tabs.len() == 1 && self.settings.hide_single_tab) {
+        // "Tab-Leiste verbergen, wenn nur ein Dokument geöffnet ist"; with
+        // several tab groups every group has its own bar.
+        let main_tabs = self.tabs.iter().filter(|t| t.window == 0).count();
+        if main_tabs == 0
+            || (main_tabs == 1 && self.settings.hide_single_tab)
+            || self.window_groups(0).len() > 1
+        {
             return;
         }
-        let t = self.t();
-        let ctx = ui.ctx().clone();
-        let mut close = None;
-        Panel::top("doc-tabs").show(ui, |ui| {
-            egui::ScrollArea::horizontal()
-                .id_salt("doc-tabs-scroll")
-                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        for (i, tab) in self.tabs.iter().enumerate() {
-                            let selected = i == self.active;
-                            let frame = egui::Frame::new()
-                                .inner_margin(egui::Margin::symmetric(8, 3))
-                                .corner_radius(egui::CornerRadius { nw: 4, ne: 4, sw: 0, se: 0 })
-                                .fill(if selected {
-                                    ui.visuals().extreme_bg_color
-                                } else {
-                                    ui.visuals().faint_bg_color
-                                })
-                                .stroke(egui::Stroke::new(
-                                    1.0,
-                                    if selected {
-                                        theme::ACCENT
-                                    } else {
-                                        ui.visuals().widgets.noninteractive.bg_stroke.color
-                                    },
-                                ));
-                            frame.show(ui, |ui| {
-                                ui.horizontal(|ui| {
-                                    let title = RichText::new(tab.title());
-                                    let title = if selected { title.strong() } else { title };
-                                    let label = ui.add(egui::Label::new(title).sense(egui::Sense::click()));
-                                    let label = match tab.doc.path() {
-                                        Some(p) => label.on_hover_text(p.display().to_string()),
-                                        None => label,
-                                    };
-                                    if label.clicked() {
-                                        self.active = i;
-                                    }
-                                    if label.middle_clicked() {
-                                        close = Some(i);
-                                    }
-                                    if icon_button(ui, Icon::Close, t.close, false, true).clicked() {
-                                        close = Some(i);
-                                    }
-                                });
-                            });
-                        }
-                    });
-                });
-        });
-        if let Some(i) = close {
-            self.request_close_tab(&ctx, i);
-        }
+        Panel::top("doc-tabs").show(ui, |ui| self.main_tab_strip(ui));
     }
 
     pub(super) fn status_bar(&mut self, ui: &mut Ui) {

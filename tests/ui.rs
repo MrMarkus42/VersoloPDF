@@ -1573,6 +1573,105 @@ fn narrow_window_and_movable_dialog() {
 }
 
 #[test]
+fn transitions_tab_windows_and_portfolio() {
+    use mrpdf::transitions::{Direction, Speed, Style, Transition};
+    use mrpdf::ui::app::Dialog;
+    use mrpdf::ui::app::commands::Cmd;
+    use mrpdf::ui::app::view_cmds::ViewCmd as V;
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let file = sample_file(&dir, 3);
+    let other = dir.path().join("Zweites.pdf");
+    std::fs::write(&other, common::text_pdf(1)).unwrap();
+    let mut h = harness(vec![file, other], false);
+    h.run_steps(12);
+    h.state_mut().set_active_tab(0);
+    h.run_steps(3);
+    let run = |h: &mut Harness<'_, MrPdfApp>, cmd: Cmd| {
+        let ctx = h.ctx.clone();
+        h.state_mut().run(&ctx, cmd);
+        h.run_steps(4);
+    };
+    // Seitenübergänge: dialog, then a wipe on page 2 written into the PDF.
+    run(&mut h, Cmd::View(V::Transitions));
+    assert!(matches!(h.state().dialog(), Some(Dialog::Transitions(_))));
+    save(&mut h, "103-transitions-dialog");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    let wipe = Transition {
+        style: Style::Wipe,
+        direction: Some(Direction::Right),
+        speed: Speed::Slow,
+        advance: None,
+    };
+    h.state_mut().active_tab_mut().unwrap().doc.set_transitions(&[1], wipe, false).unwrap();
+    let read = h.state_mut().active_tab_mut().unwrap().doc.transitions().unwrap();
+    assert_eq!(read[1].style, Style::Wipe);
+    assert_eq!(read[0].style, Style::None);
+    // Vollbild: page by page; the arrow key shows page 2 with the wipe.
+    run(&mut h, Cmd::Fullscreen);
+    assert_eq!(h.state().presentation_page(), Some(0));
+    save(&mut h, "104-presentation");
+    h.key_press(egui::Key::ArrowRight);
+    h.step();
+    h.step();
+    assert_eq!(h.state().presentation_page(), Some(1));
+    save(&mut h, "105-presentation-wipe");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    assert_eq!(h.state().presentation_page(), None);
+    assert_eq!(h.state().active_tab().unwrap().current_page, 1, "the view keeps the page");
+    // Tab groups: the active document into a new group beside the other.
+    run(&mut h, Cmd::View(V::MoveTabNewVertical));
+    let groups: Vec<u32> = (0..2).map(|i| h.state().tab_at(i).unwrap().group).collect();
+    assert_ne!(groups[0], groups[1]);
+    save(&mut h, "106-tab-groups");
+    run(&mut h, Cmd::View(V::MergeGroups));
+    assert!((0..2).all(|i| h.state().tab_at(i).unwrap().group == 0));
+    // A document in its own window, then back.
+    run(&mut h, Cmd::View(V::MoveTabNewWindow));
+    assert!((0..2).any(|i| h.state().tab_at(i).unwrap().window != 0));
+    save(&mut h, "107-tab-window");
+    run(&mut h, Cmd::View(V::MergeWindows));
+    let w = h.state().active_tab().unwrap().window;
+    assert!((0..2).all(|i| h.state().tab_at(i).unwrap().window == w));
+    // Mehrere Tabs verschieben.
+    run(&mut h, Cmd::View(V::MoveTabs));
+    assert!(matches!(h.state().dialog(), Some(Dialog::MoveTabs(_))));
+    save(&mut h, "108-move-tabs");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    // A portfolio shows its file list; a PDF in it opens in a new tab.
+    let files = vec![
+        mrpdf::portfolio::NewFile { name: "Bericht.pdf".into(), data: common::text_pdf(2), modified: None },
+        mrpdf::portfolio::NewFile { name: "Notiz.txt".into(), data: b"Hallo".to_vec(), modified: None },
+    ];
+    let mappe = dir.path().join("Mappe.pdf");
+    std::fs::write(&mappe, mrpdf::portfolio::create(&files, "Mappe", true).unwrap()).unwrap();
+    let ctx = h.ctx.clone();
+    h.state_mut().open_path(&ctx, mappe, None);
+    h.run_steps(6);
+    assert!(h.query_by_label("Bericht.pdf").is_some(), "file list shown");
+    save(&mut h, "109-portfolio");
+    let before = h.state().tab_count();
+    h.get_by_label("Bericht.pdf").click();
+    h.run_steps(2);
+    // The "Öffnen" in the row of the file list (not the toolbar's or the start page's).
+    let list_y = h.get_by_label("Bericht.pdf").rect().top();
+    h.get_all_by_label("Öffnen")
+        .find(|n| (n.rect().top() - list_y).abs() < 80.0 && n.rect().top() < list_y)
+        .unwrap()
+        .click();
+    h.run_steps(8);
+    save(&mut h, "109b-portfolio-open");
+    assert_eq!(h.state().tab_count(), before + 1, "embedded PDF opened: {:?}", h.state().dialog());
+    // "PDF-Portfolio erstellen".
+    run(&mut h, Cmd::View(V::NewPortfolio));
+    assert!(matches!(h.state().dialog(), Some(Dialog::NewPortfolio(_))));
+    save(&mut h, "110-new-portfolio");
+}
+
+#[test]
 fn backstage_and_tool_at_start() {
     let _guard = common::lock();
     let settings = Settings {

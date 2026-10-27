@@ -60,58 +60,25 @@ pub enum ViewCmd {
     ReadFields,
     ReadAnnots,
     ReadFollow,
+    Transitions,
+    MoveTabNewVertical,
+    MoveTabNewHorizontal,
+    MoveTabNewWindow,
+    MoveTabMain,
+    MoveTabs,
+    ArrangeVertical,
+    ArrangeHorizontal,
+    MergeGroups,
+    MergeWindows,
+    NewPortfolio,
+    PortfolioList,
+    PortfolioCover,
+    PortfolioAddFiles,
+    PortfolioAddFolder,
+    PortfolioMark,
 }
 
 impl ViewCmd {
-    pub const ALL: [ViewCmd; 46] = [
-        ViewCmd::LayoutTwoPagesContinuous,
-        ViewCmd::PageGaps,
-        ViewCmd::RightToLeft,
-        ViewCmd::StandardLayout,
-        ViewCmd::SideBySide,
-        ViewCmd::RotateReset,
-        ViewCmd::Rulers,
-        ViewCmd::Grid,
-        ViewCmd::Guides,
-        ViewCmd::Transparency,
-        ViewCmd::PageInfo,
-        ViewCmd::Snap,
-        ViewCmd::SnapGrid,
-        ViewCmd::SnapGuides,
-        ViewCmd::SnapSettings,
-        ViewCmd::ReplaceColors,
-        ViewCmd::AutoScroll,
-        ViewCmd::HighlightLinks,
-        ViewCmd::LoupeWindow,
-        ViewCmd::PanZoom,
-        ViewCmd::SplitHorizontal,
-        ViewCmd::SplitVertical,
-        ViewCmd::SplitGrid,
-        ViewCmd::NewTab,
-        ViewCmd::SortTabs,
-        ViewCmd::CloseOthers,
-        ViewCmd::ReopenClosed,
-        ViewCmd::ResetPanes,
-        ViewCmd::ResetDocPanes,
-        ViewCmd::Design(Design::Standard),
-        ViewCmd::Design(Design::White),
-        ViewCmd::Design(Design::DarkGray),
-        ViewCmd::Design(Design::Black),
-        ViewCmd::CustomizeUi,
-        ViewCmd::SnapshotSettings,
-        ViewCmd::ReadStart,
-        ViewCmd::ReadStop,
-        ViewCmd::ReadBack,
-        ViewCmd::ReadForward,
-        ViewCmd::ReadShow,
-        ViewCmd::ReadPage,
-        ViewCmd::ReadToEnd,
-        ViewCmd::ReadSelection,
-        ViewCmd::ReadFields,
-        ViewCmd::ReadAnnots,
-        ViewCmd::ReadFollow,
-    ];
-
     pub fn names(self) -> (&'static str, &'static str) {
         use ViewCmd::*;
         match self {
@@ -160,6 +127,24 @@ impl ViewCmd {
             ReadFields => ("Formularfelder vorlesen", "Read form fields"),
             ReadAnnots => ("Anmerkungen vorlesen", "Read comments"),
             ReadFollow => ("Beim Vorlesen automatisch blättern", "Follow the reading"),
+            Transitions => ("Seitenübergänge", "Page transitions"),
+            MoveTabNewVertical => ("Neue vertikale Tab-Gruppe", "New vertical tab group"),
+            MoveTabNewHorizontal => ("Neue horizontale Tab-Gruppe", "New horizontal tab group"),
+            MoveTabNewWindow => ("Neues Fenster", "New window"),
+            MoveTabMain => ("Hauptfenster", "Main window"),
+            MoveTabs => ("Mehrere Tabs verschieben…", "Move several tabs…"),
+            ArrangeVertical => ("Vertikal", "Vertical"),
+            ArrangeHorizontal => ("Horizontal", "Horizontal"),
+            MergeGroups => ("Alle Tabs in Tab-Gruppe zusammenfassen", "Merge all tabs into one tab group"),
+            MergeWindows => {
+                ("Alle Tabs in aktivem Fenster zusammenfassen", "Merge all tabs into the active window")
+            }
+            NewPortfolio => ("PDF-Portfolio", "PDF portfolio"),
+            PortfolioList => ("Dateiliste anzeigen", "Show file list"),
+            PortfolioCover => ("Deckblatt anzeigen", "Show cover page"),
+            PortfolioAddFiles => ("Dateien hinzufügen…", "Add files…"),
+            PortfolioAddFolder => ("Ordner hinzufügen…", "Add folder…"),
+            PortfolioMark => ("Als PDF-Portfolio anzeigen", "Show as PDF portfolio"),
         }
     }
 
@@ -198,6 +183,15 @@ impl ViewCmd {
             ReadFields => Icon::Form,
             ReadAnnots => Icon::Comments,
             ReadFollow => Icon::Continuous,
+            Transitions => Icon::Next,
+            MoveTabNewVertical | ArrangeVertical => Icon::TwoPages,
+            MoveTabNewHorizontal | ArrangeHorizontal => Icon::Continuous,
+            MoveTabNewWindow | MoveTabMain | MoveTabs => Icon::Export,
+            MergeGroups | MergeWindows => Icon::Merge,
+            NewPortfolio | PortfolioList | PortfolioMark => Icon::Attachment,
+            PortfolioCover => Icon::SinglePage,
+            PortfolioAddFiles => Icon::InsertFile,
+            PortfolioAddFolder => Icon::Open,
         }
     }
 
@@ -251,7 +245,18 @@ impl MrPdfApp {
             | SnapSettings | HighlightLinks | PageGaps | RightToLeft | StandardLayout | SideBySide
             | ReadFields | ReadAnnots | ReadFollow => true,
             ReopenClosed => !self.closed_files.is_empty(),
-            SortTabs | CloseOthers => self.tabs.len() > 1,
+            SortTabs | CloseOthers | MoveTabs => self.tabs.len() > 1,
+            NewPortfolio => true,
+            MoveTabMain => self.tabs.get(self.active).is_some_and(|t| t.window != 0),
+            MergeGroups => {
+                let w = self.tabs.get(self.active).map_or(0, |t| t.window);
+                self.window_groups(w).len() > 1
+            }
+            MergeWindows => !self.extra_windows().is_empty(),
+            ArrangeVertical | ArrangeHorizontal => self.window_groups(0).len() > 1,
+            PortfolioList | PortfolioCover | PortfolioAddFiles | PortfolioAddFolder => {
+                self.tabs.get(self.active).is_some_and(|t| t.portfolio.is_some_and(|(_, p)| p))
+            }
             ReadStop | ReadBack | ReadForward | ReadShow => self.speech.is_some(),
             ReadSelection => self.active_tab().is_some_and(|t| t.selection.is_some()),
             _ => has_doc,
@@ -288,6 +293,11 @@ impl MrPdfApp {
             ReadFields => s.read_fields,
             ReadAnnots => s.read_annots,
             ReadFollow => s.read_follow,
+            ArrangeVertical => s.tab_groups_vertical,
+            ArrangeHorizontal => !s.tab_groups_vertical,
+            PortfolioList => tab.is_some_and(|t| !t.show_cover),
+            PortfolioCover => tab.is_some_and(|t| t.show_cover),
+            PortfolioMark => tab.is_some_and(|t| t.portfolio.is_some_and(|(_, p)| p)),
             _ => false,
         }
     }
@@ -410,6 +420,44 @@ impl MrPdfApp {
             ReadFields => s.read_fields = !s.read_fields,
             ReadAnnots => s.read_annots = !s.read_annots,
             ReadFollow => s.read_follow = !s.read_follow,
+            Transitions => self.open_transitions_dialog(),
+            MoveTabNewVertical | MoveTabNewHorizontal | MoveTabNewWindow | MoveTabMain => {
+                use super::windows::MoveTarget;
+                let target = match cmd {
+                    MoveTabNewVertical => MoveTarget::NewVerticalGroup,
+                    MoveTabNewHorizontal => MoveTarget::NewHorizontalGroup,
+                    MoveTabNewWindow => MoveTarget::NewWindow,
+                    _ => MoveTarget::MainWindow,
+                };
+                if let Some(id) = self.tabs.get(self.active).map(|t| t.id) {
+                    self.move_tabs(&[id], target);
+                }
+            }
+            MoveTabs => self.open_move_tabs(),
+            ArrangeVertical => s.tab_groups_vertical = true,
+            ArrangeHorizontal => s.tab_groups_vertical = false,
+            MergeGroups => self.merge_groups(),
+            MergeWindows => self.merge_windows(),
+            NewPortfolio => {
+                self.backstage = None;
+                self.open_new_portfolio();
+            }
+            PortfolioList | PortfolioCover => {
+                if let Some(tab) = self.tab() {
+                    tab.show_cover = cmd == PortfolioCover;
+                }
+            }
+            PortfolioAddFiles | PortfolioAddFolder => {
+                let index = self.active;
+                self.portfolio_add(ctx, index, cmd == PortfolioAddFolder);
+            }
+            PortfolioMark => {
+                let on = !self.tabs.get(self.active).is_some_and(|t| t.portfolio.is_some_and(|(_, p)| p));
+                self.edit(ctx, |tab| tab.doc.set_portfolio(on));
+                if let Some(tab) = self.tab() {
+                    tab.show_cover = false;
+                }
+            }
         }
     }
 

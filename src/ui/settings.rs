@@ -140,6 +140,23 @@ pub struct Settings {
     pub read_fields: bool,
     pub read_annots: bool,
     pub read_follow: bool,
+
+    // --- "Vollbild" (presentation) ---
+    /// Background colour around the page.
+    pub fs_background: [u8; 3],
+    /// Transition used for pages without one ("Standardübergang").
+    pub fs_default_transition: crate::transitions::Transition,
+    /// "Immer den Standardübergang verwenden".
+    pub fs_always_default: bool,
+    /// "Nach letzter Seite wiederholen".
+    pub fs_loop: bool,
+    /// "Automatisch weiter nach n Sekunden" (0: off).
+    pub fs_auto_seconds: u32,
+    /// "Navigationsleiste anzeigen".
+    pub fs_nav_bar: bool,
+    /// Ribbon tab "Ansicht": document tabs grouped side by side (true) or
+    /// on top of each other ("Tabs anordnen").
+    pub tab_groups_vertical: bool,
 }
 
 /// Folder offered by "Speichern unter".
@@ -251,6 +268,16 @@ impl Default for Settings {
             read_fields: false,
             read_annots: false,
             read_follow: true,
+            fs_background: [0, 0, 0],
+            fs_default_transition: crate::transitions::Transition {
+                style: crate::transitions::Style::Replace,
+                ..Default::default()
+            },
+            fs_always_default: false,
+            fs_loop: false,
+            fs_auto_seconds: 0,
+            fs_nav_bar: true,
+            tab_groups_vertical: true,
         }
     }
 }
@@ -339,6 +366,10 @@ impl Settings {
             if self.auto_scroll_speed.is_finite() { self.auto_scroll_speed.clamp(5.0, 2000.0) } else { 60.0 };
         self.read_volume = self.read_volume.min(100);
         self.read_rate = self.read_rate.clamp(-10, 10);
+        self.fs_auto_seconds = self.fs_auto_seconds.min(3600);
+        if let Some(a) = self.fs_default_transition.advance {
+            self.fs_default_transition.advance = (a.is_finite() && a > 0.0).then_some(a.min(3600.0));
+        }
     }
 
     /// Writes the settings to a file (RON).

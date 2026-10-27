@@ -30,6 +30,7 @@ pub mod optimize;
 pub mod outline;
 pub mod pages;
 pub mod pdf_edit;
+pub mod portfolio;
 pub mod print;
 pub mod print_layout;
 pub mod redact;
@@ -38,6 +39,7 @@ pub mod search;
 pub mod security;
 pub mod speech;
 pub mod text;
+pub mod transitions;
 pub mod ui;
 pub mod xfdf;
 

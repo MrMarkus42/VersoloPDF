@@ -14,6 +14,8 @@ mod marks_dialogs;
 mod optimize_dialog;
 mod outline_tools;
 mod page_dialogs;
+mod portfolio_view;
+pub mod presentation;
 mod preview;
 mod print_dialog;
 mod properties;
@@ -26,6 +28,7 @@ mod sidebar;
 mod statusbar;
 mod structure;
 pub mod view_cmds;
+pub mod windows;
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -228,6 +231,12 @@ pub enum Dialog {
     Optimize(Box<optimize_dialog::OptimizeState>),
     /// "Speicherverbrauch untersuchen".
     SpaceUsage(Box<crate::optimize::Usage>),
+    /// "Seitenübergänge".
+    Transitions(Box<presentation::TransState>),
+    /// "Mehrere Tabs verschieben".
+    MoveTabs(Box<windows::MoveTabsState>),
+    /// "PDF-Portfolio erstellen".
+    NewPortfolio(Box<portfolio_view::NewPortfolioState>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -302,6 +311,12 @@ pub struct MrPdfApp {
     loupe: Option<(egui::TextureHandle, (usize, i32, i32, u32))>,
     /// "Ausschnitt und Vergrößerung": page picture and what it shows.
     pan_zoom_tex: Option<(egui::TextureHandle, PictureKey)>,
+    /// Portfolio file lists per tab id: (revision, files).
+    portfolio_cache: std::collections::HashMap<u64, (u64, Vec<crate::portfolio::Entry>)>,
+    /// Tab last shown in each (window, group).
+    group_focus: std::collections::HashMap<(u32, u32), u64>,
+    /// "Vollbild": the running presentation.
+    presentation: Option<presentation::Presentation>,
     /// "Vorlesen": the running speech output.
     speech: Option<crate::speech::Reader>,
     /// Position of the dialog window after the user moved it (per kind of dialog).
@@ -375,6 +390,9 @@ impl MrPdfApp {
             auto_scroll: None,
             loupe: None,
             pan_zoom_tex: None,
+            presentation: None,
+            group_focus: Default::default(),
+            portfolio_cache: Default::default(),
             speech: None,
             dialog_pos: None,
             ribbon_widths: Default::default(),
@@ -451,6 +469,16 @@ impl MrPdfApp {
 
     pub fn tool(&self) -> Tool {
         self.tool
+    }
+
+    /// Page shown by the running presentation ("Vollbild").
+    pub fn presentation_page(&self) -> Option<usize> {
+        self.presentation.as_ref().map(|p| p.page)
+    }
+
+    /// Tab by index (all windows).
+    pub fn tab_at(&self, index: usize) -> Option<&DocTab> {
+        self.tabs.get(index)
     }
 
     pub fn dialog(&self) -> Option<&Dialog> {
@@ -647,8 +675,7 @@ impl MrPdfApp {
             }
         }
         if ctx.input(|i| i.key_pressed(Key::F11)) {
-            let full = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
-            ctx.send_viewport_cmd(ViewportCommand::Fullscreen(!full));
+            self.run(ctx, commands::Cmd::Fullscreen);
         }
         if ctx.input(|i| i.key_pressed(Key::F4)) {
             self.settings.show_sidebar = !self.settings.show_sidebar;
@@ -694,6 +721,27 @@ impl MrPdfApp {
     }
 
     fn central(&mut self, ui: &mut Ui) {
+        if self.window_groups(0).len() > 1 {
+            self.central_groups(ui);
+            return;
+        }
+        let group = self.window_groups(0).first().copied().unwrap_or(0);
+        match self.shown_in_group(0, group) {
+            Some(i) => self.doc_view(ui, i),
+            None => self.start_page(ui),
+        }
+    }
+
+    /// The document view of tab `index`.
+    pub(super) fn doc_view(&mut self, ui: &mut Ui, index: usize) {
+        // A portfolio shows its file list (until "Deckblatt anzeigen").
+        if let Some(tab) = self.tabs.get_mut(index)
+            && !tab.show_cover
+            && tab.is_portfolio()
+        {
+            self.portfolio_ui(ui, index);
+            return;
+        }
         let t = self.t();
         let ctx = ui.ctx().clone();
         let mut budget = Budget::new(Duration::from_millis(40));
@@ -702,7 +750,7 @@ impl MrPdfApp {
         let stamp = self.settings.stamp;
         let highlight_fields = self.settings.highlight_fields;
         let view = self.view_options();
-        if let Some(tab) = self.tabs.get_mut(self.active) {
+        if let Some(tab) = self.tabs.get_mut(index) {
             let mut cx = CanvasCtx {
                 tool,
                 style,
@@ -798,6 +846,15 @@ impl eframe::App for MrPdfApp {
         self.poll_download(&ctx);
         self.recovery_tick(&ctx);
         self.view_tick(&ctx);
+        self.note_group_focus();
+        // "Vollbild": only the presentation.
+        if self.presentation.is_some() {
+            self.handle_close_request(&ctx);
+            egui::CentralPanel::no_frame().show(ui, |ui| self.presentation_ui(ui));
+            self.dialogs(&ctx);
+            self.process_events(&ctx);
+            return;
+        }
         self.shortcuts(&ctx);
         self.handle_close_request(&ctx);
 
@@ -819,6 +876,7 @@ impl eframe::App for MrPdfApp {
             egui::CentralPanel::no_frame().show(ui, |ui| self.central(ui));
             self.view_windows(&ctx);
         }
+        self.doc_windows(&ctx);
         self.dialogs(&ctx);
         self.process_events(&ctx);
         self.update_title(&ctx);

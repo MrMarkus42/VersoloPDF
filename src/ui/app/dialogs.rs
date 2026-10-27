@@ -356,6 +356,21 @@ impl MrPdfApp {
                         outcome = o;
                         action = a;
                     }
+                    Dialog::Transitions(state) => {
+                        let (o, a) = self.transitions_dialog(ui, state);
+                        outcome = o;
+                        action = a;
+                    }
+                    Dialog::MoveTabs(state) => {
+                        let (o, a) = self.move_tabs_dialog(ui, state);
+                        outcome = o;
+                        action = a;
+                    }
+                    Dialog::NewPortfolio(state) => {
+                        let (o, a) = self.new_portfolio_dialog(ui, state);
+                        outcome = o;
+                        action = a;
+                    }
                     Dialog::Settings(state) => {
                         let (o, a) = self.settings_dialog(ui, state);
                         outcome = o;

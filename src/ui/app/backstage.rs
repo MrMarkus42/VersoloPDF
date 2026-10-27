@@ -154,7 +154,12 @@ fn items(page: Page) -> &'static [Item] {
                 &[
                     item("Mit leeren Seiten", "With blank pages", Icon::New, New(NewKind::Blank)),
                     group("Dateien zusammenfassen", "Combine files", Icon::Merge, Run(Cmd::FromFiles)),
-                    item("PDF-Portfolio", "PDF portfolio", Icon::Attachment, Not(Unavailable::Portfolio)),
+                    item(
+                        "PDF-Portfolio",
+                        "PDF portfolio",
+                        Icon::Attachment,
+                        Run(Cmd::View(super::view_cmds::ViewCmd::NewPortfolio)),
+                    ),
                     group("Aus Text", "From text", Icon::TextFile, New(NewKind::Text(TextKind::Plain))),
                     item(
                         "Aus Markdown",

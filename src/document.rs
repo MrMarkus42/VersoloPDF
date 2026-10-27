@@ -1178,6 +1178,26 @@ impl Document {
         self.edit_bytes("page labels", |b, pw| pages::set_page_labels(b, pw, start, style, prefix, first))
     }
 
+    /// Page transitions of all pages ("Seitenübergänge").
+    pub fn transitions(&mut self) -> Result<Vec<crate::transitions::Transition>> {
+        self.sync_bytes()?;
+        crate::transitions::read(&self.bytes, self.password.as_deref())
+    }
+
+    /// Sets the transition of `pages` (one undo step).
+    pub fn set_transitions(
+        &mut self,
+        pages: &[usize],
+        t: crate::transitions::Transition,
+        random: bool,
+    ) -> Result<()> {
+        for &p in pages {
+            self.check_page(p)?;
+        }
+        self.require(self.permissions().modify)?;
+        self.edit_bytes("page transitions", |b, pw| crate::transitions::write(b, pw, pages, t, random))
+    }
+
     /// All page label ranges ("Seiten nummerieren").
     pub fn page_label_ranges(&mut self) -> Result<Vec<pages::LabelRange>> {
         self.sync_bytes()?;
@@ -1775,6 +1795,45 @@ impl Document {
     /// Embedded files as (name, size in bytes).
     pub fn attachments(&self) -> Vec<(String, usize)> {
         self.pdf.attachments().iter().map(|a| (a.name(), a.len())).collect()
+    }
+
+    /// True if the document is a PDF portfolio.
+    pub fn is_portfolio(&mut self) -> bool {
+        if self.sync_bytes().is_err() {
+            return false;
+        }
+        crate::portfolio::is_portfolio(&self.bytes, self.password.as_deref())
+    }
+
+    /// The files of a portfolio (embedded files with size and date).
+    pub fn portfolio_entries(&mut self) -> Result<Vec<crate::portfolio::Entry>> {
+        self.sync_bytes()?;
+        crate::portfolio::entries(&self.bytes, self.password.as_deref())
+    }
+
+    /// Marks the document as portfolio (or not).
+    pub fn set_portfolio(&mut self, on: bool) -> Result<()> {
+        self.require(self.permissions().modify)?;
+        self.edit_bytes("portfolio", |b, pw| crate::portfolio::set_portfolio(b, pw, on))
+    }
+
+    /// Index of the embedded file `name` (for saving or deleting it).
+    pub fn attachment_index(&self, name: &str) -> Option<usize> {
+        self.attachments().iter().position(|(n, _)| n == name)
+    }
+
+    /// Embeds a file read into memory (portfolios).
+    pub fn add_attachment_bytes(&mut self, name: &str, bytes: &[u8]) -> Result<()> {
+        self.require(self.permissions().modify)?;
+        if bytes.len() as u64 > crate::portfolio::MAX_FILE {
+            return Err(Error::FileTooLarge { size: bytes.len() as u64, limit: crate::portfolio::MAX_FILE });
+        }
+        let name = name.to_string();
+        let bytes = bytes.to_vec();
+        self.edit_engine("attach file", move |pdf| {
+            pdf.attachments_mut().create_attachment_from_bytes(&name, &bytes)?;
+            Ok(())
+        })
     }
 
     /// Writes an embedded file to disk. Attachments are never opened or executed.

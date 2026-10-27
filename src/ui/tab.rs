@@ -217,6 +217,15 @@ pub struct DocTab {
     pub active_pane: usize,
     /// Pane being drawn (for widget ids).
     pub drawing_pane: usize,
+    /// Window showing this document (0: main window) and its tab group.
+    pub window: u32,
+    pub group: u32,
+    /// Portfolio: (document revision, is portfolio) as last checked.
+    pub portfolio: Option<(u64, bool)>,
+    /// Portfolio: the cover page is shown instead of the file list.
+    pub show_cover: bool,
+    /// Portfolio: selected file.
+    pub portfolio_sel: Option<usize>,
 }
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
@@ -266,6 +275,24 @@ impl DocTab {
             panes: Vec::new(),
             active_pane: 0,
             drawing_pane: 0,
+            window: 0,
+            group: 0,
+            portfolio: None,
+            show_cover: false,
+            portfolio_sel: None,
+        }
+    }
+
+    /// True if the document is a PDF portfolio (checked once per revision).
+    pub fn is_portfolio(&mut self) -> bool {
+        let rev = self.doc.revision();
+        match self.portfolio {
+            Some((r, v)) if r == rev => v,
+            _ => {
+                let v = self.doc.is_portfolio();
+                self.portfolio = Some((rev, v));
+                v
+            }
         }
     }
 

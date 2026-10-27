@@ -962,6 +962,76 @@ fn settings_page(ui: &mut Ui, de: bool, s: &mut SettingsPage, d: &mut Settings) 
                     ui,
                     tr(de, "F11 schaltet das Vollbild ein und aus.", "F11 switches full screen on and off."),
                 );
+                ui.checkbox(
+                    &mut d.fs_nav_bar,
+                    tr(de, "Navigationsleiste anzeigen", "Show the navigation bar"),
+                );
+                ui.checkbox(
+                    &mut d.fs_loop,
+                    tr(de, "Nach letzter Seite wiederholen", "Repeat after the last page"),
+                );
+                ui.horizontal(|ui| {
+                    let mut auto = d.fs_auto_seconds > 0;
+                    if ui
+                        .checkbox(&mut auto, tr(de, "Automatisch weiter nach", "Advance automatically after"))
+                        .changed()
+                    {
+                        d.fs_auto_seconds = if auto { 5 } else { 0 };
+                    }
+                    ui.add_enabled(auto, egui::DragValue::new(&mut d.fs_auto_seconds).range(1..=3600));
+                    ui.label(tr(de, "Sekunden", "seconds"));
+                });
+                ui.horizontal(|ui| {
+                    ui.label(tr(de, "Hintergrund:", "Background:"));
+                    ui.color_edit_button_srgb(&mut d.fs_background);
+                });
+            });
+            section(ui, tr(de, "Übergang", "Transition"), |ui| {
+                ui.checkbox(
+                    &mut d.fs_always_default,
+                    tr(de, "Immer den Standardübergang verwenden", "Always use the default transition"),
+                );
+                ui.horizontal(|ui| {
+                    use crate::transitions::Style;
+                    ui.label(tr(de, "Standardübergang:", "Default transition:"));
+                    let (g, e) = d.fs_default_transition.style.names();
+                    egui::ComboBox::from_id_salt("set-fs-trans")
+                        .selected_text(tr(de, g, e))
+                        .width(200.0)
+                        .show_ui(ui, |ui| {
+                            for s in Style::ALL.into_iter().skip(1) {
+                                let (g, e) = s.names();
+                                if ui
+                                    .selectable_label(d.fs_default_transition.style == s, tr(de, g, e))
+                                    .clicked()
+                                {
+                                    d.fs_default_transition.style = s;
+                                    d.fs_default_transition.direction = None;
+                                }
+                            }
+                        });
+                });
+                let dirs = d.fs_default_transition.style.directions();
+                if !dirs.is_empty() {
+                    ui.horizontal(|ui| {
+                        ui.label(tr(de, "Richtung:", "Direction:"));
+                        let shown = d.fs_default_transition.direction_or_default();
+                        let text = shown.map_or("", |x| tr(de, x.names().0, x.names().1));
+                        egui::ComboBox::from_id_salt("set-fs-dir").selected_text(text).width(200.0).show_ui(
+                            ui,
+                            |ui| {
+                                for x in dirs {
+                                    let (g, e) = x.names();
+                                    ui.selectable_value(
+                                        &mut d.fs_default_transition.direction,
+                                        Some(*x),
+                                        tr(de, g, e),
+                                    );
+                                }
+                            },
+                        );
+                    });
+                }
             });
         }
         Cat::Tools => {

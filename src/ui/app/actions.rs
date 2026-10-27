@@ -135,7 +135,12 @@ impl MrPdfApp {
     }
 
     pub fn add_tab(&mut self, doc: Document) {
-        let tab = DocTab::new(doc, self.settings.zoom_mode, self.settings.layout);
+        let mut tab = DocTab::new(doc, self.settings.zoom_mode, self.settings.layout);
+        // A new document opens in the window and tab group of the active one.
+        if let Some(active) = self.tabs.get(self.active) {
+            tab.window = active.window;
+            tab.group = active.group;
+        }
         self.tabs.push(tab);
         self.active = self.tabs.len() - 1;
         // A new or opened document is shown at once (leaves the backstage).

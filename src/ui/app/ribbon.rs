@@ -722,11 +722,7 @@ impl MrPdfApp {
                         Entry::C(v(V::SnapSettings)),
                     ],
                 );
-                self.icon(
-                    ui,
-                    ctx,
-                    UA(Unavailable::Transitions, "Seitenübergänge", "Page transitions", Icon::Next),
-                );
+                self.icon(ui, ctx, v(V::Transitions));
                 self.icon(ui, ctx, v(V::AutoScroll));
             });
             ui.vertical(|ui| {
@@ -753,32 +749,25 @@ impl MrPdfApp {
                     ("Dokument-Tabs", "Document tabs"),
                     &[
                         Entry::C(v(V::NewTab)),
-                        Entry::C(UA(
-                            Unavailable::Windows,
-                            "Tab verschieben nach",
-                            "Move tab to",
+                        Entry::Sub(
                             Icon::Export,
-                        )),
-                        Entry::C(UA(
-                            Unavailable::Windows,
-                            "Mehrere Tabs verschieben",
-                            "Move several tabs",
-                            Icon::Export,
-                        )),
-                        Entry::C(UA(Unavailable::Windows, "Tabs anordnen", "Arrange tabs", Icon::Thumbnails)),
+                            ("Tab verschieben nach", "Move tab to"),
+                            &[
+                                Cmd::View(V::MoveTabNewHorizontal),
+                                Cmd::View(V::MoveTabNewVertical),
+                                Cmd::View(V::MoveTabNewWindow),
+                                Cmd::View(V::MoveTabMain),
+                            ],
+                        ),
+                        Entry::C(v(V::MoveTabs)),
+                        Entry::Sub(
+                            Icon::Thumbnails,
+                            ("Tabs anordnen", "Arrange tabs"),
+                            &[Cmd::View(V::ArrangeHorizontal), Cmd::View(V::ArrangeVertical)],
+                        ),
                         Entry::Sep,
-                        Entry::C(UA(
-                            Unavailable::Windows,
-                            "Alle Tabs in Tab-Gruppe zusammenfassen",
-                            "Merge all tabs into tab group",
-                            Icon::Merge,
-                        )),
-                        Entry::C(UA(
-                            Unavailable::Windows,
-                            "Alle Tabs in aktivem Fenster zusammenfassen",
-                            "Merge all tabs into active window",
-                            Icon::Merge,
-                        )),
+                        Entry::C(v(V::MergeGroups)),
+                        Entry::C(v(V::MergeWindows)),
                         Entry::Sep,
                         Entry::C(v(V::SortTabs)),
                         Entry::Sep,
@@ -826,7 +815,22 @@ impl MrPdfApp {
                         Entry::C(v(V::ResetDocPanes)),
                     ],
                 );
-                self.small(ui, ctx, UA(Unavailable::Portfolio, "Portfolio", "Portfolio", Icon::Attachment));
+                self.small_menu(
+                    ui,
+                    ctx,
+                    Icon::Attachment,
+                    ("Portfolio", "Portfolio"),
+                    &[
+                        Entry::C(v(V::PortfolioList)),
+                        Entry::C(v(V::PortfolioCover)),
+                        Entry::Sep,
+                        Entry::C(v(V::PortfolioAddFiles)),
+                        Entry::C(v(V::PortfolioAddFolder)),
+                        Entry::Sep,
+                        Entry::C(v(V::PortfolioMark)),
+                        Entry::C(v(V::NewPortfolio)),
+                    ],
+                );
             });
             self.big_menu(
                 ui,
