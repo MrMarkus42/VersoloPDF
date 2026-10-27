@@ -346,7 +346,7 @@ impl MrPdfApp {
         let de = self.settings.language == Language::German;
         let mut draft = self.settings_draft.take().unwrap_or_else(|| Box::new(self.settings.clone()));
         ui.set_max_width(780.0);
-        ui.heading(tr(de, "Einstellungen", "Settings"));
+        super::dialogs::set_title(ui, tr(de, "Einstellungen", "Settings"));
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| {
                 ui.set_width(200.0);

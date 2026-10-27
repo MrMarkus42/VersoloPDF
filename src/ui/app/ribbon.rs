@@ -15,7 +15,8 @@ use crate::ui::icons::Icon;
 use crate::ui::theme;
 use crate::ui::tools::{PALETTE, Tool};
 use crate::ui::widgets::{
-    big_button, big_menu_button, group, icon_button, menu_item, small_button, small_menu_button, swatch,
+    RibbonFit, big_button, big_menu_button, group, icon_button, menu_item, ribbon_fit, set_ribbon_fit,
+    small_button, small_menu_button, swatch,
 };
 
 const UA: fn(Unavailable, &'static str, &'static str, Icon) -> Cmd = Cmd::Unavailable;
@@ -239,47 +240,142 @@ impl MrPdfApp {
                     if has_selection {
                         tabs.push((RibbonTab::Format, t.format_tab));
                     }
-                    for (tab, label) in tabs {
-                        let mut text = RichText::new(label).size(13.0);
-                        if tab == RibbonTab::Format {
-                            text = text.color(egui::Color32::from_rgb(160, 110, 0)).strong();
-                        }
-                        let selected = self.ribbon == tab && !self.backstage_open();
-                        if ui.selectable_label(selected, text).clicked() {
-                            self.ribbon = tab;
-                            self.close_backstage();
-                        }
-                    }
+                    self.tab_row(ui, &tabs);
                 });
                 if self.backstage_open() {
                     return;
                 }
                 ui.add_space(2.0);
+                // Fit the ribbon into the window: level 0 full size, 1 small
+                // buttons without labels, 2.. collapse groups from the right.
+                // Each level's width is measured when drawn; the first level
+                // known to fit (or not measured yet) is used.
+                let avail = ui.available_width();
+                let lang = self.settings.language;
+                let content_key = if self.ribbon == RibbonTab::Format {
+                    self.tab().and_then(|tab| tab.selected_annotation()).map_or(0, |a| a.kind as u8)
+                } else {
+                    0
+                };
+                let tab_now = self.ribbon;
+                let groups = self.ribbon_groups.get(&tab_now).copied().unwrap_or(0);
+                let mut level = 0;
+                while level < 1 + groups
+                    && self
+                        .ribbon_widths
+                        .get(&(tab_now, lang, level, content_key))
+                        .is_some_and(|w| *w > avail + 0.5)
+                {
+                    level += 1;
+                }
+                set_ribbon_fit(
+                    &ctx,
+                    RibbonFit {
+                        compact: level >= 1,
+                        collapse_from: if level >= 2 { groups.saturating_sub(level - 1) } else { usize::MAX },
+                        ..RibbonFit::FULL
+                    },
+                );
+                let mut drawn_width = 0.0;
                 egui::ScrollArea::horizontal()
                     .id_salt("ribbon-scroll")
                     .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
                     .show(ui, |ui| {
                         ui.style_mut().spacing.scroll.floating = false;
-                        ui.horizontal(|ui| {
-                            ui.set_min_height(82.0);
-                            match self.ribbon {
-                                RibbonTab::Home => self.ribbon_home(ui, &ctx),
-                                RibbonTab::View => self.ribbon_view(ui, &ctx),
-                                RibbonTab::Comment => self.ribbon_comment(ui, &ctx),
-                                RibbonTab::Protect => self.ribbon_protect(ui, &ctx),
-                                RibbonTab::Form => self.ribbon_form(ui, &ctx),
-                                RibbonTab::Organize => self.ribbon_organize(ui, &ctx),
-                                RibbonTab::Convert => self.ribbon_convert(ui, &ctx),
-                                RibbonTab::Share => self.ribbon_share(ui, &ctx),
-                                RibbonTab::Review => self.ribbon_review(ui, &ctx),
-                                RibbonTab::Accessibility => self.ribbon_accessibility(ui, &ctx),
-                                RibbonTab::Bookmarks => self.ribbon_bookmarks(ui, &ctx),
-                                RibbonTab::Help => self.ribbon_help(ui, &ctx),
-                                RibbonTab::Format => self.ribbon_format(ui, &ctx),
-                            }
-                        });
+                        drawn_width = ui
+                            .horizontal(|ui| {
+                                ui.set_min_height(82.0);
+                                match self.ribbon {
+                                    RibbonTab::Home => self.ribbon_home(ui, &ctx),
+                                    RibbonTab::View => self.ribbon_view(ui, &ctx),
+                                    RibbonTab::Comment => self.ribbon_comment(ui, &ctx),
+                                    RibbonTab::Protect => self.ribbon_protect(ui, &ctx),
+                                    RibbonTab::Form => self.ribbon_form(ui, &ctx),
+                                    RibbonTab::Organize => self.ribbon_organize(ui, &ctx),
+                                    RibbonTab::Convert => self.ribbon_convert(ui, &ctx),
+                                    RibbonTab::Share => self.ribbon_share(ui, &ctx),
+                                    RibbonTab::Review => self.ribbon_review(ui, &ctx),
+                                    RibbonTab::Accessibility => self.ribbon_accessibility(ui, &ctx),
+                                    RibbonTab::Bookmarks => self.ribbon_bookmarks(ui, &ctx),
+                                    RibbonTab::Help => self.ribbon_help(ui, &ctx),
+                                    RibbonTab::Format => self.ribbon_format(ui, &ctx),
+                                }
+                            })
+                            .response
+                            .rect
+                            .width();
                     });
+                let counted = ribbon_fit(&ctx).next_group;
+                set_ribbon_fit(&ctx, RibbonFit::FULL);
+                // A command may have switched the tab while drawing.
+                if self.ribbon == tab_now {
+                    self.ribbon_widths.insert((tab_now, lang, level, content_key), drawn_width);
+                    self.ribbon_groups.insert(tab_now, counted);
+                    if drawn_width > avail + 0.5 && level < 1 + counted {
+                        ctx.request_repaint();
+                    }
+                }
             });
+    }
+
+    /// The ribbon tabs; tabs that do not fit go into a "»" menu at the end.
+    fn tab_row(&mut self, ui: &mut Ui, tabs: &[(RibbonTab, &str)]) {
+        let text_of = |tab: RibbonTab, label: &str| {
+            let text = RichText::new(label).size(13.0);
+            if tab == RibbonTab::Format {
+                text.color(egui::Color32::from_rgb(160, 110, 0)).strong()
+            } else {
+                text
+            }
+        };
+        let pad = ui.spacing().item_spacing.x + 2.0 * ui.spacing().button_padding.x;
+        let widths: Vec<f32> = tabs
+            .iter()
+            .map(|(_, label)| {
+                let font = egui::FontId::proportional(13.0);
+                ui.painter().layout_no_wrap(label.to_string(), font, egui::Color32::WHITE).size().x + pad
+            })
+            .collect();
+        let avail = ui.available_width();
+        let shown = if widths.iter().sum::<f32>() <= avail {
+            tabs.len()
+        } else {
+            // Room for the "»" button.
+            let mut used = 34.0;
+            widths
+                .iter()
+                .take_while(|w| {
+                    used += **w;
+                    used <= avail
+                })
+                .count()
+        };
+        let backstage = self.backstage_open();
+        let mut chosen = None;
+        for &(tab, label) in &tabs[..shown] {
+            if ui.selectable_label(self.ribbon == tab && !backstage, text_of(tab, label)).clicked() {
+                chosen = Some(tab);
+            }
+        }
+        if shown < tabs.len() {
+            let hidden_selected = tabs[shown..].iter().any(|(tab, _)| *tab == self.ribbon) && !backstage;
+            let de = self.settings.language == Language::German;
+            let more = ui
+                .selectable_label(hidden_selected, RichText::new("»").size(14.0))
+                .on_hover_text(if de { "Weitere Registerkarten" } else { "More tabs" });
+            egui::Popup::menu(&more).show(|ui| {
+                for &(tab, label) in &tabs[shown..] {
+                    if ui.selectable_label(self.ribbon == tab && !backstage, text_of(tab, label)).clicked() {
+                        chosen = Some(tab);
+                        ui.close();
+                    }
+                }
+            });
+        }
+        if let Some(tab) = chosen {
+            self.ribbon = tab;
+            self.close_backstage();
+        }
     }
 
     /// The command search ("Schnellstart") at the right end of the tab row.
@@ -290,7 +386,7 @@ impl MrPdfApp {
             egui::TextEdit::singleline(&mut self.quick_query)
                 .id(id)
                 .hint_text(t.quick_start)
-                .desired_width(190.0),
+                .desired_width(ui.available_width().clamp(60.0, 190.0)),
         );
         if self.quick_focus {
             edit.request_focus();

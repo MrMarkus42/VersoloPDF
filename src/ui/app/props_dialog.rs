@@ -207,7 +207,7 @@ impl MrPdfApp {
     pub(super) fn properties_dialog(&mut self, ui: &mut Ui, s: &mut PropsState) -> (Outcome, Option<Action>) {
         let de = self.pp_de();
         ui.set_max_width(760.0);
-        ui.heading(tr(de, "Dokumenteigenschaften", "Document properties"));
+        super::dialogs::set_title(ui, tr(de, "Dokumenteigenschaften", "Document properties"));
         let mut space_usage = false;
         let mut protect = false;
         ui.horizontal_top(|ui| {

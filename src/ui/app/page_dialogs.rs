@@ -952,7 +952,7 @@ impl MrPdfApp {
         let mut open_settings = false;
         match &mut state.dialog {
             PageDialog::Insert { path, pages, range, target, error } => {
-                ui.heading(Cmd::InsertFromFile.label(lang));
+                super::dialogs::set_title(ui, Cmd::InsertFromFile.label(lang));
                 section(ui, tr(de, "Quelle", "Source"), |ui| {
                     ui.horizontal(|ui| {
                         ui.label(tr(de, "Datei:", "File:"));
@@ -1024,7 +1024,7 @@ impl MrPdfApp {
             }
             PageDialog::Blank(form) => {
                 ui.horizontal(|ui| {
-                    ui.heading(Cmd::InsertBlank.label(lang));
+                    super::dialogs::set_title(ui, Cmd::InsertBlank.label(lang));
                     unit_combo_right(ui, de, &mut self.settings.unit);
                 });
                 let size = self.blank_size(form, n, cur);
@@ -1135,7 +1135,7 @@ impl MrPdfApp {
             }
             PageDialog::NewBlank(form) => {
                 ui.horizontal(|ui| {
-                    ui.heading(tr(de, "Neues leeres Dokument", "New blank document"));
+                    super::dialogs::set_title(ui, tr(de, "Neues leeres Dokument", "New blank document"));
                     unit_combo_right(ui, de, &mut self.settings.unit);
                 });
                 section(ui, tr(de, "Seiten", "Pages"), |ui| {
@@ -1212,11 +1212,18 @@ impl MrPdfApp {
             }
             PageDialog::Clipboard { image, target, new_doc } => {
                 let new_doc = *new_doc;
-                ui.heading(if new_doc {
-                    tr(de, "Neues Dokument aus der Zwischenablage", "New document from the clipboard")
-                } else {
-                    tr(de, "Einfügen von Seiten aus der Zwischenablage", "Insert pages from the clipboard")
-                });
+                super::dialogs::set_title(
+                    ui,
+                    if new_doc {
+                        tr(de, "Neues Dokument aus der Zwischenablage", "New document from the clipboard")
+                    } else {
+                        tr(
+                            de,
+                            "Einfügen von Seiten aus der Zwischenablage",
+                            "Insert pages from the clipboard",
+                        )
+                    },
+                );
                 ui.label(tr(de, "Datentypen in der Zwischenablage:", "Data types in the clipboard:"));
                 let has_text = self.clipboard.0.is_some();
                 let has_image = self.clipboard.1.is_some();
@@ -1265,7 +1272,7 @@ impl MrPdfApp {
             }
             PageDialog::Images { files, selected, target, layout, new_doc } => {
                 let new_doc = *new_doc;
-                ui.heading(tr(de, "Bilder in PDF umwandeln", "Convert images to PDF"));
+                super::dialogs::set_title(ui, tr(de, "Bilder in PDF umwandeln", "Convert images to PDF"));
                 file_list(ui, de, files, selected, &IMAGE_EXT, tr(de, "Bilder", "Images"));
                 if !new_doc {
                     target.ui(ui, de, n, cur);
@@ -1296,12 +1303,17 @@ impl MrPdfApp {
             PageDialog::Text { kind, new_doc, files, selected, target, layout } => {
                 let (kind, new_doc) = (*kind, *new_doc);
                 let rtf = kind == TextKind::Rtf;
-                ui.heading(match kind {
-                    TextKind::Plain => tr(de, "Textdateien in PDF umwandeln", "Convert text files to PDF"),
-                    TextKind::Rtf => tr(de, "RTF in PDF umwandeln", "Convert RTF to PDF"),
-                    TextKind::Markdown => tr(de, "Markdown in PDF umwandeln", "Convert Markdown to PDF"),
-                    TextKind::Csv => tr(de, "CSV-Dateien in PDF umwandeln", "Convert CSV files to PDF"),
-                });
+                super::dialogs::set_title(
+                    ui,
+                    match kind {
+                        TextKind::Plain => {
+                            tr(de, "Textdateien in PDF umwandeln", "Convert text files to PDF")
+                        }
+                        TextKind::Rtf => tr(de, "RTF in PDF umwandeln", "Convert RTF to PDF"),
+                        TextKind::Markdown => tr(de, "Markdown in PDF umwandeln", "Convert Markdown to PDF"),
+                        TextKind::Csv => tr(de, "CSV-Dateien in PDF umwandeln", "Convert CSV files to PDF"),
+                    },
+                );
                 let (ext, filter): (&[&str], &str) = match kind {
                     TextKind::Rtf => (&["rtf"], "RTF"),
                     TextKind::Markdown => (&["md", "markdown", "txt"], "Markdown"),
@@ -1431,7 +1443,7 @@ impl MrPdfApp {
                 }
             }
             PageDialog::Delete { range, bookmarks } => {
-                ui.heading(Cmd::DeletePages.label(lang));
+                super::dialogs::set_title(ui, Cmd::DeletePages.label(lang));
                 range.ui(ui, de, n, cur, &[RangeMode::Current, RangeMode::Custom]);
                 ui.checkbox(bookmarks, tr(de, "Zugehörige Lesezeichen löschen", "Delete related bookmarks"));
                 let sel = range.resolve(n, cur).filter(|p| p.len() < n);
@@ -1457,7 +1469,7 @@ impl MrPdfApp {
                 }
             }
             PageDialog::DeleteBlank { ignore_annots, ignore_noise, tolerance, range, review } => {
-                ui.heading(Cmd::DeleteBlankPages.label(lang));
+                super::dialogs::set_title(ui, Cmd::DeleteBlankPages.label(lang));
                 section(ui, tr(de, "Einstellungen", "Settings"), |ui| {
                     ui.label(tr(de, "Diese Seiten löschen:", "Delete these pages:"));
                     egui::ComboBox::from_id_salt("blank-mode")
@@ -1512,7 +1524,7 @@ impl MrPdfApp {
                 }
             }
             PageDialog::BlankReview { pages } => {
-                ui.heading(tr(de, "Leere Seiten", "Blank pages"));
+                super::dialogs::set_title(ui, tr(de, "Leere Seiten", "Blank pages"));
                 ui.label(tr(de, "Diese Seiten werden gelöscht:", "These pages will be deleted:"));
                 egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
                     for (page, keep) in pages.iter_mut() {
@@ -1536,7 +1548,7 @@ impl MrPdfApp {
                 }
             }
             PageDialog::Extract(form) => {
-                ui.heading(Cmd::ExtractPages.label(lang));
+                super::dialogs::set_title(ui, Cmd::ExtractPages.label(lang));
                 form.range.ui(ui, de, n, cur, &PageRange::ALL_MODES);
                 section(ui, tr(de, "Ausgabe", "Output"), |ui| {
                     ui.horizontal(|ui| {
@@ -1660,7 +1672,7 @@ impl MrPdfApp {
                 }
             }
             PageDialog::Move { range, target } => {
-                ui.heading(Cmd::MovePages.label(lang));
+                super::dialogs::set_title(ui, Cmd::MovePages.label(lang));
                 range.ui(ui, de, n, cur, &PageRange::ALL_MODES);
                 target.ui(ui, de, n, cur);
                 let sel = range.resolve(n, cur).filter(|p| p.len() < n);
@@ -1675,7 +1687,7 @@ impl MrPdfApp {
                 }
             }
             PageDialog::Duplicate { range, target, copies, collate, comments, forms } => {
-                ui.heading(Cmd::DuplicatePages.label(lang));
+                super::dialogs::set_title(ui, Cmd::DuplicatePages.label(lang));
                 range.ui(ui, de, n, cur, &PageRange::ALL_MODES);
                 target.ui(ui, de, n, cur);
                 ui.horizontal(|ui| {
@@ -1712,7 +1724,7 @@ impl MrPdfApp {
                 preview_target,
                 preview_source,
             } => {
-                ui.heading(Cmd::ReplacePages.label(lang));
+                super::dialogs::set_title(ui, Cmd::ReplacePages.label(lang));
                 let source_key = path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
                 if path.is_some() && self.dialog_doc.as_ref().is_none_or(|(k, _)| *k != source_key) {
                     match path.as_deref().map(|p| Document::open(p, None)) {
@@ -1872,7 +1884,7 @@ impl MrPdfApp {
                 }
             }
             PageDialog::Rotate { dir, range, filter } => {
-                ui.heading(Cmd::RotatePages.label(lang));
+                super::dialogs::set_title(ui, Cmd::RotatePages.label(lang));
                 ui.horizontal(|ui| {
                     ui.label(tr(de, "Richtung:", "Direction:"));
                     let names = [
@@ -1944,7 +1956,7 @@ impl MrPdfApp {
                 }
             }
             PageDialog::Reverse { range } => {
-                ui.heading(Cmd::ReversePages.label(lang));
+                super::dialogs::set_title(ui, Cmd::ReversePages.label(lang));
                 range.ui(ui, de, n, cur, &PageRange::ALL_MODES);
                 let sel = range.resolve(n, cur).filter(|p| p.len() > 1);
                 let (ok, cancel, _) = footer(ui, de, sel.is_some(), false, "OK");
@@ -1958,7 +1970,7 @@ impl MrPdfApp {
                 }
             }
             PageDialog::Normalize { range } => {
-                ui.heading(Cmd::NormalizePages.label(lang));
+                super::dialogs::set_title(ui, Cmd::NormalizePages.label(lang));
                 ui.label(tr(de, "Es werden unnötiger Seitenversatz und Drehungen entfernt, das Aussehen der Seite ändert sich nicht.", "Unnecessary page offsets and rotations are removed; the look of the page does not change."));
                 range.ui(ui, de, n, cur, &PageRange::ALL_MODES);
                 let sel = range.resolve(n, cur);
@@ -1989,7 +2001,7 @@ impl MrPdfApp {
                 }
             }
             PageDialog::Duplicates { range, ignore_orientation, ignore_annots } => {
-                ui.heading(tr(de, "Doppelte Seiten finden", "Find duplicate pages"));
+                super::dialogs::set_title(ui, tr(de, "Doppelte Seiten finden", "Find duplicate pages"));
                 range.ui(ui, de, n, cur, &[RangeMode::All, RangeMode::Custom]);
                 section(ui, tr(de, "Einstellungen", "Settings"), |ui| {
                     ui.checkbox(
@@ -2215,11 +2227,14 @@ impl MrPdfApp {
         let page = &mut state.settings_page;
         match &mut state.dialog {
             PageDialog::Images { layout, .. } => {
-                ui.heading(tr(
-                    de,
-                    "Einstellungen für Bild-zu-PDF-Umwandlung",
-                    "Settings for image to PDF conversion",
-                ));
+                super::dialogs::set_title(
+                    ui,
+                    tr(
+                        de,
+                        "Einstellungen für Bild-zu-PDF-Umwandlung",
+                        "Settings for image to PDF conversion",
+                    ),
+                );
                 let names = [
                     tr(de, "Seitenlayout", "Page layout"),
                     tr(de, "Bildposition", "Image position"),
@@ -2384,7 +2399,7 @@ impl MrPdfApp {
                 });
             }
             PageDialog::Text { layout, .. } => {
-                ui.heading(tr(de, "Einstellungen", "Settings"));
+                super::dialogs::set_title(ui, tr(de, "Einstellungen", "Settings"));
                 let names = [
                     tr(de, "Seitenlayout", "Page layout"),
                     tr(de, "Textformat", "Text format"),
@@ -2553,12 +2568,12 @@ impl MrPdfApp {
                 });
             }
             PageDialog::Extract(form) => {
-                ui.heading(tr(de, "Einstellungen", "Settings"));
+                super::dialogs::set_title(ui, tr(de, "Einstellungen", "Settings"));
                 extract_options_ui(ui, de, &mut form.options);
                 ui.label(RichText::new(tr(de, "Ebenen und Sprungmarken werden mit den Seiten übernommen, soweit sie zu ihnen gehören.", "Layers and named destinations are taken over with the pages they belong to.")).weak().small());
             }
             PageDialog::Duplicate { comments, forms, .. } => {
-                ui.heading(tr(de, "Einstellungen", "Settings"));
+                super::dialogs::set_title(ui, tr(de, "Einstellungen", "Settings"));
                 egui::Grid::new("dup-settings").num_columns(2).spacing(vec2(8.0, 8.0)).show(ui, |ui| {
                     for (label, value, id) in [
                         (tr(de, "Kommentare:", "Comments:"), comments, "dup-c"),

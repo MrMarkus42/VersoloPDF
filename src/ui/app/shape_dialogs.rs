@@ -251,7 +251,7 @@ impl MrPdfApp {
         let mut action: Option<Action> = None;
         match &mut state.dialog {
             ShapeDialog::Crop { form, range, page, drag } => {
-                ui.heading(Cmd::CropPages.label(lang));
+                super::dialogs::set_title(ui, Cmd::CropPages.label(lang));
                 *page = (*page).min(n.saturating_sub(1));
                 let page_size = self
                     .active_tab()
@@ -567,7 +567,7 @@ impl MrPdfApp {
                 }
             }
             ShapeDialog::Resize { form, range, page } => {
-                ui.heading(tr(de, "Seitengröße ändern", "Change page size"));
+                super::dialogs::set_title(ui, tr(de, "Seitengröße ändern", "Change page size"));
                 *page = (*page).min(n.saturating_sub(1));
                 ui.horizontal_top(|ui| {
                     ui.vertical(|ui| {
@@ -788,7 +788,7 @@ impl MrPdfApp {
                 }
             }
             ShapeDialog::Margins { form, range } => {
-                ui.heading(tr(de, "Ränder einrichten", "Page margins"));
+                super::dialogs::set_title(ui, tr(de, "Ränder einrichten", "Page margins"));
                 range.ui(ui, de, n, cur, &PageRange::ALL_MODES);
                 section(ui, tr(de, "Ränder", "Margins"), |ui| {
                     ui.horizontal(|ui| unit_combo_right(ui, de, &mut self.settings.unit));

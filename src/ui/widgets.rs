@@ -9,6 +9,67 @@ use crate::model::Rgba;
 use crate::ui::icons::{self, Icon};
 use crate::ui::theme;
 
+/// How the ribbon is fitted into a narrow window, like the ribbons of
+/// office programs: first small buttons lose their labels, then groups
+/// collapse from the right into one drop-down button each.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RibbonFit {
+    /// Small buttons show only their icon (label as tooltip).
+    pub compact: bool,
+    /// Groups with this index or higher are collapsed.
+    pub collapse_from: usize,
+    /// Index of the next group (counted while drawing).
+    pub next_group: usize,
+    /// Drawing inside the drop-down of a collapsed group (full size).
+    pub in_popup: bool,
+    /// First icon drawn in the current group (icon of its collapsed button).
+    pub first_icon: Option<Icon>,
+}
+
+impl RibbonFit {
+    /// Everything at full size (also used outside the ribbon).
+    pub const FULL: RibbonFit = RibbonFit {
+        compact: false,
+        collapse_from: usize::MAX,
+        next_group: 0,
+        in_popup: false,
+        first_icon: None,
+    };
+
+    fn shrunk(self) -> bool {
+        self.compact && !self.in_popup
+    }
+}
+
+fn fit_id() -> egui::Id {
+    egui::Id::new("mrpdf-ribbon-fit")
+}
+
+fn command_ran_id() -> egui::Id {
+    egui::Id::new("mrpdf-ribbon-command-ran")
+}
+
+pub fn ribbon_fit(ctx: &egui::Context) -> RibbonFit {
+    ctx.data(|d| d.get_temp(fit_id())).unwrap_or(RibbonFit::FULL)
+}
+
+pub fn set_ribbon_fit(ctx: &egui::Context, fit: RibbonFit) {
+    ctx.data_mut(|d| d.insert_temp(fit_id(), fit));
+}
+
+/// Called when a command runs (closes the drop-down of a collapsed group).
+pub fn note_command_ran(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.insert_temp(command_ran_id(), true));
+}
+
+fn note_icon(ui: &Ui, icon: Icon) {
+    let mut fit = ribbon_fit(ui.ctx());
+    if fit.first_icon.is_none() && fit != RibbonFit::FULL {
+        fit.first_icon = Some(icon);
+        set_ribbon_fit(ui.ctx(), fit);
+    }
+}
+
 fn button_frame(ui: &Ui, rect: Rect, response: &Response, selected: bool) {
     let visuals = ui.visuals();
     let (fill, stroke) = if selected {
@@ -30,6 +91,7 @@ fn icon_tint(ui: &Ui, enabled: bool) -> Color32 {
 
 /// Large ribbon button: icon on top, label below.
 pub fn big_button(ui: &mut Ui, icon: Icon, label: &str, selected: bool, enabled: bool) -> Response {
+    note_icon(ui, icon);
     // Wide enough for the longest word so labels only wrap between words.
     let font = FontId::proportional(11.5);
     let widest_word = label
@@ -67,6 +129,7 @@ fn paint_chevron(ui: &Ui, center: egui::Pos2, color: Color32) {
 
 /// Large ribbon button that opens a drop-down menu (label with ▾ below).
 pub fn big_menu_button(ui: &mut Ui, icon: Icon, label: &str, enabled: bool, open: bool) -> Response {
+    note_icon(ui, icon);
     let font = FontId::proportional(11.5);
     let widest_word = label
         .split_whitespace()
@@ -100,9 +163,11 @@ pub fn big_menu_button(ui: &mut Ui, icon: Icon, label: &str, enabled: bool, open
 
 /// Small ribbon button with ▾ that opens a drop-down menu.
 pub fn small_menu_button(ui: &mut Ui, icon: Icon, label: &str, enabled: bool, open: bool) -> Response {
+    note_icon(ui, icon);
+    let shrunk = ribbon_fit(ui.ctx()).shrunk();
     let font = FontId::proportional(12.5);
     let text_w = ui.painter().layout_no_wrap(label.to_string(), font.clone(), Color32::WHITE).size().x;
-    let size = vec2(text_w + 42.0, 21.0);
+    let size = if shrunk { vec2(34.0, 21.0) } else { vec2(text_w + 42.0, 21.0) };
     let sense = if enabled { Sense::click() } else { Sense::hover() };
     let (rect, response) = ui.allocate_exact_size(size, sense);
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, label));
@@ -119,10 +184,12 @@ pub fn small_menu_button(ui: &mut Ui, icon: Icon, label: &str, enabled: bool, op
             icon_tint(ui, enabled),
         );
         let color = if enabled { ui.visuals().text_color() } else { ui.visuals().weak_text_color() };
-        ui.painter().text(rect.left_center() + vec2(24.0, 0.0), Align2::LEFT_CENTER, label, font, color);
+        if !shrunk {
+            ui.painter().text(rect.left_center() + vec2(24.0, 0.0), Align2::LEFT_CENTER, label, font, color);
+        }
         paint_chevron(ui, egui::pos2(rect.right() - 8.0, rect.center().y), color);
     }
-    response
+    if shrunk { response.on_hover_text(label) } else { response }
 }
 
 /// One row of a drop-down menu: icon, label, optional shortcut and ▸ for
@@ -195,9 +262,12 @@ pub fn menu_item(
 
 /// Small ribbon button with icon and label in one row.
 pub fn small_button(ui: &mut Ui, icon: Icon, label: &str, selected: bool, enabled: bool) -> Response {
+    note_icon(ui, icon);
+    // In a narrow ribbon only the icon is shown; callers add the label as tooltip.
+    let shrunk = ribbon_fit(ui.ctx()).shrunk();
     let font = FontId::proportional(12.5);
     let text_w = ui.painter().layout_no_wrap(label.to_string(), font.clone(), Color32::WHITE).size().x;
-    let size = vec2(text_w + 30.0, 21.0);
+    let size = if shrunk { vec2(24.0, 21.0) } else { vec2(text_w + 30.0, 21.0) };
     let sense = if enabled { Sense::click() } else { Sense::hover() };
     let (rect, response) = ui.allocate_exact_size(size, sense);
     response.widget_info(|| WidgetInfo::selected(WidgetType::Button, enabled, selected, label));
@@ -211,13 +281,16 @@ pub fn small_button(ui: &mut Ui, icon: Icon, label: &str, selected: bool, enable
         }
         icons::paint(&painter, icon_rect, icon, icon_tint(ui, enabled));
         let color = if enabled { ui.visuals().text_color() } else { ui.visuals().weak_text_color() };
-        ui.painter().text(rect.left_center() + vec2(24.0, 0.0), Align2::LEFT_CENTER, label, font, color);
+        if !shrunk {
+            ui.painter().text(rect.left_center() + vec2(24.0, 0.0), Align2::LEFT_CENTER, label, font, color);
+        }
     }
     response
 }
 
 /// Square icon-only button with tooltip.
 pub fn icon_button(ui: &mut Ui, icon: Icon, tooltip: &str, selected: bool, enabled: bool) -> Response {
+    note_icon(ui, icon);
     let size = Vec2::splat(24.0);
     let sense = if enabled { Sense::click() } else { Sense::hover() };
     let (rect, response) = ui.allocate_exact_size(size, sense);
@@ -235,7 +308,44 @@ pub fn icon_button(ui: &mut Ui, icon: Icon, tooltip: &str, selected: bool, enabl
 }
 
 /// A ribbon group: contents on top, caption below, separator on the right.
+///
+/// In a narrow window the ribbon may collapse the group into one large
+/// button with the group's name; its drop-down shows the full group.
 pub fn group(ui: &mut Ui, caption: &str, add: impl FnOnce(&mut Ui)) {
+    let ctx = ui.ctx().clone();
+    let mut fit = ribbon_fit(&ctx);
+    let index = fit.next_group;
+    fit.next_group += 1;
+    let icon_id = egui::Id::new(("mrpdf-ribbon-group-icon", caption));
+    if !fit.in_popup && index >= fit.collapse_from {
+        set_ribbon_fit(&ctx, fit);
+        let icon = ctx.data(|d| d.get_temp::<Icon>(icon_id)).unwrap_or(Icon::Gear);
+        ui.vertical(|ui| {
+            ui.set_min_height(80.0);
+            let response = ui
+                .push_id(("ribbon-group", caption), |ui| big_menu_button(ui, icon, caption, true, false))
+                .inner;
+            egui::Popup::menu(&response).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(
+                |ui| {
+                    let outer = ribbon_fit(ui.ctx());
+                    set_ribbon_fit(ui.ctx(), RibbonFit { in_popup: true, ..outer });
+                    ui.ctx().data_mut(|d| d.insert_temp(command_ran_id(), false));
+                    ui.horizontal(|ui| {
+                        ui.set_min_height(64.0);
+                        add(ui);
+                    });
+                    set_ribbon_fit(ui.ctx(), outer);
+                    if ui.ctx().data(|d| d.get_temp::<bool>(command_ran_id())).unwrap_or(false) {
+                        ui.close();
+                    }
+                },
+            );
+        });
+        ui.add(egui::Separator::default().vertical().spacing(10.0));
+        return;
+    }
+    fit.first_icon = None;
+    set_ribbon_fit(&ctx, fit);
     ui.vertical(|ui| {
         ui.set_min_height(80.0);
         ui.horizontal(|ui| {
@@ -246,6 +356,12 @@ pub fn group(ui: &mut Ui, caption: &str, add: impl FnOnce(&mut Ui)) {
             egui::Label::new(egui::RichText::new(caption).size(10.5).weak()).wrap_mode(TextWrapMode::Extend),
         );
     });
+    // Remember the group's first icon for its collapsed button.
+    if let Some(icon) = ribbon_fit(&ctx).first_icon
+        && !fit.in_popup
+    {
+        ctx.data_mut(|d| d.insert_temp(icon_id, icon));
+    }
     ui.add(egui::Separator::default().vertical().spacing(10.0));
 }
 

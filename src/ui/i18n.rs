@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::model::StampPreset;
 use crate::ui::tools::Tool;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Language {
     German,
     English,

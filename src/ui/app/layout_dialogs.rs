@@ -168,7 +168,7 @@ impl MrPdfApp {
         match &mut state.dialog {
             LayoutDialog::NUp { layout, range, reverse, sheet, sheets } => {
                 ui.horizontal(|ui| {
-                    ui.heading(Cmd::NUp.label(lang));
+                    super::dialogs::set_title(ui, Cmd::NUp.label(lang));
                     unit_combo_right(ui, de, &mut self.settings.unit);
                 });
                 let pages = range.resolve(n, cur).map(|mut p| {
@@ -431,7 +431,7 @@ impl MrPdfApp {
                 options,
                 show_settings,
             } => {
-                ui.heading(Cmd::SplitDocument.label(lang));
+                super::dialogs::set_title(ui, Cmd::SplitDocument.label(lang));
                 let has_bookmarks = self.active_tab().is_some_and(|t| !t.doc.bookmarks().is_empty());
                 section(ui, tr(de, "Methode zum Aufteilen", "Split method"), |ui| {
                     ui.add_enabled_ui(has_bookmarks, |ui| {
@@ -558,7 +558,7 @@ impl MrPdfApp {
                 page,
                 dragging,
             } => {
-                ui.heading(Cmd::SplitPages.label(lang));
+                super::dialogs::set_title(ui, Cmd::SplitPages.label(lang));
                 ui.horizontal_top(|ui| {
                     ui.vertical(|ui| {
                         ui.set_width(390.0);
@@ -774,7 +774,7 @@ impl MrPdfApp {
                 }
             }
             LayoutDialog::Overlay { path, sources, targets, new_layer, layer_name, opts, page } => {
-                ui.heading(tr(de, "Seiten überlagern", "Overlay pages"));
+                super::dialogs::set_title(ui, tr(de, "Seiten überlagern", "Overlay pages"));
                 // Load the chosen source once.
                 if let Some(p) = path.clone()
                     && self.overlay_source.as_ref().is_none_or(|(sp, _)| *sp != p)

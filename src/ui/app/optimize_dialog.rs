@@ -223,7 +223,7 @@ impl MrPdfApp {
     pub(super) fn space_usage_dialog(&mut self, ui: &mut Ui, usage: &Usage) -> (Outcome, Option<Action>) {
         let de = self.opt_de();
         ui.set_max_width(560.0);
-        ui.heading(Cmd::SpaceUsage.label(self.settings.language));
+        super::dialogs::set_title(ui, Cmd::SpaceUsage.label(self.settings.language));
         ui.label(format!("{}: {}", tr(de, "Dateigröße", "File size"), size_text(usage.total)));
         ui.add_space(6.0);
         egui::Grid::new("usage").num_columns(4).striped(true).spacing(vec2(12.0, 4.0)).show(ui, |ui| {
@@ -272,7 +272,7 @@ impl MrPdfApp {
     ) -> (Outcome, Option<Action>) {
         let de = self.opt_de();
         ui.set_max_width(720.0);
-        ui.heading(tr(de, "PDF optimieren", "Optimize PDF"));
+        super::dialogs::set_title(ui, tr(de, "PDF optimieren", "Optimize PDF"));
         // Presets and space usage.
         let mut usage = false;
         ui.horizontal(|ui| {

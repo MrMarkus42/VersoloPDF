@@ -76,7 +76,7 @@ impl MrPdfApp {
         let mut action: Option<Action> = None;
         match dialog {
             Dialog::Swap { a, b } => {
-                ui.heading(Cmd::SwapPages.label(lang));
+                super::dialogs::set_title(ui, Cmd::SwapPages.label(lang));
                 ui.horizontal(|ui| {
                     ui.label(if de { "Tauschen:" } else { "Swap:" });
                     ui.add(egui::DragValue::new(a).range(1..=n.max(1) as u32));
@@ -94,7 +94,7 @@ impl MrPdfApp {
                 }
             }
             Dialog::Duplicates { groups } => {
-                ui.heading(if de { "Doppelte Seiten" } else { "Duplicate pages" });
+                super::dialogs::set_title(ui, if de { "Doppelte Seiten" } else { "Duplicate pages" });
                 for g in groups.iter() {
                     let pages: Vec<String> = g.iter().map(|p| (p + 1).to_string()).collect();
                     ui.label(format!(

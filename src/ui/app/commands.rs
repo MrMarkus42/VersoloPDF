@@ -995,6 +995,8 @@ impl MrPdfApp {
         if !self.cmd_enabled(cmd) {
             return;
         }
+        // Closes the drop-down of a collapsed ribbon group.
+        crate::ui::widgets::note_command_ran(ctx);
         // Page dialogs of "Dokumentaufbau" (insert, delete, extract, …).
         if self.run_page_dialog(cmd)
             || self.run_layout_dialog(cmd)

@@ -301,7 +301,7 @@ impl MrPdfApp {
         let mut action: Option<Action> = None;
         match dialog {
             Dialog::Confirm { title, text, cmd } => {
-                ui.heading(title.as_str());
+                super::dialogs::set_title(ui, title.as_str());
                 ui.label(text.as_str());
                 let (ok, cancel) = buttons(ui, t.ok, t.cancel);
                 if ok {
@@ -313,7 +313,7 @@ impl MrPdfApp {
                 }
             }
             Dialog::NewField(form) => {
-                ui.heading(Cmd::Tool(form.tool).label(lang));
+                super::dialogs::set_title(ui, Cmd::Tool(form.tool).label(lang));
                 egui::Grid::new("new-field").num_columns(2).show(ui, |ui| {
                     if form.tool == Tool::FieldRadio {
                         ui.label(if de { "Gruppe:" } else { "Group:" });
@@ -374,7 +374,7 @@ impl MrPdfApp {
                 }
             }
             Dialog::SearchRedact { query, match_case, whole_word } => {
-                ui.heading(Cmd::SearchRedact.label(lang));
+                super::dialogs::set_title(ui, Cmd::SearchRedact.label(lang));
                 ui.label(if de { "Suchbegriff:" } else { "Search for:" });
                 ui.text_edit_singleline(query).request_focus();
                 ui.checkbox(match_case, if de { "Groß-/Kleinschreibung beachten" } else { "Match case" });

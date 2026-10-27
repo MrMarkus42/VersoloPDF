@@ -72,7 +72,7 @@ impl MrPdfApp {
         let de = self.ex_de();
         let (n, cur) = self.active_tab().map_or((0, 0), |t| (t.doc.page_count(), t.current_page));
         ui.set_max_width(800.0);
-        ui.heading(tr(de, "Als Bilddateien exportieren", "Export as image files"));
+        super::dialogs::set_title(ui, tr(de, "Als Bilddateien exportieren", "Export as image files"));
         let o = &mut state.options;
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| {
@@ -298,7 +298,10 @@ impl MrPdfApp {
     ) -> (Outcome, Option<Action>) {
         let de = self.ex_de();
         let (n, cur) = self.active_tab().map_or((0, 0), |t| (t.doc.page_count(), t.current_page));
-        ui.heading(tr(de, "Einstellungen für Word-Umwandlung", "Word conversion settings"));
+        super::dialogs::set_title(
+            ui,
+            tr(de, "Einstellungen für Word-Umwandlung", "Word conversion settings"),
+        );
         range.ui(ui, de, n, cur, &[RangeMode::All, RangeMode::Current, RangeMode::Custom]);
         section(ui, tr(de, "Einstellungen für Layout", "Layout settings"), |ui| {
             let mut flow = true;

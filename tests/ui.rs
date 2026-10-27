@@ -1413,6 +1413,65 @@ fn settings_dialog() {
 }
 
 #[test]
+fn narrow_window_and_movable_dialog() {
+    use mrpdf::ui::app::Dialog;
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let file = sample_file(&dir, 2);
+    let mut h = harness(vec![file], false);
+    h.run_steps(10);
+    assert!(h.query_by_label("»").is_none(), "all tabs fit at full width");
+    // Medium width: small buttons lose their labels, groups collapse from the right.
+    h.set_size(egui::vec2(900.0, 700.0));
+    h.run_steps(16);
+    save(&mut h, "91-ribbon-900");
+    // The ribbon fits: its right-most group is a drop-down button now.
+    assert!(h.get_by_label("Verweise").rect().right() <= 900.0, "ribbon fits");
+    assert!(h.query_by_label("»").is_some(), "the last tabs are in the » menu");
+    // Narrow: tabs that do not fit are in the "»" menu.
+    h.set_size(egui::vec2(640.0, 600.0));
+    h.run_steps(16);
+    save(&mut h, "92-ribbon-640");
+    h.get_by_label("»").click();
+    h.run_steps(3);
+    save(&mut h, "93-ribbon-more-tabs");
+    h.get_by_label("Hilfe").click();
+    h.run_steps(4);
+    assert!(h.query_by_label("»").is_some());
+    // A collapsed group opens as drop-down; a command in it runs and closes it.
+    tab(&mut h, "Start");
+    h.run_steps(16);
+    h.get_by_label("Verweise").click();
+    h.run_steps(3);
+    save(&mut h, "94-ribbon-collapsed-group");
+    h.get_by_label("Verweis erstellen").click();
+    h.run_steps(3);
+    assert_eq!(h.state().tool(), mrpdf::ui::tools::Tool::Link);
+    // Dialogs are windows: drag the title bar, close with ✕.
+    h.set_size(egui::vec2(1280.0, 820.0));
+    h.run_steps(16);
+    h.key_press_modifiers(Modifiers::COMMAND, egui::Key::D);
+    h.run_steps(4);
+    assert!(matches!(h.state().dialog(), Some(Dialog::Properties(_))));
+    let bar = h.get_by_label("Dokumenteigenschaften").rect();
+    let from = bar.left_center() + egui::vec2(60.0, 0.0);
+    drag(&mut h, from, from + egui::vec2(-150.0, -60.0));
+    let moved = h.get_by_label("Dokumenteigenschaften").rect();
+    // A drag starts after a few pixels of movement.
+    assert!((moved.left() - (bar.left() - 150.0)).abs() < 8.0, "{bar:?} -> {moved:?}");
+    assert!((moved.top() - (bar.top() - 60.0)).abs() < 8.0, "{bar:?} -> {moved:?}");
+    save(&mut h, "95-dialog-moved");
+    h.get_by_label("✕").click();
+    h.run_steps(3);
+    assert!(h.state().dialog().is_none());
+    // The next dialog opens in the middle again.
+    h.key_press_modifiers(Modifiers::COMMAND, egui::Key::D);
+    h.run_steps(4);
+    let again = h.get_by_label("Dokumenteigenschaften").rect();
+    assert!((again.left() - bar.left()).abs() < 2.0);
+}
+
+#[test]
 fn backstage_and_tool_at_start() {
     let _guard = common::lock();
     let settings = Settings {

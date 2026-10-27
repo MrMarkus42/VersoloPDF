@@ -201,11 +201,14 @@ impl MrPdfApp {
         let de = self.pr_de();
         let (n, cur) = self.active_tab().map_or((0, 0), |t| (t.doc.page_count(), t.current_page));
         ui.set_max_width(840.0);
-        ui.heading(if state.all_documents {
-            tr(de, "Alle drucken", "Print all")
-        } else {
-            tr(de, "Drucken", "Print")
-        });
+        super::dialogs::set_title(
+            ui,
+            if state.all_documents {
+                tr(de, "Alle drucken", "Print all")
+            } else {
+                tr(de, "Drucken", "Print")
+            },
+        );
         let mut reload_paper = false;
         ui.horizontal_top(|ui| {
             // Left: settings.

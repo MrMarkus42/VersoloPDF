@@ -311,7 +311,7 @@ impl MrPdfApp {
     ) -> (Outcome, Option<Action>) {
         let de = self.fo_de();
         let t = self.t();
-        ui.heading(Cmd::RenameFile.label(self.settings.language));
+        super::dialogs::set_title(ui, Cmd::RenameFile.label(self.settings.language));
         ui.label(if de { "Neuer Dateiname:" } else { "New file name:" });
         let edit = ui.add(egui::TextEdit::singleline(name).desired_width(360.0));
         // The only input of the dialog keeps the keyboard focus.

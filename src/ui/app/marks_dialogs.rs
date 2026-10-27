@@ -314,7 +314,7 @@ impl MrPdfApp {
             MarksDialog::Edit { def, editing, range, page, file, file_page, back_to_manage } => {
                 let kind = def.kind;
                 let title = if editing.is_some() { kind_title(kind, de).1 } else { kind_title(kind, de).0 };
-                ui.heading(title);
+                super::dialogs::set_title(ui, title);
                 *page = (*page).min(n.saturating_sub(1));
                 let header_like = matches!(kind, Kind::HeaderFooter | Kind::Bates);
                 // Keep the dialog within the window.
@@ -436,7 +436,7 @@ impl MrPdfApp {
             }
             MarksDialog::Manage { kind, selected } => {
                 let kind = *kind;
-                ui.heading(kind_title(kind, de).1);
+                super::dialogs::set_title(ui, kind_title(kind, de).1);
                 let marks: Vec<_> = self
                     .tab()
                     .and_then(|t| t.doc.marks().ok())
@@ -576,7 +576,10 @@ impl MrPdfApp {
                 def,
                 show_settings,
             } => {
-                ui.heading(tr(de, "Paginierung in Dateien hinzufügen", "Add Bates numbering to files"));
+                super::dialogs::set_title(
+                    ui,
+                    tr(de, "Paginierung in Dateien hinzufügen", "Add Bates numbering to files"),
+                );
                 super::page_dialogs::file_list(ui, de, files, selected, &["pdf"], "PDF");
                 ui.label(format!("{} {}", files.len(), tr(de, "Einträge", "entries")));
                 section(ui, tr(de, "Ausgabe", "Output"), |ui| {

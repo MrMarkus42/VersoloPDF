@@ -170,7 +170,7 @@ impl MrPdfApp {
         let mut action: Option<Action> = None;
         match dialog {
             Dialog::BookmarkEveryNth { every, prefix } => {
-                ui.heading(Cmd::BookmarkEveryNth.label(lang));
+                super::dialogs::set_title(ui, Cmd::BookmarkEveryNth.label(lang));
                 egui::Grid::new("every-nth").num_columns(2).show(ui, |ui| {
                     ui.label(if de { "Alle n Seiten:" } else { "Every n pages:" });
                     ui.add(egui::DragValue::new(every).range(1..=1000));
@@ -207,7 +207,7 @@ impl MrPdfApp {
                 }
             }
             Dialog::BookmarkReplace { find, replace, match_case } => {
-                ui.heading(Cmd::BookmarkReplace.label(lang));
+                super::dialogs::set_title(ui, Cmd::BookmarkReplace.label(lang));
                 egui::Grid::new("bm-replace").num_columns(2).show(ui, |ui| {
                     ui.label(if de { "Suchen:" } else { "Find:" });
                     ui.text_edit_singleline(find);
@@ -234,7 +234,7 @@ impl MrPdfApp {
                 }
             }
             Dialog::BookmarkSort { by_page } => {
-                ui.heading(Cmd::BookmarkSort.label(lang));
+                super::dialogs::set_title(ui, Cmd::BookmarkSort.label(lang));
                 ui.radio_value(by_page, true, if de { "Nach Seitenzahl" } else { "By page number" });
                 ui.radio_value(by_page, false, if de { "Nach Titel (A–Z)" } else { "By title (A–Z)" });
                 let (ok, cancel) = buttons(ui, t.ok, t.cancel);

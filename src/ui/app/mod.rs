@@ -43,7 +43,7 @@ use crate::ui::tools::Tool;
 
 const SETTINGS_KEY: &str = "mrpdf-settings";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RibbonTab {
     Home,
     View,
@@ -288,6 +288,12 @@ pub struct MrPdfApp {
     settings_draft: Option<Box<Settings>>,
     /// "Größe der Benutzeroberfläche" last applied.
     applied_scale: Option<f32>,
+    /// Position of the dialog window after the user moved it (per kind of dialog).
+    dialog_pos: Option<(std::mem::Discriminant<Dialog>, egui::Pos2)>,
+    /// Measured widths of the ribbon per (tab, language, level, content key).
+    ribbon_widths: std::collections::HashMap<(RibbonTab, crate::ui::i18n::Language, usize, u8), f32>,
+    /// Number of groups of each ribbon tab (last drawn).
+    ribbon_groups: std::collections::HashMap<RibbonTab, usize>,
 }
 
 impl MrPdfApp {
@@ -348,6 +354,9 @@ impl MrPdfApp {
             last_recovery: 0.0,
             settings_draft: None,
             applied_scale: None,
+            dialog_pos: None,
+            ribbon_widths: Default::default(),
+            ribbon_groups: Default::default(),
         }
     }
 

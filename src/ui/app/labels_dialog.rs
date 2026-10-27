@@ -91,7 +91,7 @@ impl MrPdfApp {
         let mut outcome = Outcome::Keep;
         let mut action: Option<Action> = None;
         ui.set_max_width(760.0);
-        ui.heading(tr(de, "Seitennummerierung", "Page numbering"));
+        super::dialogs::set_title(ui, tr(de, "Seitennummerierung", "Page numbering"));
         ui.label(tr(
             de,
             "Sie können neue Bereiche mit einem Doppelklick auf die Leiste hinzufügen oder bestehende Bereiche durch Verschieben der Regler ändern.",
