@@ -97,10 +97,7 @@ impl MrPdfApp {
         let Some(tab) = self.active_tab() else { return };
         let name = tab.doc.display_name().to_string();
         let path = tab.doc.path().map(|p| p.display().to_string()).unwrap_or_default();
-        let subject: String = name
-            .chars()
-            .map(|c| if c.is_ascii_alphanumeric() || "-_.".contains(c) { c } else { '_' })
-            .collect();
+        let subject = mail_subject(&self.settings.email_subject, &name);
         ctx.open_url(egui::OpenUrl::new_tab(format!("mailto:?subject={subject}")));
         let text = if self.german() {
             format!("Das E-Mail-Programm wurde geöffnet. Bitte hängen Sie die Datei an:\n{path}")
@@ -173,13 +170,20 @@ impl MrPdfApp {
         }
     }
 
-    /// Renders an area at 2x screen resolution and copies it to the clipboard.
+    /// Renders an area (default: 2x screen resolution, see "Bildschirmfotos"
+    /// in the settings) and copies it to the clipboard.
     fn snapshot(&mut self, ctx: &Context, page: usize, rect: RectF) {
         let Some(tab) = self.active_tab() else { return };
         let Some(geo) = tab.display_geometry(page) else { return };
         let (vw, vh) = geo.view_size();
         let view = geo.pdf_rect_to_view(&rect);
-        let scale = 2.0 * 96.0 / 72.0;
+        let dpi = match self.settings.snapshot_dpi {
+            0 => 2.0 * 96.0,
+            d => d.clamp(36, 1200) as f32,
+        };
+        // Limit the full page bitmap to about 400 megapixels.
+        let scale = (dpi / 72.0).min((4.0e8 / (vw * vh).max(1.0)).sqrt());
+        let gray = self.settings.snapshot_gray;
         let full = [(vw * scale).round() as u32, (vh * scale).round() as u32];
         let x = (view.x0 * scale).max(0.0) as u32;
         let y = (view.y0 * scale).max(0.0) as u32;
@@ -187,7 +191,14 @@ impl MrPdfApp {
         let h = ((view.height() * scale) as u32).clamp(1, full[1].saturating_sub(y).max(1));
         let result = tab.doc.render_tile(page, full[0], full[1], x, y, w, h, tab.render_options());
         match result {
-            Ok(img) => {
+            Ok(mut img) => {
+                if gray {
+                    for px in img.rgba.as_chunks_mut::<4>().0 {
+                        let l = (0.299 * px[0] as f32 + 0.587 * px[1] as f32 + 0.114 * px[2] as f32).round()
+                            as u8;
+                        px[..3].fill(l);
+                    }
+                }
                 let image = egui::ColorImage::from_rgba_unmultiplied(
                     [img.width as usize, img.height as usize],
                     &img.rgba,
@@ -298,5 +309,30 @@ pub(super) fn reveal_in_file_manager(path: &std::path::Path) {
     };
     if let Err(err) = result {
         log::warn!("could not open file manager: {err}");
+    }
+}
+
+/// Subject of "Per E-Mail senden": `pattern` with %[FileName] replaced,
+/// percent-encoded for a mailto address.
+pub(super) fn mail_subject(pattern: &str, file_name: &str) -> String {
+    let text = pattern.replace("%[FileName]", file_name);
+    let mut out = String::new();
+    for b in text.chars().filter(|c| !c.is_control()).take(200).collect::<String>().bytes() {
+        if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn mail_subject_pattern() {
+        assert_eq!(super::mail_subject("%[FileName]", "a b.pdf"), "a%20b.pdf");
+        assert_eq!(super::mail_subject("Datei: %[FileName]", "ä"), "Datei%3A%20%C3%A4");
+        assert_eq!(super::mail_subject("x&y=\n", "n"), "x%26y%3D");
     }
 }

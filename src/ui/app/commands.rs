@@ -117,6 +117,9 @@ pub enum Cmd {
     Exit,
     DocProperties,
     Settings,
+    ExportSettings,
+    ImportSettings,
+    ResetSettings,
     Email,
     OpenFolder,
     ViewBack,
@@ -278,6 +281,9 @@ pub const SEARCHABLE: &[Cmd] = &[
     Cmd::TrashFile,
     Cmd::DocProperties,
     Cmd::Settings,
+    Cmd::ExportSettings,
+    Cmd::ImportSettings,
+    Cmd::ResetSettings,
     Cmd::Email,
     Cmd::OpenFolder,
     Cmd::ViewBack,
@@ -478,6 +484,9 @@ impl Cmd {
             Exit => ("Beenden", "Exit"),
             DocProperties => ("Dokumenteigenschaften", "Document properties"),
             Settings => ("Einstellungen", "Settings"),
+            ExportSettings => ("Einstellungen exportieren", "Export settings"),
+            ImportSettings => ("Einstellungen importieren", "Import settings"),
+            ResetSettings => ("Einstellungen zurücksetzen", "Reset settings"),
             Email => ("Per E-Mail senden", "Send by e-mail"),
             OpenFolder => ("Ordner öffnen", "Open folder"),
             ViewBack => ("Letzte Ansicht", "Previous view"),
@@ -656,6 +665,9 @@ impl Cmd {
             Exit => Icon::Close,
             DocProperties => Icon::Info,
             Settings => Icon::Gear,
+            ExportSettings => Icon::Export,
+            ImportSettings => Icon::Import,
+            ResetSettings => Icon::Undo,
             Email => Icon::Mail,
             OpenFolder => Icon::Open,
             ViewBack => Icon::Back,
@@ -915,9 +927,10 @@ impl MrPdfApp {
         let tab = self.active_tab();
         let has_doc = tab.is_some();
         match cmd {
-            New | Open | Exit | Settings | ToggleSidebar | ToggleProperties | Fullscreen | DarkMode
-            | FromFiles | MergeFiles | CompareDocuments | Manual | Support | ReportProblem
-            | CommandLineHelp | CheckUpdate | About | FileAssociation | Homepage => true,
+            New | Open | Exit | Settings | ExportSettings | ImportSettings | ResetSettings
+            | ToggleSidebar | ToggleProperties | Fullscreen | DarkMode | FromFiles | MergeFiles
+            | CompareDocuments | Manual | Support | ReportProblem | CommandLineHelp | CheckUpdate | About
+            | FileAssociation | Homepage => true,
             Undo => tab.and_then(|t| t.doc.can_undo()).is_some(),
             Redo => tab.and_then(|t| t.doc.can_redo()).is_some(),
             ViewBack => tab.is_some_and(|t| t.can_go_back()),
@@ -1009,7 +1022,7 @@ impl MrPdfApp {
             CloseAll => self.request_close_all(ctx),
             Exit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
             DocProperties => self.open_properties(),
-            Settings => self.dialog = Some(Dialog::Settings { author: self.settings.author.clone() }),
+            Settings => self.open_settings(),
             Undo => self.undo(ctx),
             Redo => self.redo(ctx),
             ViewBack => {
@@ -1061,7 +1074,12 @@ impl MrPdfApp {
                 let full = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
                 ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!full));
             }
-            DarkMode => self.settings.dark_mode = !self.settings.dark_mode,
+            DarkMode => {
+                // The button decides by itself: it ends "Dunkler Modus aus System".
+                let dark = self.applied_dark.unwrap_or(self.settings.dark_mode);
+                self.settings.follow_system_theme = false;
+                self.settings.dark_mode = !dark;
+            }
             CommentList => self.run(ctx, Panel(SidePanel::Comments)),
             ToggleAnnotations => {
                 if let Some(tab) = self.tab() {

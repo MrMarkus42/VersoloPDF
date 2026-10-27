@@ -179,12 +179,28 @@ impl MrPdfApp {
                         outcome = Outcome::Close;
                     }
                 }
-                Dialog::ConfirmLink { uri } => {
+                Dialog::ConfirmLink { uri, trust } => {
                     ui.heading(t.open_link_title);
                     ui.label(t.open_link_question);
                     ui.add(egui::Label::new(RichText::new(uri.as_str()).monospace()).wrap());
+                    let host = crate::ui::settings::url_host(uri);
+                    if let Some(host) = &host {
+                        let de = self.settings.language == crate::ui::i18n::Language::German;
+                        let text = if de {
+                            format!("Diese Webseite immer erlauben ({host})")
+                        } else {
+                            format!("Always allow this web site ({host})")
+                        };
+                        ui.checkbox(trust, text);
+                    }
                     let (ok, cancel) = buttons(ui, t.open, t.cancel);
                     if ok {
+                        if *trust
+                            && let Some(host) = host
+                            && !self.settings.trusted_hosts.contains(&host)
+                        {
+                            self.settings.trusted_hosts.push(host);
+                        }
                         ctx.open_url(egui::OpenUrl::new_tab(uri.clone()));
                         outcome = Outcome::Close;
                     } else if cancel {
@@ -241,18 +257,10 @@ impl MrPdfApp {
                     outcome = o;
                     action = a;
                 }
-                Dialog::Settings { author } => {
-                    ui.heading(t.settings);
-                    ui.label(t.author_name);
-                    ui.text_edit_singleline(author);
-                    ui.label(RichText::new(t.author_hint).small().weak());
-                    let (ok, cancel) = buttons(ui, t.ok, t.cancel);
-                    if ok {
-                        self.settings.author = author.chars().filter(|c| !c.is_control()).take(128).collect();
-                        outcome = Outcome::Close;
-                    } else if cancel {
-                        outcome = Outcome::Close;
-                    }
+                Dialog::Settings(state) => {
+                    let (o, a) = self.settings_dialog(ui, state);
+                    outcome = o;
+                    action = a;
                 }
                 Dialog::Print(state) => {
                     let (o, a) = self.print_dialog(ui, state);

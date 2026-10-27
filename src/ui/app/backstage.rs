@@ -103,8 +103,6 @@ enum Kind {
     New(NewKind),
     /// "Von URL öffnen".
     Url,
-    /// Planned in a later step of docs/DATEI.md.
-    Planned(char),
     /// Offered by other editors, not by MrPDF.
     Not(Unavailable),
 }
@@ -230,20 +228,22 @@ fn items(page: Page) -> &'static [Item] {
         Page::ManageSettings => {
             const {
                 &[
-                    item("Einstellungen exportieren", "Export settings", Icon::Export, Planned('M')),
-                    item("Einstellungen importieren", "Import settings", Icon::Import, Planned('M')),
-                    item("Einstellungen zurücksetzen", "Reset settings", Icon::Undo, Planned('M')),
+                    item(
+                        "Einstellungen exportieren",
+                        "Export settings",
+                        Icon::Export,
+                        Run(Cmd::ExportSettings),
+                    ),
+                    item(
+                        "Einstellungen importieren",
+                        "Import settings",
+                        Icon::Import,
+                        Run(Cmd::ImportSettings),
+                    ),
+                    item("Einstellungen zurücksetzen", "Reset settings", Icon::Undo, Run(Cmd::ResetSettings)),
                 ]
             }
         }
-    }
-}
-
-fn planned_hint(lang: Language, step: char) -> String {
-    if lang == Language::German {
-        format!("In Vorbereitung (Schritt {step}).")
-    } else {
-        format!("In preparation (step {step}).")
     }
 }
 
@@ -423,7 +423,6 @@ impl MrPdfApp {
                     let (enabled, hint) = match it.kind {
                         Kind::Run(cmd) => (self.cmd_enabled(cmd), None),
                         Kind::View(_) | Kind::New(_) | Kind::Url => (true, None),
-                        Kind::Planned(step) => (false, Some(planned_hint(lang, step))),
                         Kind::Not(reason) => (false, Some(reason.reason(lang).to_string())),
                     };
                     let selected = page == Page::Open && it.kind == Kind::View(open_view);

@@ -10,7 +10,8 @@ use crate::ui::widgets::icon_button;
 
 impl MrPdfApp {
     pub(super) fn tab_bar(&mut self, ui: &mut Ui) {
-        if self.tabs.is_empty() {
+        // "Tab-Leiste verbergen, wenn nur ein Dokument geöffnet ist".
+        if self.tabs.is_empty() || (self.tabs.len() == 1 && self.settings.hide_single_tab) {
             return;
         }
         let t = self.t();

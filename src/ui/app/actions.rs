@@ -108,6 +108,15 @@ impl MrPdfApp {
             Ok(doc) => {
                 self.add_tab(doc);
                 self.settings.add_recent(&canonical);
+                // "Zuletzt angezeigte Seite wiederherstellen".
+                if self.settings.restore_last_page
+                    && let Some(page) = self.settings.last_page(&canonical)
+                    && let Some(tab) = self.tabs.last_mut()
+                    && page > 0
+                    && page < tab.doc.page_count()
+                {
+                    tab.go_to_page(page);
+                }
                 ctx.request_repaint();
             }
             Err(Error::PasswordRequired) => {
@@ -185,12 +194,19 @@ impl MrPdfApp {
             .add_filter(if de { "Einfache Textdatei" } else { "Plain text file" }, &["txt"])
             .add_filter("MS Word Document", &["docx"])
             .set_file_name(name);
-        if let Some(dir) = self.tabs[index].doc.path().and_then(Path::parent) {
+        let doc_dir = self.tabs[index].doc.path().and_then(Path::parent).map(Path::to_path_buf);
+        let last_dir = self.settings.last_save_folder.clone().filter(|d| d.is_dir());
+        let dir = match self.settings.save_as_folder {
+            crate::ui::settings::SaveFolder::Document => doc_dir.or(last_dir),
+            crate::ui::settings::SaveFolder::Last => last_dir.or(doc_dir),
+        };
+        if let Some(dir) = dir {
             dialog = dialog.set_directory(dir);
         }
         let Some(path) = dialog.save_file() else {
             return false;
         };
+        self.settings.last_save_folder = path.parent().map(Path::to_path_buf);
         let ext = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
         if ext == "txt" || ext == "docx" {
             let doc = &self.tabs[index].doc;
@@ -250,9 +266,22 @@ impl MrPdfApp {
         }
     }
 
+    /// Remembers the shown page of every open document (for
+    /// "Zuletzt angezeigte Seite wiederherstellen").
+    pub(super) fn remember_pages(&mut self) {
+        for tab in &self.tabs {
+            if let Some(path) = tab.doc.path() {
+                self.settings.remember_page(path, tab.current_page);
+            }
+        }
+    }
+
     pub fn close_tab(&mut self, ctx: &Context, tab_id: u64) {
         self.forget_recovery(tab_id);
         if let Some(i) = self.tabs.iter().position(|t| t.id == tab_id) {
+            if let Some(path) = self.tabs[i].doc.path() {
+                self.settings.remember_page(path, self.tabs[i].current_page);
+            }
             self.tabs.remove(i);
             if self.active >= self.tabs.len() {
                 self.active = self.tabs.len().saturating_sub(1);
@@ -508,10 +537,12 @@ impl MrPdfApp {
     pub fn handle_canvas_event(&mut self, ctx: &Context, event: CanvasEvent) {
         match event {
             CanvasEvent::Create { page, annot } => {
+                // "Neu erstellte Anmerkung automatisch auswählen".
+                let select = self.settings.auto_select_new;
                 self.edit(ctx, |tab| {
                     tab.doc.add_annotation(page, &annot)?;
                     let index = tab.doc.annotations(page)?.len().saturating_sub(1);
-                    tab.selected_annot = Some(crate::ui::tab::AnnotRef { page, index });
+                    tab.selected_annot = select.then_some(crate::ui::tab::AnnotRef { page, index });
                     Ok(())
                 });
                 if !self.tool.is_sticky() && self.tool.gesture() != crate::ui::tools::Gesture::Vertices {
@@ -546,11 +577,15 @@ impl MrPdfApp {
                 });
             }
             CanvasEvent::OpenUri(uri) => {
-                if is_safe_uri(&uri) {
-                    self.dialog = Some(Dialog::ConfirmLink { uri });
-                } else {
+                use crate::ui::settings::{LinkPolicy, url_host};
+                let trusted = url_host(&uri).is_some_and(|h| self.settings.trusted_hosts.contains(&h));
+                if !is_safe_uri(&uri) || self.settings.link_policy == LinkPolicy::Block {
                     let t = self.t();
                     self.set_status(ctx, t.link_blocked);
+                } else if self.settings.link_policy == LinkPolicy::Allow || trusted {
+                    ctx.open_url(egui::OpenUrl::new_tab(uri));
+                } else {
+                    self.dialog = Some(Dialog::ConfirmLink { uri, trust: false });
                 }
             }
             CanvasEvent::CommitField { page, annot_index, value } => {

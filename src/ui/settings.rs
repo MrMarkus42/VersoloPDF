@@ -60,6 +60,83 @@ pub struct Settings {
     pub unit: Unit,
     /// Saved dialog settings (see [crate::ui::pickers::preset_combo]).
     pub presets: PresetStore,
+
+    // --- "Einstellungen" dialog ---
+    /// Allgemein: "Tab-Leiste verbergen, wenn nur ein Dokument geöffnet ist".
+    pub hide_single_tab: bool,
+    /// Allgemein: "Das Dateimenü beim Start anzeigen".
+    pub backstage_at_start: bool,
+    /// Dokumente: folder offered by "Speichern unter".
+    pub save_as_folder: SaveFolder,
+    pub last_save_folder: Option<PathBuf>,
+    /// Seitenanzeige: reopen documents at the page last shown.
+    pub restore_last_page: bool,
+    pub last_pages: Vec<(PathBuf, usize)>,
+    /// Anmerkungen: "Neu erstellte Anmerkung automatisch auswählen".
+    pub auto_select_new: bool,
+    /// Oberfläche anpassen: "Dunkler Modus aus System".
+    pub follow_system_theme: bool,
+    /// Oberfläche anpassen: size of the user interface (1.0 = 100 %).
+    pub ui_scale: f32,
+    /// Vollbild: "Beenden durch Drücken der ESC-Taste".
+    pub esc_exits_fullscreen: bool,
+    /// Werkzeuge: tool at start and whether the last tool is remembered.
+    pub default_tool: Tool,
+    pub remember_tool: bool,
+    pub last_tool: Tool,
+    /// Sicherheit: what happens when a document opens a web page.
+    pub link_policy: LinkPolicy,
+    /// Sicherheit: web sites (host names) always allowed.
+    pub trusted_hosts: Vec<String>,
+    /// E-Mails versenden: subject pattern (%[FileName]).
+    pub email_subject: String,
+    /// Identität (the name is `author`).
+    pub identity: Identity,
+    /// Bildschirmfotos: resolution (0: twice the screen resolution), greyscale.
+    pub snapshot_dpi: u32,
+    pub snapshot_gray: bool,
+    /// Barrierefreiheit: "Farben im Dokument ersetzen".
+    pub recolor: bool,
+    pub recolor_background: [u8; 3],
+    pub recolor_text: [u8; 3],
+}
+
+/// Folder offered by "Speichern unter".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum SaveFolder {
+    /// "Letzter Ordner"
+    #[default]
+    Last,
+    /// The folder of the document.
+    Document,
+}
+
+/// Opening web pages from documents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum LinkPolicy {
+    /// Ask unless the site is in the trust list ("Vertrauensliste").
+    #[default]
+    Ask,
+    Allow,
+    Block,
+}
+
+/// "Identität": details of the user (used for comments and stamps).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Identity {
+    pub title: String,
+    pub organisation: String,
+    pub department: String,
+    pub email: String,
+}
+
+/// Host name of a web address (lower case), for the trust list.
+pub fn url_host(url: &str) -> Option<String> {
+    let rest = url.split_once("://")?.1;
+    let host = rest.split(['/', '?', '#']).next()?.rsplit('@').next()?;
+    let host = host.split(':').next()?.trim().to_ascii_lowercase();
+    (!host.is_empty()).then_some(host)
 }
 
 impl Default for Settings {
@@ -86,9 +163,34 @@ impl Default for Settings {
             highlight_fields: true,
             unit: Unit::Mm,
             presets: Vec::new(),
+            hide_single_tab: false,
+            backstage_at_start: true,
+            save_as_folder: SaveFolder::Last,
+            last_save_folder: None,
+            restore_last_page: true,
+            last_pages: Vec::new(),
+            auto_select_new: true,
+            follow_system_theme: false,
+            ui_scale: 1.0,
+            esc_exits_fullscreen: true,
+            default_tool: Tool::Hand,
+            remember_tool: false,
+            last_tool: Tool::Hand,
+            link_policy: LinkPolicy::Ask,
+            trusted_hosts: Vec::new(),
+            email_subject: "%[FileName]".into(),
+            identity: Identity::default(),
+            snapshot_dpi: 0,
+            snapshot_gray: false,
+            recolor: false,
+            recolor_background: [255, 255, 255],
+            recolor_text: [0, 0, 0],
         }
     }
 }
+
+/// Upper bound of remembered page positions.
+const MAX_LAST_PAGES: usize = 200;
 
 fn default_author() -> String {
     std::env::var("USERNAME")
@@ -128,6 +230,57 @@ impl Settings {
         self.recent_files.retain(|p| p != path);
         self.recent_files.insert(0, path.to_path_buf());
         self.recent_files.truncate(MAX_RECENT);
+    }
+
+    /// Remembers the page shown for a document.
+    pub fn remember_page(&mut self, path: &Path, page: usize) {
+        self.last_pages.retain(|(p, _)| p != path);
+        self.last_pages.insert(0, (path.to_path_buf(), page));
+        self.last_pages.truncate(MAX_LAST_PAGES);
+    }
+
+    /// The page last shown for a document.
+    pub fn last_page(&self, path: &Path) -> Option<usize> {
+        self.last_pages.iter().find(|(p, _)| p == path).map(|(_, page)| *page)
+    }
+
+    /// Resets all options but keeps the history (recent files, pins,
+    /// sessions, page positions) and the saved presets.
+    pub fn reset_options(&mut self) {
+        let old = std::mem::take(self);
+        self.keep_history(old);
+    }
+
+    /// Takes the history (recent files, pins, sessions, page positions,
+    /// addresses) and the saved presets from `old`.
+    pub fn keep_history(&mut self, old: Settings) {
+        self.recent_files = old.recent_files;
+        self.pinned_files = old.pinned_files;
+        self.last_session = old.last_session;
+        self.sessions = old.sessions;
+        self.url_history = old.url_history;
+        self.last_pages = old.last_pages;
+        self.presets = old.presets;
+    }
+
+    /// Writes the settings to a file (RON).
+    pub fn export(&self, path: &Path) -> crate::Result<()> {
+        let text = ron::ser::to_string_pretty(self, ron::ser::PrettyConfig::default())
+            .map_err(|e| crate::Error::Invalid(e.to_string()))?;
+        std::fs::write(path, text).map_err(|e| crate::Error::io(path, e))
+    }
+
+    /// Reads settings written by [`Settings::export`].
+    pub fn import(path: &Path) -> crate::Result<Settings> {
+        let len = std::fs::metadata(path).map_err(|e| crate::Error::io(path, e))?.len();
+        if len > 16 * 1024 * 1024 {
+            return Err(crate::Error::FileTooLarge { size: len, limit: 16 * 1024 * 1024 });
+        }
+        let text = std::fs::read_to_string(path).map_err(|e| crate::Error::io(path, e))?;
+        let mut s: Settings = ron::from_str(&text).map_err(|e| crate::Error::Invalid(e.to_string()))?;
+        s.ui_scale = s.ui_scale.clamp(0.5, 2.0);
+        s.recovery_minutes = s.recovery_minutes.min(600);
+        Ok(s)
     }
 
     /// Pins or unpins a document of the recent files list.
@@ -205,6 +358,39 @@ mod tests {
         assert_eq!(read_session(&file).unwrap(), session);
         std::fs::write(&file, "kein ron").unwrap();
         assert!(read_session(&file).is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn options_export_import_reset() {
+        let mut s = Settings {
+            hide_single_tab: true,
+            ui_scale: 1.25,
+            email_subject: "Datei %[FileName]".into(),
+            ..Settings::default()
+        };
+        s.add_recent(Path::new("/a.pdf"));
+        s.remember_page(Path::new("/a.pdf"), 7);
+        assert_eq!(s.last_page(Path::new("/a.pdf")), Some(7));
+        let dir = std::env::temp_dir().join(format!("mrpdf-settings-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("e.ron");
+        s.export(&file).unwrap();
+        let back = Settings::import(&file).unwrap();
+        assert!(back.hide_single_tab);
+        assert_eq!(back.email_subject, "Datei %[FileName]");
+        assert_eq!(back.ui_scale, 1.25);
+        // Old files without the new fields still load.
+        std::fs::write(&file, "(author: \"X\")").unwrap();
+        let old = Settings::import(&file).unwrap();
+        assert_eq!(old.author, "X");
+        assert!(old.backstage_at_start && old.restore_last_page);
+        s.reset_options();
+        assert!(!s.hide_single_tab);
+        assert_eq!(s.recent_files.len(), 1, "history is kept");
+        assert_eq!(s.last_page(Path::new("/a.pdf")), Some(7));
+        assert_eq!(url_host("https://user@Example.org:8080/x?y"), Some("example.org".into()));
+        assert_eq!(url_host("mailto:x@y"), None);
         std::fs::remove_dir_all(&dir).ok();
     }
 

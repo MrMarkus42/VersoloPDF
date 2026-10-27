@@ -139,6 +139,8 @@ pub struct DocTab {
     pub view_rotation: Rotation,
     /// Whether annotations are drawn.
     pub show_annotations: bool,
+    /// "Farben im Dokument ersetzen" (background, text); set by the app.
+    pub recolor: Option<([u8; 3], [u8; 3])>,
     /// Vertices of a polygon tool in progress (view space of polygon_page).
     pub polygon: Vec<PointF>,
     pub polygon_page: usize,
@@ -179,6 +181,7 @@ impl DocTab {
             forward: Vec::new(),
             view_rotation: Rotation::R0,
             show_annotations: true,
+            recolor: None,
             polygon: Vec::new(),
             polygon_page: 0,
         }
@@ -217,6 +220,7 @@ impl DocTab {
         RenderOptions {
             rotation: self.view_rotation,
             annotations: self.show_annotations,
+            recolor: self.recolor,
             ..RenderOptions::default()
         }
     }

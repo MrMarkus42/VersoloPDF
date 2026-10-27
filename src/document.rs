@@ -50,11 +50,32 @@ pub struct RenderOptions {
     pub background: [u8; 3],
     /// Render as for a printer (annotations without the print flag hidden).
     pub printing: bool,
+    /// "Farben im Dokument ersetzen": (background, text) colours; light
+    /// areas become the background colour, dark areas the text colour.
+    pub recolor: Option<([u8; 3], [u8; 3])>,
 }
 
 impl Default for RenderOptions {
     fn default() -> Self {
-        Self { rotation: Rotation::R0, annotations: true, background: [255, 255, 255], printing: false }
+        Self {
+            rotation: Rotation::R0,
+            annotations: true,
+            background: [255, 255, 255],
+            printing: false,
+            recolor: None,
+        }
+    }
+}
+
+/// Maps the brightness of every pixel between `text` (dark) and
+/// `background` (light); used for "Farben im Dokument ersetzen".
+pub fn recolor_rgba(rgba: &mut [u8], background: [u8; 3], text: [u8; 3]) {
+    for px in rgba.as_chunks_mut::<4>().0 {
+        let l = (299 * px[0] as u32 + 587 * px[1] as u32 + 114 * px[2] as u32) / 1000;
+        for c in 0..3 {
+            let (fg, bg) = (text[c] as i32, background[c] as i32);
+            px[c] = (fg + (bg - fg) * l as i32 / 255).clamp(0, 255) as u8;
+        }
     }
 }
 
@@ -470,7 +491,11 @@ impl Document {
             .use_print_quality(opts.printing)
             .set_clear_color(PdfColor::new(opts.background[0], opts.background[1], opts.background[2], 255));
         page.render_into_bitmap_with_config(&mut bitmap, &config)?;
-        Ok(RenderedImage { width: w, height: h, rgba: bitmap.as_rgba_bytes() })
+        let mut rgba = bitmap.as_rgba_bytes();
+        if let Some((background, text)) = opts.recolor {
+            recolor_rgba(&mut rgba, background, text);
+        }
+        Ok(RenderedImage { width: w, height: h, rgba })
     }
 
     // -----------------------------------------------------------------

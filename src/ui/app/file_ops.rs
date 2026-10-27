@@ -193,16 +193,34 @@ impl MrPdfApp {
                     cmd,
                 });
             }
+            Cmd::ExportSettings => self.export_settings(ctx),
+            Cmd::ImportSettings => self.import_settings(ctx),
+            Cmd::ResetSettings => {
+                self.dialog = Some(Dialog::Confirm {
+                    title: cmd.label(lang).into(),
+                    text: if de {
+                        "Alle Einstellungen auf die Standardwerte zurücksetzen? Die Liste der zuletzt \
+                         verwendeten Dokumente und die Sitzungen bleiben erhalten."
+                    } else {
+                        "Reset all settings to their defaults? The list of recent documents and the \
+                         sessions are kept."
+                    }
+                    .into(),
+                    cmd,
+                });
+            }
             _ => return false,
         }
         true
     }
 
-    /// After the confirmation of "Zurücksetzen" / "In den Papierkorb werfen".
+    /// After the confirmation of "Zurücksetzen" / "In den Papierkorb werfen"
+    /// / "Einstellungen zurücksetzen".
     pub(super) fn run_file_op_confirmed(&mut self, ctx: &Context, cmd: Cmd) -> bool {
         match cmd {
             Cmd::Revert => self.revert(ctx),
             Cmd::TrashFile => self.trash(ctx),
+            Cmd::ResetSettings => self.reset_settings(ctx),
             _ => return false,
         }
         true

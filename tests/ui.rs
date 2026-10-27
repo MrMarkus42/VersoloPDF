@@ -35,8 +35,13 @@ fn harness(files: Vec<PathBuf>, dark: bool) -> Harness<'static, MrPdfApp> {
         language: Language::German,
         author: "Tester".into(),
         dark_mode: dark,
+        backstage_at_start: false,
         ..Settings::default()
     };
+    harness_with(settings, files)
+}
+
+fn harness_with(settings: Settings, files: Vec<PathBuf>) -> Harness<'static, MrPdfApp> {
     Harness::builder().with_size(egui::vec2(1280.0, 820.0)).with_max_steps(64).wgpu().build_eframe(
         move |cc| {
             let mut app = MrPdfApp::with_settings(&cc.egui_ctx, settings, files);
@@ -1251,11 +1256,23 @@ fn file_backstage() {
     h.run_steps(3);
     open_backstage(&mut h);
     // Disabled entries do nothing.
+    h.get_by_label("Speicherort hinzufügen").click();
+    h.run_steps(3);
+    assert!(h.state().backstage_open() && h.state().dialog().is_none());
+    // "Einstellungen verwalten": "zurücksetzen" asks first.
     h.get_by_label("Einstellungen verwalten").click();
     h.run_steps(3);
-    h.get_by_label("Einstellungen exportieren").click();
+    assert!(h.query_by_label("Einstellungen exportieren").is_some());
+    assert!(h.query_by_label("Einstellungen importieren").is_some());
+    save(&mut h, "86-backstage-manage-settings");
+    h.get_by_label("Einstellungen zurücksetzen").click();
     h.run_steps(3);
-    assert!(h.state().backstage_open());
+    assert!(matches!(h.state().dialog(), Some(mrpdf::ui::app::Dialog::Confirm { .. })));
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    if !h.state().backstage_open() {
+        open_backstage(&mut h);
+    }
     // Sub-page lists.
     h.get_by_label("Exportieren").click();
     h.run_steps(3);
@@ -1319,4 +1336,93 @@ fn file_backstage() {
     h.run_steps(5);
     assert_eq!(h.state().tab_count(), 0);
     assert!(h.state().dialog().is_none());
+}
+
+#[test]
+fn settings_dialog() {
+    use mrpdf::ui::app::Dialog;
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let file = sample_file(&dir, 3);
+    let mut h = harness(vec![file.clone()], false);
+    h.run_steps(10);
+    h.key_press_modifiers(Modifiers::COMMAND, egui::Key::K);
+    h.run_steps(3);
+    assert!(matches!(h.state().dialog(), Some(Dialog::Settings(_))));
+    // All 38 categories are listed; "Allgemein" is shown first.
+    for label in ["Dokumente", "Seitenanzeige", "Identität", "Sicherheit", "Vollbild", "Vorlesen"] {
+        assert!(h.query_all_by_label(label).next().is_some(), "{label} missing");
+    }
+    save(&mut h, "87-settings-general");
+    // A checkbox changes only the draft; "Übernehmen" applies it and keeps the dialog.
+    h.get_by_label("Tab-Leiste verbergen, wenn nur ein Dokument geöffnet ist").click();
+    h.run_steps(2);
+    assert!(!h.state().settings().hide_single_tab);
+    h.get_by_label("Übernehmen").click();
+    h.run_steps(3);
+    assert!(h.state().settings().hide_single_tab);
+    assert!(matches!(h.state().dialog(), Some(Dialog::Settings(_))));
+    // Identity page (further down in the scrolled list).
+    h.get_by_label("Identität").scroll_to_me();
+    h.run_steps(6);
+    h.get_by_label("Identität").click();
+    h.run_steps(3);
+    assert!(h.query_by_label("Organisation:").is_some(), "identity page shown");
+    save(&mut h, "88-settings-identity");
+    h.state_mut().settings_draft_mut().unwrap().identity.organisation = "Firma\u{7}".into();
+    h.get_by_label("Sicherheit").scroll_to_me();
+    h.run_steps(6);
+    h.get_by_label("Sicherheit").click();
+    h.run_steps(3);
+    assert!(h.query_by_label("Vertrauensliste").is_some(), "security page shown");
+    save(&mut h, "89-settings-security");
+    h.get_by_label("Lizenz").scroll_to_me();
+    h.run_steps(6);
+    h.get_by_label("Lizenz").click();
+    h.run_steps(3);
+    assert!(h.query_by_label("❌ MrPDF ist freie Software und braucht keine Lizenz.").is_some());
+    // "Farben im Dokument ersetzen" and OK.
+    let draft = h.state_mut().settings_draft_mut().unwrap();
+    draft.recolor = true;
+    draft.recolor_background = [0, 0, 0];
+    draft.recolor_text = [255, 255, 0];
+    h.get_by_label("OK").click();
+    h.run_steps(5);
+    assert!(h.state().dialog().is_none());
+    assert_eq!(h.state().settings().identity.organisation, "Firma", "control characters removed");
+    assert_eq!(h.state().active_tab().unwrap().recolor, Some(([0, 0, 0], [255, 255, 0])));
+    save(&mut h, "90-settings-recolor");
+    // Abbrechen discards the changes.
+    h.key_press_modifiers(Modifiers::COMMAND, egui::Key::K);
+    h.run_steps(3);
+    h.state_mut().settings_draft_mut().unwrap().author = "Jemand".into();
+    h.get_by_label("Abbrechen").click();
+    h.run_steps(3);
+    assert!(h.state().dialog().is_none());
+    assert_eq!(h.state().settings().author, "Tester");
+    // The page shown last is restored when the document is opened again.
+    h.state_mut().active_tab_mut().unwrap().go_to_page(2);
+    h.run_steps(4);
+    h.key_press_modifiers(Modifiers::COMMAND, egui::Key::W);
+    h.run_steps(4);
+    assert_eq!(h.state().tab_count(), 0);
+    let ctx = h.ctx.clone();
+    h.state_mut().open_path(&ctx, file.clone(), None);
+    h.run_steps(6);
+    assert_eq!(h.state().active_tab().unwrap().current_page, 2);
+}
+
+#[test]
+fn backstage_and_tool_at_start() {
+    let _guard = common::lock();
+    let settings = Settings {
+        language: Language::German,
+        default_tool: mrpdf::ui::tools::Tool::SelectText,
+        ..Settings::default()
+    };
+    let mut h = harness_with(settings, Vec::new());
+    h.run_steps(5);
+    // "Das Dateimenü beim Start anzeigen" is on by default.
+    assert!(h.state().backstage_open());
+    assert_eq!(h.state().tool(), mrpdf::ui::tools::Tool::SelectText);
 }

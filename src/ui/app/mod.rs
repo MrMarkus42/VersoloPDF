@@ -20,6 +20,7 @@ mod properties;
 mod props_dialog;
 mod review;
 mod ribbon;
+pub mod settings_dialog;
 mod shape_dialogs;
 mod sidebar;
 mod statusbar;
@@ -137,6 +138,8 @@ pub enum Dialog {
     },
     ConfirmLink {
         uri: String,
+        /// "Diese Webseite immer erlauben" (adds it to the trust list).
+        trust: bool,
     },
     /// "Dokumenteigenschaften".
     Properties(Box<props_dialog::PropsState>),
@@ -151,9 +154,8 @@ pub enum Dialog {
     ExportWord {
         range: crate::ui::pickers::PageRange,
     },
-    Settings {
-        author: String,
-    },
+    /// "Einstellungen" (Strg+K).
+    Settings(Box<settings_dialog::SettingsPage>),
     /// "Drucken" / "Alle drucken".
     Print(Box<print_dialog::PrintState>),
     Choice {
@@ -282,6 +284,10 @@ pub struct MrPdfApp {
     recovery_offer: Option<Vec<(String, crate::files::RecoveryEntry)>>,
     /// Time of the last recovery copy.
     last_recovery: f64,
+    /// Options being edited in "Einstellungen" (applied with OK / Übernehmen).
+    settings_draft: Option<Box<Settings>>,
+    /// "Größe der Benutzeroberfläche" last applied.
+    applied_scale: Option<f32>,
 }
 
 impl MrPdfApp {
@@ -295,18 +301,21 @@ impl MrPdfApp {
     pub fn with_settings(ctx: &Context, settings: Settings, files: Vec<PathBuf>) -> Self {
         ctx.options_mut(|o| o.zoom_with_keyboard = false);
         // "Letzte Sitzung beim Start wiederherstellen".
-        let files = if files.is_empty() && settings.restore_session {
+        let files: Vec<PathBuf> = if files.is_empty() && settings.restore_session {
             settings.last_session.files.iter().filter(|p| p.exists()).cloned().collect()
         } else {
             files
         };
+        // "Das Dateimenü beim Start anzeigen" (only when nothing is opened).
+        let backstage = (settings.backstage_at_start && files.is_empty()).then_some(backstage::Page::Open);
+        let tool = if settings.remember_tool { settings.last_tool } else { settings.default_tool };
         Self {
             side: SidePanel::Thumbnails,
             settings,
             tabs: Vec::new(),
             active: 0,
             ribbon: RibbonTab::Home,
-            tool: Tool::Hand,
+            tool,
             dialog: None,
             status: None,
             pending_open: files.into(),
@@ -328,7 +337,7 @@ impl MrPdfApp {
             dialog_doc: None,
             clipboard: (None, None),
             overlay_source: None,
-            backstage: None,
+            backstage,
             recent_filter: String::new(),
             open_view: backstage::OpenView::Recent,
             session_name: String::new(),
@@ -337,6 +346,39 @@ impl MrPdfApp {
             recovery_dir: crate::files::default_recovery_dir(),
             recovery_offer: None,
             last_recovery: 0.0,
+            settings_draft: None,
+            applied_scale: None,
+        }
+    }
+
+    /// Applies options that act on the window or the open tabs (theme,
+    /// size of the user interface, replaced document colours).
+    fn apply_view_settings(&mut self, ctx: &Context) {
+        let dark = if self.settings.follow_system_theme {
+            ctx.system_theme().map_or(self.settings.dark_mode, |t| t == egui::Theme::Dark)
+        } else {
+            self.settings.dark_mode
+        };
+        if self.applied_dark != Some(dark) {
+            theme::apply(ctx, dark);
+            self.applied_dark = Some(dark);
+        }
+        let scale = self.settings.ui_scale.clamp(0.5, 2.0);
+        if self.applied_scale != Some(scale) {
+            // Only touch the zoom when the option was changed, so the
+            // user's own zoom of the window is kept otherwise.
+            if self.applied_scale.is_some() || scale != 1.0 {
+                ctx.set_zoom_factor(scale);
+            }
+            self.applied_scale = Some(scale);
+        }
+        let recolor =
+            self.settings.recolor.then_some((self.settings.recolor_background, self.settings.recolor_text));
+        for tab in &mut self.tabs {
+            if tab.recolor != recolor {
+                tab.recolor = recolor;
+                tab.textures.clear();
+            }
         }
     }
 
@@ -400,6 +442,13 @@ impl MrPdfApp {
             |m: Modifiers, k: Key| ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(m, k)));
         if self.backstage_open() && pressed(Modifiers::NONE, Key::Escape) {
             self.close_backstage();
+        }
+        // "Vollbild: Beenden durch Drücken der ESC-Taste".
+        if self.settings.esc_exits_fullscreen
+            && ctx.input(|i| i.viewport().fullscreen.unwrap_or(false))
+            && pressed(Modifiers::NONE, Key::Escape)
+        {
+            ctx.send_viewport_cmd(ViewportCommand::Fullscreen(false));
         }
         if pressed(cmd, Key::K) {
             self.run(ctx, commands::Cmd::Settings);
@@ -649,10 +698,7 @@ impl MrPdfApp {
 impl eframe::App for MrPdfApp {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-        if self.applied_dark != Some(self.settings.dark_mode) {
-            theme::apply(&ctx, self.settings.dark_mode);
-            self.applied_dark = Some(self.settings.dark_mode);
-        }
+        self.apply_view_settings(&ctx);
         if let Some(path) = self.pending_open.pop_front() {
             self.open_path(&ctx, path, None);
         }
@@ -692,6 +738,8 @@ impl eframe::App for MrPdfApp {
         if let Some(session) = self.current_session(String::new()) {
             self.settings.last_session = session;
         }
+        self.remember_pages();
+        self.settings.last_tool = self.tool;
         eframe::set_value(storage, SETTINGS_KEY, &self.settings);
     }
 }
