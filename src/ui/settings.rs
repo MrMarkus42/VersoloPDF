@@ -99,6 +99,47 @@ pub struct Settings {
     pub recolor: bool,
     pub recolor_background: [u8; 3],
     pub recolor_text: [u8; 3],
+
+    // --- Ribbon tab "Ansicht" ---
+    /// "Titelseite in der zweiseitigen Ansicht einzeln".
+    pub cover_alone: bool,
+    /// "Seitenzwischenräume".
+    pub page_gaps: bool,
+    /// "Rechts-nach-Links-Seitenansicht".
+    pub right_to_left: bool,
+    /// "Seiten nebeneinander" (instead of "Standardlayout").
+    pub side_by_side: bool,
+    pub show_rulers: bool,
+    pub show_grid: bool,
+    pub show_guides: bool,
+    /// "Transparenzgitter" instead of white paper.
+    pub transparency_grid: bool,
+    /// "Seitenmaße/Position" in the status bar.
+    pub show_page_info: bool,
+    /// "Einrasten" (at the grid and/or the guides).
+    pub snap: bool,
+    pub snap_grid: bool,
+    pub snap_guides: bool,
+    /// "Verweise hervorheben".
+    pub highlight_links: bool,
+    /// Grid: distance of the main lines (mm) and number of subdivisions.
+    pub grid_mm: f32,
+    pub grid_subdivisions: u32,
+    /// "Lupe" window and its magnification.
+    pub show_loupe: bool,
+    pub loupe_factor: f32,
+    /// "Ausschnitt und Vergrößerung" window.
+    pub show_pan_zoom: bool,
+    /// "Design" of the user interface.
+    pub design: crate::ui::theme::Design,
+    /// "Automatisch blättern": points per second.
+    pub auto_scroll_speed: f32,
+    /// "Vorlesen": volume 0–100, speed −10…10 and options.
+    pub read_volume: u32,
+    pub read_rate: i32,
+    pub read_fields: bool,
+    pub read_annots: bool,
+    pub read_follow: bool,
 }
 
 /// Folder offered by "Speichern unter".
@@ -185,6 +226,31 @@ impl Default for Settings {
             recolor: false,
             recolor_background: [255, 255, 255],
             recolor_text: [0, 0, 0],
+            cover_alone: false,
+            page_gaps: true,
+            right_to_left: false,
+            side_by_side: false,
+            show_rulers: false,
+            show_grid: false,
+            show_guides: true,
+            transparency_grid: false,
+            show_page_info: true,
+            snap: false,
+            snap_grid: true,
+            snap_guides: true,
+            highlight_links: false,
+            grid_mm: 10.0,
+            grid_subdivisions: 10,
+            show_loupe: false,
+            loupe_factor: 4.0,
+            show_pan_zoom: false,
+            design: crate::ui::theme::Design::Standard,
+            auto_scroll_speed: 60.0,
+            read_volume: 100,
+            read_rate: 0,
+            read_fields: false,
+            read_annots: false,
+            read_follow: true,
         }
     }
 }
@@ -263,6 +329,18 @@ impl Settings {
         self.presets = old.presets;
     }
 
+    /// Keeps the values of the view options in a sensible range.
+    pub fn limit_view_values(&mut self) {
+        self.grid_mm = if self.grid_mm.is_finite() { self.grid_mm.clamp(1.0, 200.0) } else { 10.0 };
+        self.grid_subdivisions = self.grid_subdivisions.clamp(1, 20);
+        self.loupe_factor =
+            if self.loupe_factor.is_finite() { self.loupe_factor.clamp(1.5, 16.0) } else { 4.0 };
+        self.auto_scroll_speed =
+            if self.auto_scroll_speed.is_finite() { self.auto_scroll_speed.clamp(5.0, 2000.0) } else { 60.0 };
+        self.read_volume = self.read_volume.min(100);
+        self.read_rate = self.read_rate.clamp(-10, 10);
+    }
+
     /// Writes the settings to a file (RON).
     pub fn export(&self, path: &Path) -> crate::Result<()> {
         let text = ron::ser::to_string_pretty(self, ron::ser::PrettyConfig::default())
@@ -280,6 +358,7 @@ impl Settings {
         let mut s: Settings = ron::from_str(&text).map_err(|e| crate::Error::Invalid(e.to_string()))?;
         s.ui_scale = s.ui_scale.clamp(0.5, 2.0);
         s.recovery_minutes = s.recovery_minutes.min(600);
+        s.limit_view_values();
         Ok(s)
     }
 

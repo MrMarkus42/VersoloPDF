@@ -50,6 +50,10 @@ pub enum Tool {
     FieldSignature,
     /// Draw a rectangle to crop the page (Seite zuschneiden).
     Crop,
+    /// "Stufenlose Vergrößerung": drag up or down to zoom.
+    DynamicZoom,
+    /// "Lupe": shows the area under the pointer magnified in a window.
+    Loupe,
 }
 
 /// How a tool is operated on the page.
@@ -115,14 +119,20 @@ impl Tool {
             Tool::FieldCombo => Icon::ComboBox,
             Tool::FieldSignature => Icon::Signature,
             Tool::Crop => Icon::Crop,
+            Tool::DynamicZoom => Icon::ZoomIn,
+            Tool::Loupe => Icon::Search,
         }
     }
 
     pub fn gesture(self) -> Gesture {
         match self {
-            Tool::Hand | Tool::SelectText | Tool::SelectAnnot | Tool::SelectFields | Tool::Eraser => {
-                Gesture::None
-            }
+            Tool::Hand
+            | Tool::SelectText
+            | Tool::SelectAnnot
+            | Tool::SelectFields
+            | Tool::Eraser
+            | Tool::DynamicZoom
+            | Tool::Loupe => Gesture::None,
             Tool::Highlight | Tool::Underline | Tool::StrikeOut | Tool::Squiggly | Tool::Replace => {
                 Gesture::TextMarkup
             }
@@ -241,6 +251,8 @@ impl Tool {
                 | Tool::Redact
                 | Tool::Zoom
                 | Tool::Signature
+                | Tool::DynamicZoom
+                | Tool::Loupe
         )
     }
 

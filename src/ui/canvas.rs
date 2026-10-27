@@ -12,13 +12,57 @@ use crate::pdf_edit::NewAnnotation;
 use crate::text::TextRange;
 use crate::ui::cache::Budget;
 use crate::ui::i18n::Strings;
-use crate::ui::tab::{AnnotRef, DocTab, FieldEdit, Interaction, ScrollRequest, TextSelection};
+use crate::ui::pickers::Unit;
+use crate::ui::tab::{AnnotRef, DocTab, FieldEdit, Guide, Interaction, ScrollRequest, Split, TextSelection};
 use crate::ui::theme;
 use crate::ui::tools::{Gesture, Tool};
 use crate::ui::view::{
-    Layout, MARGIN, MAX_ZOOM, MIN_ZOOM, PT_TO_SCREEN, PageLayout, ZoomMode, fit_page_zoom, fit_width_zoom,
-    zoom_in, zoom_out,
+    Layout, LayoutOptions, MARGIN, MAX_ZOOM, MIN_ZOOM, PT_TO_SCREEN, PageLayout, ZoomMode, fit_page_zoom,
+    fit_width_zoom, zoom_in, zoom_out,
 };
+
+/// Display options of the ribbon tab "Ansicht" used by the canvas.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ViewOptions {
+    /// Page display (the mode itself comes from the tab).
+    pub layout: LayoutOptions,
+    /// "Gitter": distance of the main lines in points and subdivisions.
+    pub grid: Option<(f32, u32)>,
+    /// "Hilfslinien" are shown (and can be moved).
+    pub guides: bool,
+    /// "Transparenzgitter" instead of white paper.
+    pub transparency: bool,
+    /// "Verweise hervorheben".
+    pub highlight_links: bool,
+    /// "Einrasten": (at the grid, at guides); None: off.
+    pub snap: Option<(bool, bool)>,
+    /// "Lineale".
+    pub rulers: bool,
+    pub unit: Unit,
+    /// "Lupe": magnification (the area is marked on the page).
+    pub loupe: Option<f32>,
+}
+
+impl Default for ViewOptions {
+    fn default() -> Self {
+        ViewOptions {
+            layout: LayoutOptions::new(PageLayout::Continuous),
+            grid: None,
+            guides: true,
+            transparency: false,
+            highlight_links: false,
+            snap: None,
+            rulers: false,
+            unit: Unit::Mm,
+            loupe: None,
+        }
+    }
+}
+
+/// Width of the rulers in points.
+pub const RULER: f32 = 18.0;
+/// Size of the loupe picture in points.
+pub const LOUPE_SIZE: Vec2 = vec2(320.0, 220.0);
 
 /// Requests from the canvas that the application has to carry out.
 #[derive(Debug, Clone, PartialEq)]
@@ -99,6 +143,7 @@ pub struct CanvasCtx<'a> {
     pub budget: &'a mut Budget,
     pub events: &'a mut Vec<CanvasEvent>,
     pub t: &'static Strings,
+    pub view: ViewOptions,
 }
 
 /// Placement of a page on screen for one frame.
@@ -167,6 +212,10 @@ fn scroll_offset_for(tab: &DocTab, req: &ScrollRequest, viewport: Vec2) -> Optio
     let scale = tab.scale();
     match req {
         ScrollRequest::Offset(o) => Some(*o),
+        ScrollRequest::Page(p) if tab.layout.horizontal => tab
+            .layout
+            .slot(*p)
+            .map(|s| vec2((s.rect.min.x + tab.content_shift.x - MARGIN / 2.0).max(0.0), tab.scroll_offset.y)),
         ScrollRequest::Page(p) => tab
             .layout
             .slot(*p)
@@ -178,15 +227,240 @@ fn scroll_offset_for(tab: &DocTab, req: &ScrollRequest, viewport: Vec2) -> Optio
     }
 }
 
+/// Draws the document: the rulers, and one view or the panes of a split
+/// window ("Teilen").
+pub fn show_document(ui: &mut Ui, tab: &mut DocTab, cx: &mut CanvasCtx) {
+    tab.textures.begin_frame();
+    tab.pointer = None;
+    let full = ui.available_rect_before_wrap();
+    ui.allocate_rect(full, Sense::hover());
+    let r = if cx.view.rulers { RULER } else { 0.0 };
+    let area = Rect::from_min_max(full.min + vec2(r, r), full.max);
+    let panes = pane_rects(area, tab.split);
+    let mut activate = None;
+    let pressed = ui.input(|i| i.pointer.any_pressed().then(|| i.pointer.interact_pos()).flatten());
+    for (i, rect) in panes.iter().enumerate() {
+        let mut child = ui.new_child(
+            egui::UiBuilder::new().max_rect(*rect).layout(egui::Layout::top_down(egui::Align::Min)),
+        );
+        child.set_clip_rect(rect.intersect(ui.clip_rect()));
+        tab.drawing_pane = i;
+        if i == tab.active_pane || tab.split == Split::None {
+            show(&mut child, tab, cx);
+        } else {
+            let mut v = tab.panes[i].clone();
+            tab.swap_view(&mut v);
+            show(&mut child, tab, cx);
+            tab.swap_view(&mut v);
+            tab.panes[i] = v;
+        }
+        if pressed.is_some_and(|p| rect.contains(p)) && i != tab.active_pane {
+            activate = Some(i);
+        }
+    }
+    tab.drawing_pane = tab.active_pane;
+    // Dividers between the panes; the active pane has a frame.
+    if panes.len() > 1 {
+        let painter = ui.painter_at(area);
+        let line = Stroke::new(3.0, ui.visuals().widgets.noninteractive.bg_stroke.color);
+        for rect in &panes {
+            painter.rect_stroke(*rect, 0.0, line, StrokeKind::Inside);
+        }
+        if let Some(rect) = panes.get(tab.active_pane) {
+            painter.rect_stroke(*rect, 0.0, Stroke::new(1.5, theme::ACCENT), StrokeKind::Inside);
+        }
+    }
+    if let Some(i) = activate {
+        tab.activate_pane(i);
+    }
+    if cx.view.rulers {
+        rulers(ui, tab, cx, full, area);
+    }
+    tab.textures.evict();
+}
+
+/// The rectangles of the panes of a split window.
+fn pane_rects(area: Rect, split: Split) -> Vec<Rect> {
+    let (l, r) = (area.left(), area.right());
+    let (t, b) = (area.top(), area.bottom());
+    let (cx, cy) = (area.center().x, area.center().y);
+    match split {
+        Split::None => vec![area],
+        Split::Horizontal => {
+            vec![Rect::from_min_max(pos2(l, t), pos2(r, cy)), Rect::from_min_max(pos2(l, cy), pos2(r, b))]
+        }
+        Split::Vertical => {
+            vec![Rect::from_min_max(pos2(l, t), pos2(cx, b)), Rect::from_min_max(pos2(cx, t), pos2(r, b))]
+        }
+        Split::Grid => vec![
+            Rect::from_min_max(pos2(l, t), pos2(cx, cy)),
+            Rect::from_min_max(pos2(cx, t), pos2(r, cy)),
+            Rect::from_min_max(pos2(l, cy), pos2(cx, b)),
+            Rect::from_min_max(pos2(cx, cy), pos2(r, b)),
+        ],
+    }
+}
+
+/// Distance of the labelled ruler ticks in `unit` for a scale (screen
+/// points per unit): at least 50 points apart.
+fn ruler_step(points_per_unit: f32) -> f32 {
+    [1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0, 500.0, 1000.0]
+        .into_iter()
+        .find(|s| s * points_per_unit >= 50.0)
+        .unwrap_or(1000.0)
+}
+
+/// The rulers ("Lineale") at the top and left; dragging from a ruler
+/// creates a guide.
+fn rulers(ui: &mut Ui, tab: &mut DocTab, cx: &mut CanvasCtx, full: Rect, area: Rect) {
+    let top = Rect::from_min_max(pos2(area.left(), full.top()), pos2(full.right(), area.top()));
+    let left = Rect::from_min_max(pos2(full.left(), area.top()), pos2(area.left(), full.bottom()));
+    let corner = Rect::from_min_max(full.min, area.min);
+    let visuals = ui.visuals().clone();
+    let bg = if visuals.dark_mode { Color32::from_gray(40) } else { Color32::from_gray(236) };
+    let fg = visuals.text_color();
+    let painter = ui.painter_at(full);
+    for r in [top, left, corner] {
+        painter.rect_filled(r, 0.0, bg);
+    }
+    painter.line_segment([top.left_bottom(), top.right_bottom()], Stroke::new(1.0, fg.gamma_multiply(0.5)));
+    painter.line_segment([left.right_top(), left.right_bottom()], Stroke::new(1.0, fg.gamma_multiply(0.5)));
+    let Some((_, page_rect)) = tab.ruler_page else { return };
+    let unit_pt = cx.view.unit.points();
+    let ppu = tab.scale() * unit_pt;
+    let step = ruler_step(ppu);
+    let font = egui::FontId::proportional(9.5);
+    let tick = Stroke::new(1.0, fg.gamma_multiply(0.7));
+    let decimals = cx.view.unit == Unit::Inch && step < 1.0;
+    // Top ruler.
+    let p = painter.with_clip_rect(top);
+    let first = ((top.left() - page_rect.left()) / ppu / step).floor() as i64;
+    let last = ((top.right() - page_rect.left()) / ppu / step).ceil() as i64;
+    for k in first..=last.min(first + 2000) {
+        let v = k as f32 * step;
+        let x = page_rect.left() + v * ppu;
+        p.line_segment([pos2(x, top.bottom() - 8.0), pos2(x, top.bottom())], tick);
+        for m in 1..10 {
+            let xm = x + m as f32 * step * ppu / 10.0;
+            let len = if m == 5 { 5.0 } else { 3.0 };
+            p.line_segment([pos2(xm, top.bottom() - len), pos2(xm, top.bottom())], tick);
+        }
+        let label = if decimals { format!("{v:.1}") } else { format!("{v:.0}") };
+        p.text(pos2(x + 2.0, top.top() + 1.0), egui::Align2::LEFT_TOP, label, font.clone(), fg);
+    }
+    // Left ruler.
+    let p = painter.with_clip_rect(left);
+    let first = ((left.top() - page_rect.top()) / ppu / step).floor() as i64;
+    let last = ((left.bottom() - page_rect.top()) / ppu / step).ceil() as i64;
+    for k in first..=last.min(first + 2000) {
+        let v = k as f32 * step;
+        let y = page_rect.top() + v * ppu;
+        p.line_segment([pos2(left.right() - 8.0, y), pos2(left.right(), y)], tick);
+        for m in 1..10 {
+            let ym = y + m as f32 * step * ppu / 10.0;
+            let len = if m == 5 { 5.0 } else { 3.0 };
+            p.line_segment([pos2(left.right() - len, ym), pos2(left.right(), ym)], tick);
+        }
+        let label = if decimals { format!("{v:.1}") } else { format!("{v:.0}") };
+        p.text(pos2(left.left() + 1.0, y + 2.0), egui::Align2::LEFT_TOP, label, font.clone(), fg);
+    }
+    // Pointer position on the rulers.
+    if let Some(h) = ui.input(|i| i.pointer.hover_pos()).filter(|h| area.contains(*h)) {
+        let marker = Stroke::new(1.0, theme::ACCENT);
+        painter.line_segment([pos2(h.x, top.top()), pos2(h.x, top.bottom())], marker);
+        painter.line_segment([pos2(left.left(), h.y), pos2(left.right(), h.y)], marker);
+    }
+    // Dragging out of a ruler creates a guide; back onto the ruler removes it.
+    if !cx.view.guides {
+        return;
+    }
+    let scale = tab.scale();
+    for (rect, vertical, id) in [(top, false, "ruler-top"), (left, true, "ruler-left")] {
+        let response = ui.interact(rect, ui.id().with(id), Sense::drag());
+        if response.hovered() {
+            ui.ctx().set_cursor_icon(if vertical {
+                CursorIcon::ResizeHorizontal
+            } else {
+                CursorIcon::ResizeVertical
+            });
+        }
+        if response.drag_started() {
+            tab.guides.push(Guide { vertical, pos: 0.0 });
+            tab.interaction = Interaction::Guide { index: tab.guides.len() - 1 };
+        }
+        if let Interaction::Guide { index } = tab.interaction
+            && (response.dragged() || response.drag_stopped())
+            && let Some(p) = response.interact_pointer_pos()
+            && let Some(g) = tab.guides.get_mut(index)
+        {
+            g.pos = if vertical { (p.x - page_rect.left()) / scale } else { (p.y - page_rect.top()) / scale };
+            if response.drag_stopped() {
+                if !area.contains(p) {
+                    tab.guides.remove(index);
+                }
+                tab.interaction = Interaction::None;
+            }
+        }
+    }
+}
+
+/// "Einrasten": moves a view point onto the nearest grid line or guide
+/// within a few screen points.
+fn snap_point(tab: &DocTab, cx: &CanvasCtx, v: PointF) -> PointF {
+    let Some((to_grid, to_guides)) = cx.view.snap else { return v };
+    let reach = 6.0 / tab.scale();
+    let mut x = (v.x, reach);
+    let mut y = (v.y, reach);
+    let mut consider = |vertical: bool, pos: f32| {
+        let (cur, value) = if vertical { (&mut x, v.x) } else { (&mut y, v.y) };
+        let d = (value - pos).abs();
+        if d < cur.1 {
+            *cur = (pos, d);
+        }
+    };
+    if to_grid {
+        let (main, sub) = cx.view.grid.unwrap_or((10.0 * 72.0 / 25.4, 10));
+        let step = main / sub.max(1) as f32;
+        consider(true, (v.x / step).round() * step);
+        consider(false, (v.y / step).round() * step);
+    }
+    if to_guides && cx.view.guides {
+        for g in &tab.guides {
+            consider(g.vertical, g.pos);
+        }
+    }
+    PointF::new(x.0, y.0)
+}
+
+/// Checkerboard texture for "Transparenzgitter" (repeated).
+fn checker_texture(ctx: &egui::Context) -> egui::TextureHandle {
+    let id = egui::Id::new("mrpdf-checker");
+    if let Some(tex) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
+        return tex;
+    }
+    let mut img = egui::ColorImage::new([16, 16], vec![Color32::WHITE; 256]);
+    for y in 0..16 {
+        for x in 0..16 {
+            if (x / 8 + y / 8) % 2 == 1 {
+                img.pixels[y * 16 + x] = Color32::from_gray(204);
+            }
+        }
+    }
+    let options =
+        egui::TextureOptions { wrap_mode: egui::TextureWrapMode::Repeat, ..egui::TextureOptions::NEAREST };
+    let tex = ctx.load_texture("mrpdf-checker", img, options);
+    ctx.data_mut(|d| d.insert_temp(id, tex.clone()));
+    tex
+}
+
 pub fn show(ui: &mut Ui, tab: &mut DocTab, cx: &mut CanvasCtx) {
     let ctx = ui.ctx().clone();
-    tab.textures.begin_frame();
     let avail = ui.available_size();
     let sizes = tab.page_sizes();
     if sizes.is_empty() {
         return;
     }
-    let facing = matches!(tab.layout_mode, PageLayout::Facing | PageLayout::Cover);
+    let facing = tab.layout_mode.two_up();
     let max_w = sizes.iter().map(|s| s.0).fold(0.0, f32::max);
     let scrollbar = ui.spacing().scroll.bar_width + 4.0;
     match tab.zoom_mode {
@@ -215,9 +489,10 @@ pub fn show(ui: &mut Ui, tab: &mut DocTab, cx: &mut CanvasCtx) {
         tab.pending_scroll = Some(ScrollRequest::Offset(new_offset.max(Vec2::ZERO)));
     }
 
-    tab.layout = Layout::compute(&sizes, tab.zoom, tab.layout_mode, tab.current_page);
+    let opts = LayoutOptions { mode: tab.layout_mode, ..cx.view.layout };
+    tab.layout = Layout::compute(&sizes, tab.zoom, opts, tab.current_page);
 
-    let mut area = ScrollArea::both().id_salt(("doc", tab.id)).auto_shrink([false, false]);
+    let mut area = ScrollArea::both().id_salt(("doc", tab.id, tab.drawing_pane)).auto_shrink([false, false]);
     if let Some(req) = tab.pending_scroll.take() {
         let viewport_size = avail - vec2(scrollbar, scrollbar);
         if let Some(off) = scroll_offset_for(tab, &req, viewport_size) {
@@ -230,20 +505,22 @@ pub fn show(ui: &mut Ui, tab: &mut DocTab, cx: &mut CanvasCtx) {
     });
     tab.scroll_offset = output.state.offset;
 
-    // Single page layout: the mouse wheel flips pages at the top/bottom edge.
-    if tab.layout_mode == PageLayout::Single
+    // Page by page layouts: the mouse wheel flips pages at the top/bottom edge.
+    if tab.layout_mode.paged()
         && let Some(pointer) = ui.input(|i| i.pointer.hover_pos())
         && output.inner_rect.contains(pointer)
     {
         let (dy, now) = ui.input(|i| (i.smooth_scroll_delta.y, i.time));
         let max_y = (output.content_size.y - output.inner_rect.height()).max(0.0);
         let count = tab.doc.page_count();
+        let shown_last = tab.layout.slots.iter().map(|s| s.page).max().unwrap_or(tab.current_page);
+        let shown_first = tab.layout.slots.iter().map(|s| s.page).min().unwrap_or(tab.current_page);
         if now - tab.last_flip > 0.35 {
-            if dy < 0.0 && output.state.offset.y >= max_y - 1.0 && tab.current_page + 1 < count {
-                tab.go_to_page(tab.current_page + 1);
+            if dy < 0.0 && output.state.offset.y >= max_y - 1.0 && shown_last + 1 < count {
+                tab.go_to_page(shown_last + 1);
                 tab.last_flip = now;
-            } else if dy > 0.0 && output.state.offset.y <= 1.0 && tab.current_page > 0 {
-                tab.go_to_page(tab.current_page - 1);
+            } else if dy > 0.0 && output.state.offset.y <= 1.0 && shown_first > 0 {
+                tab.go_to_page(shown_first - 1);
                 tab.last_flip = now;
             }
         }
@@ -256,7 +533,11 @@ fn draw_and_interact(ui: &mut Ui, tab: &mut DocTab, cx: &mut CanvasCtx, viewport
     let (rect, response) = ui.allocate_exact_size(size, Sense::click_and_drag());
     let shift = vec2(
         ((size.x - layout_size.x) / 2.0).max(0.0),
-        if tab.layout_mode == PageLayout::Single { ((size.y - layout_size.y) / 2.0).max(0.0) } else { 0.0 },
+        if tab.layout_mode.paged() || tab.layout.horizontal {
+            ((size.y - layout_size.y) / 2.0).max(0.0)
+        } else {
+            0.0
+        },
     );
     tab.content_shift = shift;
     tab.viewport = viewport;
@@ -266,12 +547,14 @@ fn draw_and_interact(ui: &mut Ui, tab: &mut DocTab, cx: &mut CanvasCtx, viewport
     painter.rect_filled(ui.clip_rect(), 0.0, theme::canvas_background(ui.visuals().dark_mode));
 
     // Track the current page in scrolling layouts.
-    if tab.layout_mode != PageLayout::Single
-        && let Some(p) = tab.layout.page_at(viewport.center().y - shift.y)
+    if !tab.layout_mode.paged()
+        && let Some(p) = tab.layout.page_at(viewport.center() - shift)
         && tab.pending_scroll.is_none()
     {
         tab.current_page = p;
     }
+    let hover = response.hover_pos();
+    let mut ruler_page = None;
 
     let scale = tab.scale();
     let ppp = ctx.pixels_per_point();
@@ -288,12 +571,24 @@ fn draw_and_interact(ui: &mut Ui, tab: &mut DocTab, cx: &mut CanvasCtx, viewport
         };
         let pos = PageOnScreen { page: slot.page, rect: screen, geo, scale };
         on_screen.push(pos);
+        // The rulers refer to the page under the pointer, else the current page.
+        if hover.is_some_and(|h| screen.contains(h))
+            || (ruler_page.is_none() && slot.page == tab.current_page)
+        {
+            ruler_page = Some((slot.page, screen));
+        }
         if !screen.intersects(visible_screen.expand(200.0)) {
             continue;
         }
-        // Page shadow and paper.
+        // Page shadow and paper (or the transparency grid).
         painter.rect_filled(screen.translate(vec2(2.0, 3.0)), 1.0, Color32::from_black_alpha(60));
-        painter.rect_filled(screen, 0.0, Color32::WHITE);
+        if cx.view.transparency {
+            let tex = checker_texture(ctx);
+            let uv = Rect::from_min_size(Pos2::ZERO, screen.size() / 16.0);
+            painter.image(tex.id(), screen, uv, Color32::WHITE);
+        } else {
+            painter.rect_filled(screen, 0.0, Color32::WHITE);
+        }
 
         let px_w = (screen.width() * ppp).round().max(1.0) as u32;
         let px_h = (screen.height() * ppp).round().max(1.0) as u32;
@@ -333,12 +628,50 @@ fn draw_and_interact(ui: &mut Ui, tab: &mut DocTab, cx: &mut CanvasCtx, viewport
             }
         }
         painter.rect_stroke(screen, 0.0, Stroke::new(1.0, Color32::from_gray(150)), StrokeKind::Outside);
+        if let Some((main, sub)) = cx.view.grid {
+            draw_grid(&painter.with_clip_rect(screen.intersect(visible_screen)), screen, scale, main, sub);
+        }
         draw_overlays(&painter, tab, &pos, cx, response.hover_pos());
+    }
+    if tab.drawing_pane == tab.active_pane {
+        tab.ruler_page = ruler_page;
     }
 
     handle_input(ui, tab, cx, &response, &on_screen);
     draw_field_editor(ui, tab, &on_screen, cx);
-    tab.textures.evict();
+}
+
+/// "Gitter": main lines every `main` points, `sub` subdivisions.
+fn draw_grid(painter: &egui::Painter, page: Rect, scale: f32, main: f32, sub: u32) {
+    let sub = sub.max(1);
+    let step = main / sub as f32;
+    if step * scale < 3.0 {
+        return;
+    }
+    let clip = painter.clip_rect();
+    let minor = Stroke::new(1.0, Color32::from_rgba_unmultiplied(80, 120, 220, 40));
+    let major = Stroke::new(1.0, Color32::from_rgba_unmultiplied(80, 120, 220, 110));
+    let lines = |horizontal: bool| {
+        let len = if horizontal { page.height() } else { page.width() } / scale;
+        let n = (len / step).floor() as u32;
+        for k in 0..=n.min(5000) {
+            let off = k as f32 * step * scale;
+            let stroke = if k % sub == 0 { major } else { minor };
+            if horizontal {
+                let y = page.top() + off;
+                if y >= clip.top() - 1.0 && y <= clip.bottom() + 1.0 {
+                    painter.line_segment([pos2(page.left(), y), pos2(page.right(), y)], stroke);
+                }
+            } else {
+                let x = page.left() + off;
+                if x >= clip.left() - 1.0 && x <= clip.right() + 1.0 {
+                    painter.line_segment([pos2(x, page.top()), pos2(x, page.bottom())], stroke);
+                }
+            }
+        }
+    };
+    lines(true);
+    lines(false);
 }
 
 fn style_stroke(cx: &CanvasCtx, scale: f32) -> Stroke {
@@ -354,6 +687,46 @@ fn draw_overlays(
     hover: Option<Pos2>,
 ) {
     let page = pos.page;
+    // "Verweise hervorheben".
+    if cx.view.highlight_links {
+        for l in tab.links(page).iter() {
+            let r = pos.pdf_rect_to_screen(&l.rect);
+            painter.rect_filled(r, 0.0, Color32::from_rgba_unmultiplied(40, 110, 230, 35));
+            painter.rect_stroke(r, 0.0, Stroke::new(1.0, theme::ACCENT), StrokeKind::Outside);
+        }
+    }
+    // Guides ("Hilfslinien").
+    if cx.view.guides {
+        let stroke = Stroke::new(1.0, Color32::from_rgb(0, 170, 220));
+        for g in &tab.guides {
+            if g.vertical {
+                let x = pos.rect.left() + g.pos * pos.scale;
+                if x >= pos.rect.left() && x <= pos.rect.right() {
+                    painter.line_segment([pos2(x, pos.rect.top()), pos2(x, pos.rect.bottom())], stroke);
+                }
+            } else {
+                let y = pos.rect.top() + g.pos * pos.scale;
+                if y >= pos.rect.top() && y <= pos.rect.bottom() {
+                    painter.line_segment([pos2(pos.rect.left(), y), pos2(pos.rect.right(), y)], stroke);
+                }
+            }
+        }
+    }
+    // The area shown in the loupe.
+    if let Some(factor) = cx.view.loupe
+        && let Some((p, at)) = tab.loupe_at
+        && p == page
+    {
+        // The loupe shows LOUPE_SIZE screen points at `factor` × 100 %.
+        let half = LOUPE_SIZE / (2.0 * factor * PT_TO_SCREEN) * pos.scale;
+        let c = pos.view_to_screen(at);
+        painter.rect_stroke(
+            Rect::from_center_size(c, half * 2.0),
+            0.0,
+            Stroke::new(1.5, Color32::from_rgb(220, 60, 40)),
+            StrokeKind::Middle,
+        );
+    }
     if cx.highlight_fields || cx.tool == Tool::SelectFields || cx.tool.is_field() {
         for f in tab.fields(page).iter() {
             if !f.read_only && f.kind != FieldKind::PushButton {
@@ -580,7 +953,8 @@ fn cursor_for(tab: &mut DocTab, cx: &CanvasCtx, pos: &PageOnScreen, pdf: PointF)
             }
         }
         Tool::SelectText => CursorIcon::Text,
-        Tool::Zoom => CursorIcon::ZoomIn,
+        Tool::Zoom | Tool::Loupe => CursorIcon::ZoomIn,
+        Tool::DynamicZoom => CursorIcon::ResizeVertical,
         t if t.is_markup() => CursorIcon::Text,
         _ => CursorIcon::Crosshair,
     }
@@ -599,8 +973,39 @@ fn handle_input(
     if let Some(h) = response.hover_pos()
         && let Some(pos) = find_page(on_screen, h)
     {
-        let cursor = cursor_for(tab, cx, &pos, pos.pdf_at(h));
+        let cursor = match guide_at(tab, cx, &pos, h) {
+            Some(i) if tab.guides[i].vertical => CursorIcon::ResizeHorizontal,
+            Some(_) => CursorIcon::ResizeVertical,
+            None => cursor_for(tab, cx, &pos, pos.pdf_at(h)),
+        };
         ui.ctx().set_cursor_icon(cursor);
+        // "Seitenmaße/Position" and the loupe follow the pointer.
+        tab.pointer = Some((pos.page, pos.view_at(h)));
+        if cx.tool == Tool::Loupe {
+            tab.loupe_at = Some((pos.page, pos.view_at(h)));
+        }
+    }
+
+    // Moving a guide; dropped outside the page it is removed.
+    if let Interaction::Guide { index } = tab.interaction {
+        if response.dragged()
+            && let Some(cur) = response.interact_pointer_pos()
+            && let Some(pos) = on_screen.iter().find(|p| p.rect.expand(40.0).contains(cur))
+            && let Some(g) = tab.guides.get_mut(index)
+        {
+            let v = pos.view_at(cur);
+            g.pos = if g.vertical { v.x } else { v.y };
+        }
+        if response.drag_stopped() {
+            let inside = response.interact_pointer_pos().is_some_and(|p| find_page(on_screen, p).is_some());
+            if !inside && index < tab.guides.len() {
+                tab.guides.remove(index);
+            }
+            tab.interaction = Interaction::None;
+        }
+        if response.dragged() || response.drag_stopped() {
+            return;
+        }
     }
 
     // Polygon tools: Enter finishes, Escape cancels.
@@ -666,6 +1071,32 @@ fn handle_input(
     context_menu(tab, cx, response);
 }
 
+/// Index of the guide near the screen point `p` (only with tools that do
+/// not draw).
+fn guide_at(tab: &DocTab, cx: &CanvasCtx, pos: &PageOnScreen, p: Pos2) -> Option<usize> {
+    if !cx.view.guides || !matches!(cx.tool, Tool::Hand | Tool::SelectAnnot | Tool::SelectText) {
+        return None;
+    }
+    tab.guides.iter().position(|g| {
+        if g.vertical {
+            (pos.rect.left() + g.pos * pos.scale - p.x).abs() <= 3.0
+        } else {
+            (pos.rect.top() + g.pos * pos.scale - p.y).abs() <= 3.0
+        }
+    })
+}
+
+/// Changes the zoom keeping the content under the screen point `anchor`.
+fn zoom_at(tab: &mut DocTab, zoom: f32, anchor: Pos2) {
+    let old = tab.scale();
+    tab.zoom = zoom.clamp(MIN_ZOOM, MAX_ZOOM);
+    tab.zoom_mode = ZoomMode::Custom;
+    let factor = tab.scale() / old;
+    let content_pt = anchor - tab.canvas_origin;
+    let offset = content_pt * factor - (content_pt + tab.content_shift - tab.scroll_offset);
+    tab.pending_scroll = Some(ScrollRequest::Offset(offset.max(Vec2::ZERO)));
+}
+
 fn start_drag(
     tab: &mut DocTab,
     cx: &CanvasCtx,
@@ -673,11 +1104,18 @@ fn start_drag(
     start: Pos2,
     tol: f32,
 ) -> Interaction {
+    if cx.tool == Tool::DynamicZoom {
+        return Interaction::DynamicZoom { anchor: start };
+    }
     let Some(pos) = page else {
         return if cx.tool == Tool::Hand { Interaction::Pan } else { Interaction::None };
     };
+    if let Some(index) = guide_at(tab, cx, &pos, start) {
+        return Interaction::Guide { index };
+    }
     let pdf = pos.pdf_at(start);
     let v = pos.view_at(start);
+    let snapped = snap_point(tab, cx, v);
     match cx.tool {
         Tool::Hand | Tool::SelectAnnot | Tool::SelectFields => {
             let hit = if cx.tool == Tool::SelectFields {
@@ -721,9 +1159,10 @@ fn start_drag(
                 let anchor = tab.page_text(pos.page).and_then(|t| t.hit_test(pdf, 10.0 / tab.scale()));
                 Interaction::Markup { page: pos.page, anchor, start: v, current: v }
             }
-            Gesture::Rect | Gesture::Line | Gesture::Freehand => {
-                Interaction::Shape { page: pos.page, start: v, current: v, points: vec![v] }
+            Gesture::Rect | Gesture::Line => {
+                Interaction::Shape { page: pos.page, start: snapped, current: snapped, points: vec![snapped] }
             }
+            Gesture::Freehand => Interaction::Shape { page: pos.page, start: v, current: v, points: vec![v] },
             _ => Interaction::None,
         },
     }
@@ -763,6 +1202,8 @@ fn continue_drag(
                 let mut v = pos.view_at(cur.clamp(pos.rect.min, pos.rect.max));
                 if shift_down && cx.tool.gesture() == Gesture::Line {
                     v = snap_45(*start, v);
+                } else if cx.tool.gesture() != Gesture::Freehand {
+                    v = snap_point(tab, cx, v);
                 }
                 *current = v;
                 if cx.tool.gesture() == Gesture::Freehand
@@ -781,7 +1222,13 @@ fn continue_drag(
             }
         }
         Interaction::MoveAnnot { delta: d, .. } => *d += delta,
-        Interaction::None => {}
+        Interaction::DynamicZoom { anchor } => {
+            // Up zooms in, down zooms out.
+            let factor = (-delta.y * 0.01).exp();
+            let anchor = *anchor;
+            zoom_at(tab, tab.zoom * factor, anchor);
+        }
+        Interaction::Guide { .. } | Interaction::None => {}
     }
     tab.interaction = interaction;
 }

@@ -36,6 +36,7 @@ pub mod redact;
 pub mod report;
 pub mod search;
 pub mod security;
+pub mod speech;
 pub mod text;
 pub mod ui;
 pub mod xfdf;

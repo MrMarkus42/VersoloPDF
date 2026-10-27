@@ -279,8 +279,9 @@ impl MrPdfApp {
     pub fn close_tab(&mut self, ctx: &Context, tab_id: u64) {
         self.forget_recovery(tab_id);
         if let Some(i) = self.tabs.iter().position(|t| t.id == tab_id) {
-            if let Some(path) = self.tabs[i].doc.path() {
-                self.settings.remember_page(path, self.tabs[i].current_page);
+            if let Some(path) = self.tabs[i].doc.path().map(Path::to_path_buf) {
+                self.settings.remember_page(&path, self.tabs[i].current_page);
+                self.remember_closed(path);
             }
             self.tabs.remove(i);
             if self.active >= self.tabs.len() {

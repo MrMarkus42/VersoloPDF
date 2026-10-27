@@ -223,9 +223,110 @@ fn dark_mode_and_view_ribbon() {
     h.run_steps(10);
     tab(&mut h, "Ansicht");
     h.run_steps(3);
-    h.get_by_label("Doppelseite").click();
+    save(&mut h, "96-view-ribbon");
+    h.get_by_label("Zwei Seiten fortlaufend").click();
     h.run_steps(8);
+    assert_eq!(h.state().active_tab().unwrap().layout_mode, mrpdf::ui::view::PageLayout::TwoPagesContinuous);
     save(&mut h, "10-dark-two-pages");
+}
+
+#[test]
+fn view_tab_features() {
+    use mrpdf::ui::app::commands::Cmd;
+    use mrpdf::ui::app::view_cmds::ViewCmd as V;
+    use mrpdf::ui::view::PageLayout;
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let file = sample_file(&dir, 4);
+    let other = dir.path().join("Anderes.pdf");
+    std::fs::write(&other, common::text_pdf(1)).unwrap();
+    let mut h = harness(vec![file.clone(), other.clone()], false);
+    h.run_steps(12);
+    h.state_mut().set_active_tab(0);
+    h.run_steps(4);
+    tab(&mut h, "Ansicht");
+    let ctx = h.ctx.clone();
+    let run = |h: &mut Harness<'_, MrPdfApp>, cmd: Cmd| {
+        let ctx = h.ctx.clone();
+        h.state_mut().run(&ctx, cmd);
+        h.run_steps(4);
+    };
+    // Rulers, grid and the page size / pointer position.
+    run(&mut h, Cmd::View(V::Rulers));
+    run(&mut h, Cmd::View(V::Grid));
+    assert!(h.state().settings().show_rulers && h.state().settings().show_grid);
+    // A guide dragged out of the top ruler onto the page.
+    let t = h.state().active_tab().unwrap();
+    let page = t.ruler_page.unwrap().1;
+    let view_top = (t.canvas_origin - t.content_shift + t.scroll_offset).y;
+    let scale = t.scale();
+    let x = page.center().x;
+    drag(&mut h, egui::pos2(x, view_top - 9.0), egui::pos2(x, page.top() + 100.0));
+    let guides = h.state().active_tab().unwrap().guides.clone();
+    assert_eq!(guides.len(), 1, "guide created");
+    assert!(!guides[0].vertical && (guides[0].pos - 100.0 / scale).abs() < 3.0, "{guides:?}");
+    save(&mut h, "97-view-rulers-grid");
+    // Two pages one spread at a time, right to left, cover alone.
+    run(&mut h, Cmd::LayoutFacing);
+    run(&mut h, Cmd::LayoutCover);
+    run(&mut h, Cmd::View(V::RightToLeft));
+    let tab = h.state().active_tab().unwrap();
+    assert_eq!(tab.layout_mode, PageLayout::TwoPages);
+    assert_eq!(tab.layout.slots.len(), 1, "cover page alone");
+    h.state_mut().active_tab_mut().unwrap().go_to_page(1);
+    h.run_steps(6);
+    let slots = h.state().active_tab().unwrap().layout.slots.clone();
+    assert_eq!(slots.len(), 2);
+    assert_eq!(slots[0].page, 2, "right to left: page 3 on the left");
+    save(&mut h, "98-view-two-pages-rtl");
+    run(&mut h, Cmd::View(V::RightToLeft));
+    run(&mut h, Cmd::LayoutCover);
+    // Pages side by side.
+    run(&mut h, Cmd::LayoutContinuous);
+    run(&mut h, Cmd::View(V::SideBySide));
+    assert!(h.state().active_tab().unwrap().layout.horizontal);
+    save(&mut h, "99-view-side-by-side");
+    run(&mut h, Cmd::View(V::StandardLayout));
+    // Split view with two panes; a click activates the other pane.
+    run(&mut h, Cmd::View(V::SplitVertical));
+    assert_eq!(h.state().active_tab().unwrap().panes.len(), 2);
+    save(&mut h, "100-view-split");
+    run(&mut h, Cmd::View(V::SplitVertical));
+    assert!(
+        h.state().active_tab().unwrap().panes.is_empty() || h.state().active_tab().unwrap().panes.len() == 1
+    );
+    // Transparency grid, highlighted links, design "Schwarz".
+    run(&mut h, Cmd::View(V::Transparency));
+    assert!(h.state().active_tab().unwrap().transparent);
+    run(&mut h, Cmd::View(V::Transparency));
+    run(&mut h, Cmd::View(V::Design(mrpdf::ui::theme::Design::Black)));
+    assert!(ctx.style_of(ctx.theme()).visuals.dark_mode);
+    save(&mut h, "101-view-design-black");
+    run(&mut h, Cmd::View(V::Design(mrpdf::ui::theme::Design::Standard)));
+    // Loupe and pan & zoom windows.
+    run(&mut h, Cmd::Tool(mrpdf::ui::tools::Tool::Loupe));
+    run(&mut h, Cmd::View(V::PanZoom));
+    let page = h.state().active_tab().unwrap().ruler_page.unwrap().1;
+    h.hover_at(page.center());
+    h.run_steps(6);
+    assert!(h.state().active_tab().unwrap().loupe_at.is_some());
+    assert!(h.query_all_by_label("Ausschnitt und Vergrößerung").count() >= 2, "window open");
+    save(&mut h, "102-view-loupe-pan-zoom");
+    // Rotate and reset the view.
+    run(&mut h, Cmd::RotateViewRight);
+    run(&mut h, Cmd::View(V::RotateReset));
+    assert_eq!(h.state().active_tab().unwrap().view_rotation, mrpdf::geometry::Rotation::R0);
+    // Tabs: sort, close the other, reopen it.
+    run(&mut h, Cmd::View(V::SortTabs));
+    assert!(h.state().active_tab().unwrap().doc.display_name().starts_with("Beispiel"), "stays active");
+    h.state_mut().set_active_tab(0);
+    assert!(h.state().active_tab().unwrap().doc.display_name().starts_with("Anderes"), "sorted first");
+    h.state_mut().set_active_tab(1);
+    run(&mut h, Cmd::View(V::CloseOthers));
+    assert_eq!(h.state().tab_count(), 1);
+    run(&mut h, Cmd::View(V::ReopenClosed));
+    h.run_steps(6);
+    assert_eq!(h.state().tab_count(), 2);
 }
 
 #[test]

@@ -253,11 +253,6 @@ impl Cat {
                 tr(de, "MrPDF sucht nicht im Internet.", "MrPDF does not search the internet.")
             }
             Cat::Ocr => tr(de, "MrPDF hat keine Texterkennung.", "MrPDF has no OCR."),
-            Cat::ReadAloud => tr(
-                de,
-                "Vorlesen ist in MrPDF noch nicht vorhanden.",
-                "Read aloud is not available in MrPDF yet.",
-            ),
             _ => return None,
         })
     }
@@ -314,13 +309,19 @@ fn sanitize(s: &mut Settings) {
         s.snapshot_dpi = s.snapshot_dpi.clamp(36, 1200);
     }
     s.trusted_hosts.truncate(200);
+    s.limit_view_values();
 }
 
 impl MrPdfApp {
     /// Opens "Einstellungen".
     pub fn open_settings(&mut self) {
+        self.open_settings_at(Cat::General);
+    }
+
+    /// Opens "Einstellungen" at a category.
+    pub fn open_settings_at(&mut self, page: Cat) {
         self.settings_draft = Some(Box::new(self.settings.clone()));
-        self.dialog = Some(Dialog::Settings(Box::default()));
+        self.dialog = Some(Dialog::Settings(Box::new(SettingsPage { page, ..SettingsPage::default() })));
     }
 
     /// The options being edited in "Einstellungen" (for tests).
@@ -585,8 +586,11 @@ fn settings_page(ui: &mut Ui, de: bool, s: &mut SettingsPage, d: &mut Settings) 
                         &[
                             (PageLayout::Single, tr(de, "Einzelne Seite", "Single page")),
                             (PageLayout::Continuous, tr(de, "Fortlaufend", "Continuous")),
-                            (PageLayout::Facing, tr(de, "Doppelseiten", "Facing")),
-                            (PageLayout::Cover, tr(de, "Doppelseiten mit Deckblatt", "Facing with cover")),
+                            (PageLayout::TwoPages, tr(de, "Zwei Seiten", "Two pages")),
+                            (
+                                PageLayout::TwoPagesContinuous,
+                                tr(de, "Zwei Seiten fortlaufend", "Two pages continuous"),
+                            ),
                         ],
                         200.0,
                     );
@@ -801,9 +805,64 @@ fn settings_page(ui: &mut Ui, de: bool, s: &mut SettingsPage, d: &mut Settings) 
                     let options: Vec<(Unit, &str)> = Unit::ALL.iter().map(|u| (*u, u.suffix())).collect();
                     combo(ui, "set-unit", &mut d.unit, &options, 80.0);
                 });
+                ui.checkbox(&mut d.show_rulers, tr(de, "Lineale anzeigen", "Show rulers"));
+            });
+            section(ui, tr(de, "Gitter und Hilfslinien", "Grid and guides"), |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(tr(de, "Abstand der Gitterlinien:", "Grid spacing:"));
+                    ui.add(egui::DragValue::new(&mut d.grid_mm).range(1.0..=200.0).speed(0.5).suffix(" mm"));
+                    ui.label(tr(de, "Unterteilung:", "Subdivisions:"));
+                    ui.add(egui::DragValue::new(&mut d.grid_subdivisions).range(1..=20));
+                });
+                ui.checkbox(&mut d.show_grid, tr(de, "Gitter anzeigen", "Show grid"));
+                ui.checkbox(&mut d.show_guides, tr(de, "Hilfslinien anzeigen", "Show guides"));
+                hint(
+                    ui,
+                    tr(
+                        de,
+                        "Hilfslinien werden aus den Linealen auf die Seite gezogen und zum Entfernen zurückgezogen.",
+                        "Guides are dragged from the rulers onto the page and dragged back to remove them.",
+                    ),
+                );
+            });
+            section(ui, tr(de, "Einrasten", "Snap"), |ui| {
+                ui.checkbox(&mut d.snap, tr(de, "Einrasten beim Zeichnen", "Snap while drawing"));
+                ui.add_enabled_ui(d.snap, |ui| {
+                    ui.checkbox(&mut d.snap_grid, tr(de, "Am Gitter", "To grid"));
+                    ui.checkbox(&mut d.snap_guides, tr(de, "An Hilfslinien", "To guides"));
+                });
+            });
+        }
+        Cat::ReadAloud => {
+            section(ui, tr(de, "Sprachausgabe", "Speech output"), |ui| {
+                hint(
+                    ui,
+                    tr(
+                        de,
+                        "MrPDF verwendet die Sprachausgabe des Betriebssystems.",
+                        "MrPDF uses the speech output of the operating system.",
+                    ),
+                );
+                egui::Grid::new("set-read").num_columns(2).spacing(vec2(10.0, 4.0)).show(ui, |ui| {
+                    ui.label(tr(de, "Lautstärke:", "Volume:"));
+                    ui.add(egui::Slider::new(&mut d.read_volume, 0..=100).suffix(" %"));
+                    ui.end_row();
+                    ui.label(tr(de, "Tempo:", "Speed:"));
+                    ui.add(egui::Slider::new(&mut d.read_rate, -10..=10));
+                    ui.end_row();
+                });
+                ui.checkbox(&mut d.read_fields, tr(de, "Formularfelder vorlesen", "Read form fields"));
+                ui.checkbox(&mut d.read_annots, tr(de, "Anmerkungen vorlesen", "Read comments"));
+                ui.checkbox(&mut d.read_follow, tr(de, "Automatisch blättern", "Turn pages automatically"));
             });
         }
         Cat::Interface => {
+            section(ui, tr(de, "Design", "Design"), |ui| {
+                for design in crate::ui::theme::Design::ALL {
+                    let (g, e) = design.names();
+                    ui.radio_value(&mut d.design, design, tr(de, g, e));
+                }
+            });
             section(ui, tr(de, "Aussehen", "Appearance"), |ui| {
                 ui.checkbox(
                     &mut d.follow_system_theme,

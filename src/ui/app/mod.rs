@@ -25,6 +25,7 @@ mod shape_dialogs;
 mod sidebar;
 mod statusbar;
 mod structure;
+pub mod view_cmds;
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -42,6 +43,9 @@ use crate::ui::theme;
 use crate::ui::tools::Tool;
 
 const SETTINGS_KEY: &str = "mrpdf-settings";
+
+/// What a rendered picture shows: tab, page, document revision, size.
+type PictureKey = (u64, usize, u64, [u32; 2]);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RibbonTab {
@@ -288,6 +292,18 @@ pub struct MrPdfApp {
     settings_draft: Option<Box<Settings>>,
     /// "Größe der Benutzeroberfläche" last applied.
     applied_scale: Option<f32>,
+    /// Design last applied (see `applied_dark`).
+    applied_design: Option<theme::Design>,
+    /// Documents closed in this session ("Kürzlich geschlossene Dokumente").
+    closed_files: Vec<PathBuf>,
+    /// "Automatisch blättern": time of the last step (None: off).
+    auto_scroll: Option<f64>,
+    /// "Lupe": rendered picture and what it shows (page, point, factor).
+    loupe: Option<(egui::TextureHandle, (usize, i32, i32, u32))>,
+    /// "Ausschnitt und Vergrößerung": page picture and what it shows.
+    pan_zoom_tex: Option<(egui::TextureHandle, PictureKey)>,
+    /// "Vorlesen": the running speech output.
+    speech: Option<crate::speech::Reader>,
     /// Position of the dialog window after the user moved it (per kind of dialog).
     dialog_pos: Option<(std::mem::Discriminant<Dialog>, egui::Pos2)>,
     /// Measured widths of the ribbon per (tab, language, level, content key).
@@ -354,6 +370,12 @@ impl MrPdfApp {
             last_recovery: 0.0,
             settings_draft: None,
             applied_scale: None,
+            applied_design: None,
+            closed_files: Vec::new(),
+            auto_scroll: None,
+            loupe: None,
+            pan_zoom_tex: None,
+            speech: None,
             dialog_pos: None,
             ribbon_widths: Default::default(),
             ribbon_groups: Default::default(),
@@ -363,14 +385,17 @@ impl MrPdfApp {
     /// Applies options that act on the window or the open tabs (theme,
     /// size of the user interface, replaced document colours).
     fn apply_view_settings(&mut self, ctx: &Context) {
-        let dark = if self.settings.follow_system_theme {
-            ctx.system_theme().map_or(self.settings.dark_mode, |t| t == egui::Theme::Dark)
-        } else {
-            self.settings.dark_mode
-        };
-        if self.applied_dark != Some(dark) {
-            theme::apply(ctx, dark);
+        let design = self.settings.design;
+        let dark = design.is_dark()
+            || if self.settings.follow_system_theme {
+                ctx.system_theme().map_or(self.settings.dark_mode, |t| t == egui::Theme::Dark)
+            } else {
+                self.settings.dark_mode
+            };
+        if self.applied_dark != Some(dark) || self.applied_design != Some(design) {
+            theme::apply(ctx, dark, design);
             self.applied_dark = Some(dark);
+            self.applied_design = Some(design);
         }
         let scale = self.settings.ui_scale.clamp(0.5, 2.0);
         if self.applied_scale != Some(scale) {
@@ -383,9 +408,11 @@ impl MrPdfApp {
         }
         let recolor =
             self.settings.recolor.then_some((self.settings.recolor_background, self.settings.recolor_text));
+        let transparent = self.settings.transparency_grid;
         for tab in &mut self.tabs {
-            if tab.recolor != recolor {
+            if tab.recolor != recolor || tab.transparent != transparent {
                 tab.recolor = recolor;
+                tab.transparent = transparent;
                 tab.textures.clear();
             }
         }
@@ -461,6 +488,38 @@ impl MrPdfApp {
         }
         if pressed(cmd, Key::K) {
             self.run(ctx, commands::Cmd::Settings);
+        }
+        // Ribbon tab "Ansicht".
+        {
+            use commands::Cmd;
+            use view_cmds::ViewCmd as V;
+            let shift = cmd | Modifiers::SHIFT;
+            let list: [(Modifiers, Key, Cmd); 13] = [
+                (cmd, Key::R, Cmd::View(V::Rulers)),
+                (shift, Key::G, Cmd::View(V::PageGaps)),
+                (shift, Key::Num0, Cmd::View(V::RotateReset)),
+                (shift, Key::Num6, Cmd::View(V::ReplaceColors)),
+                (shift, Key::Num3, Cmd::DarkMode),
+                (shift, Key::L, Cmd::View(V::AutoScroll)),
+                (shift, Key::W, Cmd::View(V::ReopenClosed)),
+                (cmd | Modifiers::ALT, Key::L, Cmd::Tool(Tool::Loupe)),
+                (cmd, Key::B, Cmd::Panel(SidePanel::Bookmarks)),
+                (cmd, Key::T, Cmd::Panel(SidePanel::Thumbnails)),
+                (cmd, Key::M, Cmd::Panel(SidePanel::Comments)),
+                (shift, Key::A, Cmd::Panel(SidePanel::Attachments)),
+                (shift, Key::F, Cmd::Search),
+            ];
+            // Extra modifiers are ignored by egui: Ctrl+T must not take Ctrl+Shift+T.
+            let (shift_held, alt_held) = ctx.input(|i| (i.modifiers.shift, i.modifiers.alt));
+            for (m, k, c) in list {
+                if (m.shift || !shift_held) && (m.alt || !alt_held) && pressed(m, k) {
+                    self.run(ctx, c);
+                }
+            }
+        }
+        // Esc ends "Automatisch blättern".
+        if self.auto_scroll.is_some() && pressed(Modifiers::NONE, Key::Escape) {
+            self.auto_scroll = None;
         }
         if pressed(cmd, Key::Q) {
             self.run(ctx, commands::Cmd::Exit);
@@ -642,6 +701,7 @@ impl MrPdfApp {
         let style = self.settings.style(tool);
         let stamp = self.settings.stamp;
         let highlight_fields = self.settings.highlight_fields;
+        let view = self.view_options();
         if let Some(tab) = self.tabs.get_mut(self.active) {
             let mut cx = CanvasCtx {
                 tool,
@@ -653,8 +713,9 @@ impl MrPdfApp {
                 budget: &mut budget,
                 events: &mut self.events,
                 t,
+                view,
             };
-            canvas::show(ui, tab, &mut cx);
+            canvas::show_document(ui, tab, &mut cx);
             if tab.search.is_running() && tab.continue_search(Duration::from_millis(15)) {
                 ctx.request_repaint();
             }
@@ -663,6 +724,28 @@ impl MrPdfApp {
         }
         if budget.pending {
             ctx.request_repaint();
+        }
+    }
+
+    /// The display options of the ribbon tab "Ansicht" for the canvas.
+    fn view_options(&self) -> canvas::ViewOptions {
+        let s = &self.settings;
+        canvas::ViewOptions {
+            layout: crate::ui::view::LayoutOptions {
+                mode: s.layout,
+                cover_alone: s.cover_alone,
+                gaps: s.page_gaps,
+                right_to_left: s.right_to_left,
+                side_by_side: s.side_by_side,
+            },
+            grid: s.show_grid.then_some((s.grid_mm * 72.0 / 25.4, s.grid_subdivisions)),
+            guides: s.show_guides,
+            transparency: s.transparency_grid,
+            highlight_links: s.highlight_links,
+            snap: s.snap.then_some((s.snap_grid, s.snap_guides)),
+            rulers: s.show_rulers,
+            unit: s.unit,
+            loupe: (s.show_loupe || self.tool == Tool::Loupe).then_some(s.loupe_factor),
         }
     }
 
@@ -714,6 +797,7 @@ impl eframe::App for MrPdfApp {
         self.handle_dropped_files(&ctx);
         self.poll_download(&ctx);
         self.recovery_tick(&ctx);
+        self.view_tick(&ctx);
         self.shortcuts(&ctx);
         self.handle_close_request(&ctx);
 
@@ -733,6 +817,7 @@ impl eframe::App for MrPdfApp {
                 }
             }
             egui::CentralPanel::no_frame().show(ui, |ui| self.central(ui));
+            self.view_windows(&ctx);
         }
         self.dialogs(&ctx);
         self.process_events(&ctx);

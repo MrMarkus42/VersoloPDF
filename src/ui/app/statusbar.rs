@@ -153,12 +153,32 @@ impl MrPdfApp {
                         tab.go_to_page(0);
                     }
                     ui.separator();
-                    if let Some(geo) = tab.doc.geometry(cur) {
-                        let (w, h) = geo.view_size();
-                        ui.label(
-                            RichText::new(format!("{:.0} × {:.0} mm", w / 72.0 * 25.4, h / 72.0 * 25.4))
-                                .weak(),
-                        );
+                    // "Seitenmaße/Position": page size and pointer position.
+                    if self.settings.show_page_info {
+                        let unit = self.settings.unit;
+                        let de = self.settings.language == crate::ui::i18n::Language::German;
+                        let num = |pt: f32| {
+                            let s = format!("{:.2}", pt / unit.points());
+                            if de { s.replace('.', ",") } else { s }
+                        };
+                        let (page, at) = match tab.pointer {
+                            Some((p, v)) => (p, Some(v)),
+                            None => (cur, None),
+                        };
+                        if let Some(geo) = tab.display_geometry(page) {
+                            let (w, h) = geo.view_size();
+                            let u = unit.suffix();
+                            let pos = match at {
+                                Some(v) => format!("   X: {} {u}  Y: {} {u}", num(v.x), num(v.y)),
+                                None => String::new(),
+                            };
+                            let text = if de {
+                                format!("B: {} {u}  H: {} {u}{pos}", num(w), num(h))
+                            } else {
+                                format!("W: {} {u}  H: {} {u}{pos}", num(w), num(h))
+                            };
+                            ui.label(RichText::new(text).weak());
+                        }
                     }
                     ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                         ui.label(message);

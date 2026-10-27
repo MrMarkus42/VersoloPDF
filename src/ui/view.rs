@@ -22,13 +22,54 @@ pub enum ZoomMode {
     FitPage,
 }
 
+/// "Seitenanzeige": the four page layouts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PageLayout {
+    /// "Einzelne Seite": one page at a time.
     Single,
+    /// "Fortlaufend".
     Continuous,
-    Facing,
-    /// Two pages side by side with the first page alone (books).
-    Cover,
+    /// "Zwei Seiten": one spread at a time.
+    TwoPages,
+    /// "Zwei Seiten fortlaufend" (older settings: "Facing", "Cover").
+    #[serde(alias = "Facing", alias = "Cover")]
+    TwoPagesContinuous,
+}
+
+impl PageLayout {
+    /// Layouts that show one page or spread at a time (the mouse wheel flips).
+    pub fn paged(self) -> bool {
+        matches!(self, PageLayout::Single | PageLayout::TwoPages)
+    }
+
+    pub fn two_up(self) -> bool {
+        matches!(self, PageLayout::TwoPages | PageLayout::TwoPagesContinuous)
+    }
+}
+
+/// Options of the page display besides the layout (global view settings).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LayoutOptions {
+    pub mode: PageLayout,
+    /// "Titelseite in der zweiseitigen Ansicht einzeln".
+    pub cover_alone: bool,
+    /// "Seitenzwischenräume".
+    pub gaps: bool,
+    /// "Rechts-nach-Links-Seitenansicht".
+    pub right_to_left: bool,
+    /// "Seiten nebeneinander": scrolling layouts run horizontally.
+    pub side_by_side: bool,
+}
+
+impl LayoutOptions {
+    pub fn new(mode: PageLayout) -> Self {
+        LayoutOptions { mode, cover_alone: false, gaps: true, right_to_left: false, side_by_side: false }
+    }
+
+    /// Scrolling layouts arranged in one row.
+    pub fn horizontal(&self) -> bool {
+        self.side_by_side && !self.mode.paged()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -42,61 +83,75 @@ pub struct Slot {
 pub struct Layout {
     pub slots: Vec<Slot>,
     pub size: Vec2,
+    /// Pages run from left to right in one row ("Seiten nebeneinander").
+    pub horizontal: bool,
 }
 
 impl Layout {
     /// Lays out pages of the given view sizes (PDF points) at `zoom`.
-    pub fn compute(sizes: &[(f32, f32)], zoom: f32, mode: PageLayout, current: usize) -> Layout {
+    pub fn compute(sizes: &[(f32, f32)], zoom: f32, opts: LayoutOptions, current: usize) -> Layout {
         let scale = zoom * PT_TO_SCREEN;
+        let gap = if opts.gaps { PAGE_GAP } else { 0.0 };
         let size_of = |i: usize| {
             let (w, h) = sizes[i];
             vec2(w * scale, h * scale)
         };
+        // Rows of pages: (first page, number of pages).
+        let mut rows: Vec<(usize, usize)> = Vec::new();
+        if opts.mode.two_up() {
+            let mut i = 0;
+            while i < sizes.len() {
+                let alone = opts.cover_alone && i == 0;
+                let n = if alone || i + 1 >= sizes.len() { 1 } else { 2 };
+                rows.push((i, n));
+                i += n;
+            }
+        } else {
+            rows.extend((0..sizes.len()).map(|i| (i, 1)));
+        }
+        if opts.mode.paged() {
+            rows.retain(|(first, n)| (*first..first + n).contains(&current));
+        }
         let mut slots = Vec::new();
+        let horizontal = opts.horizontal();
+        if horizontal {
+            // All pages in one row, vertically centred.
+            let height = (0..sizes.len()).map(|i| size_of(i).y).fold(0.0, f32::max);
+            let mut order: Vec<usize> = (0..sizes.len()).collect();
+            if opts.right_to_left {
+                order.reverse();
+            }
+            let mut x = MARGIN;
+            for i in order {
+                let s = size_of(i);
+                slots.push(Slot {
+                    page: i,
+                    rect: Rect::from_min_size(pos2(x, MARGIN + (height - s.y) / 2.0), s),
+                });
+                x += s.x + gap;
+            }
+            let width = (x - gap + MARGIN).max(2.0 * MARGIN);
+            return Layout { slots, size: vec2(width, height + 2.0 * MARGIN), horizontal };
+        }
         let mut width: f32 = 0.0;
         let mut y = MARGIN;
-        match mode {
-            PageLayout::Single => {
-                if let Some(i) = (current < sizes.len()).then_some(current) {
-                    let s = size_of(i);
-                    slots.push(Slot { page: i, rect: Rect::from_min_size(pos2(0.0, y), s) });
-                    width = s.x;
-                    y += s.y + MARGIN;
-                }
+        for (first, n) in rows {
+            let mut pages: Vec<usize> = (first..first + n).collect();
+            if opts.right_to_left {
+                pages.reverse();
             }
-            PageLayout::Continuous => {
-                for i in 0..sizes.len() {
-                    let s = size_of(i);
-                    slots.push(Slot { page: i, rect: Rect::from_min_size(pos2(0.0, y), s) });
-                    width = width.max(s.x);
-                    y += s.y + PAGE_GAP;
-                }
-                y += MARGIN - PAGE_GAP;
+            let row_h = pages.iter().map(|&i| size_of(i).y).fold(0.0, f32::max);
+            let mut x = 0.0;
+            for &i in &pages {
+                let s = size_of(i);
+                slots.push(Slot { page: i, rect: Rect::from_min_size(pos2(x, y), s) });
+                x += s.x + gap;
             }
-            PageLayout::Facing | PageLayout::Cover => {
-                let mut i = 0;
-                while i < sizes.len() {
-                    let a = size_of(i);
-                    // With a separate cover the first page stands alone.
-                    let alone = mode == PageLayout::Cover && i == 0;
-                    let b = (!alone && i + 1 < sizes.len()).then(|| size_of(i + 1));
-                    let row_h = a.y.max(b.map_or(0.0, |b| b.y));
-                    slots.push(Slot { page: i, rect: Rect::from_min_size(pos2(0.0, y), a) });
-                    let mut row_w = a.x;
-                    if let Some(b) = b {
-                        slots.push(Slot {
-                            page: i + 1,
-                            rect: Rect::from_min_size(pos2(a.x + PAGE_GAP, y), b),
-                        });
-                        row_w += PAGE_GAP + b.x;
-                    }
-                    width = width.max(row_w);
-                    y += row_h + PAGE_GAP;
-                    i += if alone { 1 } else { 2 };
-                }
-                y += MARGIN - PAGE_GAP;
-            }
+            let row_w = x - gap;
+            width = width.max(row_w);
+            y += row_h + gap;
         }
+        y += MARGIN - gap;
         let total_w = width + 2.0 * MARGIN;
         // Centre each row horizontally.
         let mut row_start = 0;
@@ -113,31 +168,27 @@ impl Layout {
             }
             row_start = row_end + 1;
         }
-        Layout { slots, size: vec2(total_w, y.max(MARGIN * 2.0)) }
+        Layout { slots, size: vec2(total_w, y.max(MARGIN * 2.0)), horizontal }
     }
 
     pub fn slot(&self, page: usize) -> Option<&Slot> {
         self.slots.iter().find(|s| s.page == page)
     }
 
-    /// The page shown at content position `y` (or the closest one).
-    pub fn page_at(&self, y: f32) -> Option<usize> {
-        self.slots
-            .iter()
-            .min_by(|a, b| {
-                let da = dist(a.rect, y);
-                let db = dist(b.rect, y);
-                da.total_cmp(&db)
-            })
-            .map(|s| s.page)
+    /// The page shown at content position `p` (or the closest one); only
+    /// `y` matters for vertical layouts, only `x` for horizontal ones.
+    pub fn page_at(&self, p: egui::Pos2) -> Option<usize> {
+        let horizontal = self.horizontal;
+        let d = |r: Rect| if horizontal { dist(r.min.x, r.max.x, p.x) } else { dist(r.min.y, r.max.y, p.y) };
+        self.slots.iter().min_by(|a, b| d(a.rect).total_cmp(&d(b.rect))).map(|s| s.page)
     }
 }
 
-fn dist(r: Rect, y: f32) -> f32 {
-    if y < r.min.y {
-        r.min.y - y
-    } else if y > r.max.y {
-        y - r.max.y
+fn dist(min: f32, max: f32, v: f32) -> f32 {
+    if v < min {
+        min - v
+    } else if v > max {
+        v - max
     } else {
         0.0
     }
@@ -167,34 +218,67 @@ pub fn zoom_out(z: f32) -> f32 {
 mod tests {
     use super::*;
 
-    #[test]
-    fn continuous_layout_stacks_pages() {
-        let l = Layout::compute(&[(100.0, 200.0), (100.0, 200.0)], 1.0, PageLayout::Continuous, 0);
-        assert_eq!(l.slots.len(), 2);
-        assert!(l.slots[1].rect.min.y > l.slots[0].rect.max.y);
-        assert_eq!(l.slots[0].rect.center().x, l.size.x / 2.0);
-        assert_eq!(l.page_at(l.slots[1].rect.center().y), Some(1));
+    fn opts(mode: PageLayout) -> LayoutOptions {
+        LayoutOptions::new(mode)
     }
 
     #[test]
-    fn cover_layout_keeps_first_page_alone() {
-        let l = Layout::compute(&[(100.0, 100.0); 3], 1.0, PageLayout::Cover, 0);
+    fn continuous_layout_stacks_pages() {
+        let l = Layout::compute(&[(100.0, 200.0), (100.0, 200.0)], 1.0, opts(PageLayout::Continuous), 0);
+        assert_eq!(l.slots.len(), 2);
+        assert!(l.slots[1].rect.min.y > l.slots[0].rect.max.y);
+        assert_eq!(l.slots[0].rect.center().x, l.size.x / 2.0);
+        assert_eq!(l.page_at(l.slots[1].rect.center()), Some(1));
+        // Without gaps the pages touch.
+        let l = Layout::compute(
+            &[(100.0, 200.0), (100.0, 200.0)],
+            1.0,
+            LayoutOptions { gaps: false, ..opts(PageLayout::Continuous) },
+            0,
+        );
+        assert_eq!(l.slots[1].rect.min.y, l.slots[0].rect.max.y);
+    }
+
+    #[test]
+    fn cover_option_keeps_first_page_alone() {
+        let o = LayoutOptions { cover_alone: true, ..opts(PageLayout::TwoPagesContinuous) };
+        let l = Layout::compute(&[(100.0, 100.0); 3], 1.0, o, 0);
         assert!(l.slots[1].rect.min.y > l.slots[0].rect.max.y);
         assert_eq!(l.slots[1].rect.min.y, l.slots[2].rect.min.y);
     }
 
     #[test]
-    fn facing_layout_pairs_pages() {
-        let l = Layout::compute(&[(100.0, 100.0); 3], 1.0, PageLayout::Facing, 0);
+    fn two_page_layouts() {
+        let l = Layout::compute(&[(100.0, 100.0); 3], 1.0, opts(PageLayout::TwoPagesContinuous), 0);
         assert_eq!(l.slots[0].rect.min.y, l.slots[1].rect.min.y);
+        assert!(l.slots[0].rect.min.x < l.slots[1].rect.min.x);
         assert!(l.slots[2].rect.min.y > l.slots[0].rect.max.y);
+        // One spread at a time, right to left.
+        let o = LayoutOptions { right_to_left: true, ..opts(PageLayout::TwoPages) };
+        let l = Layout::compute(&[(100.0, 100.0); 4], 1.0, o, 3);
+        assert_eq!(l.slots.len(), 2);
+        assert_eq!((l.slots[0].page, l.slots[1].page), (3, 2));
+        assert!(l.slots[0].rect.min.x < l.slots[1].rect.min.x);
     }
 
     #[test]
     fn single_layout_shows_current_page() {
-        let l = Layout::compute(&[(100.0, 100.0); 3], 1.0, PageLayout::Single, 2);
+        let l = Layout::compute(&[(100.0, 100.0); 3], 1.0, opts(PageLayout::Single), 2);
         assert_eq!(l.slots.len(), 1);
         assert_eq!(l.slots[0].page, 2);
+    }
+
+    #[test]
+    fn side_by_side_runs_horizontally() {
+        let o = LayoutOptions { side_by_side: true, ..opts(PageLayout::Continuous) };
+        let l = Layout::compute(&[(100.0, 100.0); 3], 1.0, o, 0);
+        assert!(l.horizontal);
+        assert_eq!(l.slots[0].rect.min.y, l.slots[2].rect.min.y);
+        assert!(l.slots[2].rect.min.x > l.slots[1].rect.max.x);
+        assert_eq!(l.page_at(l.slots[2].rect.center()), Some(2));
+        // Old settings files still load.
+        let old: PageLayout = ron::from_str("Cover").unwrap();
+        assert_eq!(old, PageLayout::TwoPagesContinuous);
     }
 
     #[test]

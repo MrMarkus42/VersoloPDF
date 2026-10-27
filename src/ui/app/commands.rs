@@ -5,6 +5,7 @@
 use egui::Context;
 
 use super::structure::MarkKind;
+use super::view_cmds::ViewCmd;
 use super::{Dialog, InsertPosition, MrPdfApp, RangePurpose, SidePanel};
 use crate::ui::i18n::Language;
 use crate::ui::icons::Icon;
@@ -38,6 +39,12 @@ pub enum Unavailable {
     Cloud,
     Portfolio,
     WebImport,
+    ThinLines,
+    Transitions,
+    SnapObjects,
+    Windows,
+    Pane,
+    Highlighting,
 }
 
 impl Unavailable {
@@ -90,6 +97,27 @@ impl Unavailable {
             Unavailable::WebImport => (
                 "Das Umwandeln von Web-Seiten und E-Mails in PDF wird nicht unterstützt.",
                 "Converting web pages and e-mails to PDF is not supported.",
+            ),
+            Unavailable::ThinLines => (
+                "Die Darstellung mit dünnen Linien bietet die verwendete PDF-Bibliothek nicht an.",
+                "The PDF library used does not offer thin line display.",
+            ),
+            Unavailable::Transitions => (
+                "MrPDF hat keinen Präsentationsmodus mit Seitenübergängen.",
+                "MrPDF has no presentation mode with page transitions.",
+            ),
+            Unavailable::SnapObjects => (
+                "Einrasten ist am Gitter und an Hilfslinien möglich, nicht an Objekten.",
+                "Snapping works at the grid and guides, not at objects.",
+            ),
+            Unavailable::Windows => (
+                "MrPDF zeigt alle Dokumente als Tabs in einem Fenster.",
+                "MrPDF shows all documents as tabs in one window.",
+            ),
+            Unavailable::Pane => ("Diese Leiste gibt es in MrPDF nicht.", "MrPDF does not have this pane."),
+            Unavailable::Highlighting => (
+                "Wörter und Sätze können beim Vorlesen nicht hervorgehoben werden.",
+                "Words and sentences cannot be highlighted while reading aloud.",
             ),
         };
         if lang == Language::German { de } else { en }
@@ -258,6 +286,8 @@ pub enum Cmd {
     Homepage,
     /// A command that MrPDF does not offer.
     Unavailable(Unavailable, &'static str, &'static str, Icon),
+    /// Commands of the ribbon tab "Ansicht" (see `view_cmds.rs`).
+    View(super::view_cmds::ViewCmd),
 }
 
 pub const HOMEPAGE: &str = "https://github.com/MrMarkus42/MrPDF";
@@ -459,6 +489,34 @@ pub const SEARCHABLE: &[Cmd] = &[
     Cmd::About,
     Cmd::FileAssociation,
     Cmd::Homepage,
+    Cmd::Tool(Tool::DynamicZoom),
+    Cmd::Tool(Tool::Loupe),
+    Cmd::View(ViewCmd::LayoutTwoPagesContinuous),
+    Cmd::View(ViewCmd::PageGaps),
+    Cmd::View(ViewCmd::RightToLeft),
+    Cmd::View(ViewCmd::SideBySide),
+    Cmd::View(ViewCmd::RotateReset),
+    Cmd::View(ViewCmd::Rulers),
+    Cmd::View(ViewCmd::Grid),
+    Cmd::View(ViewCmd::Guides),
+    Cmd::View(ViewCmd::Transparency),
+    Cmd::View(ViewCmd::PageInfo),
+    Cmd::View(ViewCmd::Snap),
+    Cmd::View(ViewCmd::ReplaceColors),
+    Cmd::View(ViewCmd::AutoScroll),
+    Cmd::View(ViewCmd::HighlightLinks),
+    Cmd::View(ViewCmd::PanZoom),
+    Cmd::View(ViewCmd::SplitHorizontal),
+    Cmd::View(ViewCmd::SplitVertical),
+    Cmd::View(ViewCmd::SplitGrid),
+    Cmd::View(ViewCmd::SortTabs),
+    Cmd::View(ViewCmd::CloseOthers),
+    Cmd::View(ViewCmd::ReopenClosed),
+    Cmd::View(ViewCmd::ResetPanes),
+    Cmd::View(ViewCmd::ReadPage),
+    Cmd::View(ViewCmd::ReadToEnd),
+    Cmd::View(ViewCmd::ReadSelection),
+    Cmd::View(ViewCmd::ReadStop),
 ];
 
 impl Cmd {
@@ -511,10 +569,12 @@ impl Cmd {
             ZoomOut => ("Verkleinern", "Zoom out"),
             RotateViewLeft => ("Ansicht links drehen", "Rotate view left"),
             RotateViewRight => ("Ansicht rechts drehen", "Rotate view right"),
-            LayoutSingle => ("Einzelseite", "Single page"),
+            LayoutSingle => ("Einzelne Seite", "Single page"),
             LayoutContinuous => ("Fortlaufend", "Continuous"),
-            LayoutFacing => ("Doppelseite", "Two pages"),
-            LayoutCover => ("Deckblatt separat", "Separate cover"),
+            LayoutFacing => ("Zwei Seiten", "Two pages"),
+            LayoutCover => {
+                ("Titelseite in der zweiseitigen Ansicht einzeln", "Show cover page alone in two-page view")
+            }
             ToggleSidebar => ("Seitenleiste", "Sidebar"),
             ToggleProperties => ("Eigenschaften", "Properties"),
             Fullscreen => ("Vollbild", "Full screen"),
@@ -637,6 +697,7 @@ impl Cmd {
             FileAssociation => ("Dateizuordnung", "File association"),
             Homepage => ("Homepage", "Homepage"),
             Unavailable(_, de, en, _) => (de, en),
+            View(v) => v.names(),
         }
     }
 
@@ -796,6 +857,7 @@ impl Cmd {
             BatesFiles => Icon::InsertFile,
             FitContent => Icon::FitPage,
             Unavailable(_, _, _, icon) => icon,
+            View(v) => v.icon(),
         }
     }
 
@@ -855,6 +917,13 @@ impl Cmd {
             ActualSize => ("Strg+1", "Ctrl+1"),
             FitWidth => ("Strg+2", "Ctrl+2"),
             FitContent => ("Strg+3", "Ctrl+3"),
+            Tool(crate::ui::tools::Tool::Loupe) => ("Strg+Alt+L", "Ctrl+Alt+L"),
+            DarkMode => ("Strg+Umschalt+3", "Ctrl+Shift+3"),
+            Panel(SidePanel::Bookmarks) => ("Strg+B", "Ctrl+B"),
+            Panel(SidePanel::Thumbnails) => ("Strg+T", "Ctrl+T"),
+            Panel(SidePanel::Comments) => ("Strg+M", "Ctrl+M"),
+            Panel(SidePanel::Attachments) => ("Strg+Umschalt+A", "Ctrl+Shift+A"),
+            View(v) => return v.shortcut(),
             _ => return None,
         })
     }
@@ -904,6 +973,8 @@ pub fn tool_names(tool: Tool) -> (&'static str, &'static str) {
         Tool::FieldCombo => ("Menü", "Combo box"),
         Tool::FieldSignature => ("Signatur", "Signature field"),
         Tool::Crop => ("Seite zuschneiden (Werkzeug)", "Crop page (tool)"),
+        Tool::DynamicZoom => ("Stufenlose Vergrößerung", "Dynamic zoom"),
+        Tool::Loupe => ("Lupe", "Loupe"),
     }
 }
 
@@ -948,6 +1019,8 @@ impl MrPdfApp {
                 tab.is_some_and(|t| t.doc.path().is_some())
             }
             EmailAll => self.tabs.iter().any(|t| t.doc.path().is_some()),
+            LayoutCover => true,
+            View(v) => self.view_enabled(v),
             _ => has_doc,
         }
     }
@@ -962,8 +1035,9 @@ impl MrPdfApp {
             FitWidth => tab.is_some_and(|t| t.zoom_mode == ZoomMode::FitWidth),
             LayoutSingle => tab.is_some_and(|t| t.layout_mode == PageLayout::Single),
             LayoutContinuous => tab.is_some_and(|t| t.layout_mode == PageLayout::Continuous),
-            LayoutFacing => tab.is_some_and(|t| t.layout_mode == PageLayout::Facing),
-            LayoutCover => tab.is_some_and(|t| t.layout_mode == PageLayout::Cover),
+            LayoutFacing => tab.is_some_and(|t| t.layout_mode == PageLayout::TwoPages),
+            LayoutCover => self.settings.cover_alone,
+            View(v) => self.view_selected(v),
             ToggleSidebar => self.settings.show_sidebar,
             ToggleProperties => self.settings.show_properties,
             DarkMode => self.settings.dark_mode,
@@ -998,6 +1072,10 @@ impl MrPdfApp {
         // Closes the drop-down of a collapsed ribbon group.
         crate::ui::widgets::note_command_ran(ctx);
         // Page dialogs of "Dokumentaufbau" (insert, delete, extract, …).
+        if let View(v) = cmd {
+            self.run_view(ctx, v);
+            return;
+        }
         if self.run_page_dialog(cmd)
             || self.run_layout_dialog(cmd)
             || self.run_shape(ctx, cmd)
@@ -1068,8 +1146,9 @@ impl MrPdfApp {
             RotateViewRight => self.rotate_view(90),
             LayoutSingle => self.set_layout(PageLayout::Single),
             LayoutContinuous => self.set_layout(PageLayout::Continuous),
-            LayoutFacing => self.set_layout(PageLayout::Facing),
-            LayoutCover => self.set_layout(PageLayout::Cover),
+            LayoutFacing => self.set_layout(PageLayout::TwoPages),
+            LayoutCover => self.settings.cover_alone = !self.settings.cover_alone,
+            View(v) => self.run_view(ctx, v),
             ToggleSidebar => self.settings.show_sidebar = !self.settings.show_sidebar,
             ToggleProperties => self.settings.show_properties = !self.settings.show_properties,
             Fullscreen => {

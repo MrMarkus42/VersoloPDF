@@ -164,7 +164,10 @@ impl MrPdfApp {
                         Entry::Sub(
                             Icon::Camera,
                             ("Bildschirmfoto", "Snapshot"),
-                            &[Cmd::Tool(Tool::Snapshot)],
+                            &[
+                                Cmd::Tool(Tool::Snapshot),
+                                Cmd::View(super::view_cmds::ViewCmd::SnapshotSettings),
+                            ],
                         ),
                         Entry::Sub(
                             Icon::Copy,
@@ -187,7 +190,6 @@ impl MrPdfApp {
 
     pub(super) fn ribbon_ui(&mut self, ui: &mut Ui) {
         let t = self.t();
-        let dark = self.settings.dark_mode;
         let ctx = ui.ctx().clone();
         // Form fields have no Format tab; they are edited in the properties panel.
         let has_selection = self
@@ -198,7 +200,11 @@ impl MrPdfApp {
             self.ribbon = RibbonTab::Home;
         }
         Panel::top("ribbon")
-            .frame(Frame::new().fill(theme::ribbon_background(dark)).inner_margin(Margin::symmetric(6, 3)))
+            .frame(
+                Frame::new()
+                    .fill(theme::ribbon_background(ui.visuals().dark_mode, self.settings.design))
+                    .inner_margin(Margin::symmetric(6, 3)),
+            )
             .show(ui, |ui| {
                 // Row 1: quick access toolbar and quick start search (title bar row).
                 ui.horizontal(|ui| {
@@ -472,18 +478,48 @@ impl MrPdfApp {
     }
 
     fn zoom_box(&mut self, ui: &mut Ui) {
+        let de = self.settings.language == Language::German;
         let Some(tab) = self.tab() else {
             ui.add_enabled(false, egui::DragValue::new(&mut 100.0).suffix(" %"));
             return;
         };
         let mut pct = tab.zoom * 100.0;
-        if ui
-            .add(egui::DragValue::new(&mut pct).range(5.0..=6400.0).suffix(" %").speed(1.0).max_decimals(0))
-            .changed()
-        {
-            tab.zoom = pct / 100.0;
-            tab.zoom_mode = crate::ui::view::ZoomMode::Custom;
-        }
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            if ui
+                .add(
+                    egui::DragValue::new(&mut pct)
+                        .range(5.0..=6400.0)
+                        .suffix(" %")
+                        .speed(1.0)
+                        .max_decimals(0),
+                )
+                .changed()
+            {
+                tab.zoom = pct / 100.0;
+                tab.zoom_mode = crate::ui::view::ZoomMode::Custom;
+            }
+            // Preset values.
+            let resp = ui.small_button("▾");
+            egui::Popup::menu(&resp).show(|ui| {
+                use crate::ui::view::ZoomMode;
+                for p in
+                    [10.0, 25.0, 50.0, 75.0, 100.0, 125.0, 150.0, 200.0, 400.0, 800.0, 1600.0, 3200.0, 6400.0]
+                {
+                    if ui.button(format!("{p:.0} %")).clicked() {
+                        tab.zoom = p / 100.0;
+                        tab.zoom_mode = ZoomMode::Custom;
+                    }
+                }
+                ui.separator();
+                if ui.button(if de { "Seitengröße" } else { "Fit page" }).clicked() {
+                    tab.zoom_mode = ZoomMode::FitPage;
+                }
+                if ui.button(if de { "Seitenbreite" } else { "Fit width" }).clicked() {
+                    tab.zoom_mode = ZoomMode::FitWidth;
+                }
+            });
+        });
     }
 
     fn ribbon_home(&mut self, ui: &mut Ui, ctx: &Context) {
@@ -593,17 +629,18 @@ impl MrPdfApp {
     }
 
     fn ribbon_view(&mut self, ui: &mut Ui, ctx: &Context) {
+        use super::view_cmds::ViewCmd as V;
+        use crate::ui::theme::Design;
         let t = self.t();
         let de = self.settings.language == Language::German;
+        let v = Cmd::View;
         self.tools_group(ui, ctx);
         group(ui, "Navigation", |ui| {
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
                     self.icon(ui, ctx, Cmd::FirstPage);
                     self.icon(ui, ctx, Cmd::PrevPage);
-                    if let Some(tab) = self.active_tab() {
-                        ui.label(format!("{} / {}", tab.current_page + 1, tab.doc.page_count()));
-                    }
+                    self.page_box(ui);
                     self.icon(ui, ctx, Cmd::NextPage);
                     self.icon(ui, ctx, Cmd::LastPage);
                 });
@@ -613,35 +650,258 @@ impl MrPdfApp {
         });
         group(ui, if de { "Größe" } else { "Size" }, |ui| {
             self.big(ui, ctx, Cmd::ActualSize);
+            self.smalls(ui, ctx, &[Cmd::FitPage, Cmd::FitWidth, Cmd::FitContent]);
             ui.vertical(|ui| {
-                ui.horizontal(|ui| {
-                    self.icon(ui, ctx, Cmd::FitPage);
-                    self.icon(ui, ctx, Cmd::FitWidth);
-                    self.zoom_box(ui);
-                });
+                self.zoom_box(ui);
                 self.small(ui, ctx, Cmd::ZoomIn);
                 self.small(ui, ctx, Cmd::ZoomOut);
             });
             self.big(ui, ctx, Cmd::Tool(Tool::Zoom));
-        });
-        group(ui, if de { "Drehen" } else { "Rotate" }, |ui| {
-            self.smalls(ui, ctx, &[Cmd::RotateViewLeft, Cmd::RotateViewRight]);
+            self.smalls(ui, ctx, &[Cmd::Tool(Tool::DynamicZoom), Cmd::Tool(Tool::Loupe), v(V::PanZoom)]);
         });
         group(ui, if de { "Seitenanzeige" } else { "Page display" }, |ui| {
-            self.smalls(ui, ctx, &[Cmd::LayoutSingle, Cmd::LayoutContinuous]);
-            self.smalls(ui, ctx, &[Cmd::LayoutFacing, Cmd::LayoutCover]);
+            self.big_menu(
+                ui,
+                ctx,
+                Icon::RotateRight,
+                ("Ansicht drehen", "Rotate view"),
+                &[
+                    Entry::C(Cmd::RotateViewLeft),
+                    Entry::C(Cmd::RotateViewRight),
+                    Entry::Sep,
+                    Entry::C(v(V::RotateReset)),
+                ],
+            );
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    for cmd in [
+                        Cmd::LayoutSingle,
+                        Cmd::LayoutContinuous,
+                        Cmd::LayoutFacing,
+                        v(V::LayoutTwoPagesContinuous),
+                    ] {
+                        self.icon(ui, ctx, cmd);
+                    }
+                });
+                ui.horizontal(|ui| {
+                    for cmd in [v(V::PageGaps), Cmd::LayoutCover, v(V::RightToLeft)] {
+                        self.icon(ui, ctx, cmd);
+                    }
+                    let resp = crate::ui::widgets::small_menu_button(ui, Icon::TwoPages, "", true, false)
+                        .on_hover_text(if de { "Seitenanordnung" } else { "Page arrangement" });
+                    self.popup_menu(
+                        ctx,
+                        &resp,
+                        &[Entry::C(v(V::StandardLayout)), Entry::C(v(V::SideBySide))],
+                    );
+                });
+            });
+            self.smalls(ui, ctx, &[v(V::Rulers), v(V::Grid), v(V::Guides)]);
+            self.smalls(
+                ui,
+                ctx,
+                &[
+                    UA(Unavailable::ThinLines, "Dünne Linien", "Thin lines", Icon::Line),
+                    v(V::Transparency),
+                    v(V::PageInfo),
+                ],
+            );
+            ui.vertical(|ui| {
+                let resp = crate::ui::widgets::small_menu_button(ui, Icon::Margins, "", true, false)
+                    .on_hover_text(if de { "Einrasten" } else { "Snap" });
+                self.popup_menu(
+                    ctx,
+                    &resp,
+                    &[
+                        Entry::C(v(V::Snap)),
+                        Entry::Sep,
+                        Entry::C(v(V::SnapGrid)),
+                        Entry::C(v(V::SnapGuides)),
+                        Entry::C(UA(Unavailable::SnapObjects, "An Objekten", "To objects", Icon::Margins)),
+                        Entry::Sep,
+                        Entry::C(v(V::SnapSettings)),
+                    ],
+                );
+                self.icon(
+                    ui,
+                    ctx,
+                    UA(Unavailable::Transitions, "Seitenübergänge", "Page transitions", Icon::Next),
+                );
+                self.icon(ui, ctx, v(V::AutoScroll));
+            });
+            ui.vertical(|ui| {
+                self.icon(ui, ctx, v(V::ReplaceColors));
+                self.icon(ui, ctx, Cmd::DarkMode);
+                self.icon(ui, ctx, v(V::HighlightLinks));
+            });
+        });
+        group(ui, if de { "Teilen" } else { "Split" }, |ui| {
+            self.big_menu(
+                ui,
+                ctx,
+                Icon::Split,
+                ("Teilen", "Split"),
+                &[Entry::C(v(V::SplitHorizontal)), Entry::C(v(V::SplitVertical)), Entry::C(v(V::SplitGrid))],
+            );
         });
         group(ui, if de { "Fenster" } else { "Window" }, |ui| {
-            self.smalls(ui, ctx, &[Cmd::ToggleSidebar, Cmd::ToggleProperties, Cmd::Fullscreen]);
-            self.big(ui, ctx, Cmd::DarkMode);
             ui.vertical(|ui| {
+                self.small_menu(
+                    ui,
+                    ctx,
+                    Icon::Thumbnails,
+                    ("Dokument-Tabs", "Document tabs"),
+                    &[
+                        Entry::C(v(V::NewTab)),
+                        Entry::C(UA(
+                            Unavailable::Windows,
+                            "Tab verschieben nach",
+                            "Move tab to",
+                            Icon::Export,
+                        )),
+                        Entry::C(UA(
+                            Unavailable::Windows,
+                            "Mehrere Tabs verschieben",
+                            "Move several tabs",
+                            Icon::Export,
+                        )),
+                        Entry::C(UA(Unavailable::Windows, "Tabs anordnen", "Arrange tabs", Icon::Thumbnails)),
+                        Entry::Sep,
+                        Entry::C(UA(
+                            Unavailable::Windows,
+                            "Alle Tabs in Tab-Gruppe zusammenfassen",
+                            "Merge all tabs into tab group",
+                            Icon::Merge,
+                        )),
+                        Entry::C(UA(
+                            Unavailable::Windows,
+                            "Alle Tabs in aktivem Fenster zusammenfassen",
+                            "Merge all tabs into active window",
+                            Icon::Merge,
+                        )),
+                        Entry::Sep,
+                        Entry::C(v(V::SortTabs)),
+                        Entry::Sep,
+                        Entry::C(Cmd::CloseAll),
+                        Entry::C(v(V::CloseOthers)),
+                        Entry::C(Cmd::Close),
+                        Entry::Sep,
+                        Entry::C(v(V::ReopenClosed)),
+                    ],
+                );
+                let pane = |de: &'static str, en: &'static str, icon: Icon| {
+                    Entry::C(UA(Unavailable::Pane, de, en, icon))
+                };
+                self.small_menu(
+                    ui,
+                    ctx,
+                    Icon::Sidebar,
+                    ("Leisten", "Panes"),
+                    &[
+                        Entry::C(Cmd::Panel(SidePanel::Bookmarks)),
+                        Entry::C(Cmd::Panel(SidePanel::Thumbnails)),
+                        Entry::C(Cmd::Panel(SidePanel::Comments)),
+                        Entry::C(Cmd::Panel(SidePanel::Attachments)),
+                        Entry::C(Cmd::Panel(SidePanel::Search)),
+                        pane("Digitale Signaturen", "Digital signatures", Icon::Signature),
+                        pane("Ebenen", "Layers", Icon::Thumbnails),
+                        pane("Inhalt", "Content", Icon::TextBox),
+                        pane("Sprungmarken", "Destinations", Icon::Bookmarks),
+                        pane("3D-Modellbaum", "3D model tree", Icon::Thumbnails),
+                        Entry::Sep,
+                        pane("Struktur", "Structure", Icon::Accessibility),
+                        pane("Strukturreihenfolge", "Structure order", Icon::Accessibility),
+                        Entry::Sep,
+                        Entry::C(v(V::LoupeWindow)),
+                        Entry::C(v(V::PanZoom)),
+                        pane("Stempelpalette", "Stamp palette", Icon::Stamp),
+                        Entry::Sep,
+                        pane("Rechtschreibprüfung", "Spell checking", Icon::TextBox),
+                        pane("Verlauf", "History", Icon::Undo),
+                        Entry::Sep,
+                        Entry::C(Cmd::ToggleProperties),
+                        Entry::C(Cmd::ToggleSidebar),
+                        Entry::Sep,
+                        Entry::C(v(V::ResetPanes)),
+                        Entry::C(v(V::ResetDocPanes)),
+                    ],
+                );
+                self.small(ui, ctx, UA(Unavailable::Portfolio, "Portfolio", "Portfolio", Icon::Attachment));
+            });
+            self.big_menu(
+                ui,
+                ctx,
+                Icon::Theme,
+                ("Design", "Design"),
+                &[
+                    Entry::C(v(V::Design(Design::Standard))),
+                    Entry::C(v(V::Design(Design::White))),
+                    Entry::C(v(V::Design(Design::DarkGray))),
+                    Entry::C(v(V::Design(Design::Black))),
+                    Entry::Sep,
+                    Entry::C(v(V::CustomizeUi)),
+                    Entry::C(v(V::ReplaceColors)),
+                    Entry::C(Cmd::DarkMode),
+                ],
+            );
+            ui.vertical(|ui| {
+                self.small(ui, ctx, Cmd::Fullscreen);
                 ui.label(t.language);
                 self.language_picker(ui);
             });
         });
         group(ui, if de { "Vorlesen" } else { "Read aloud" }, |ui| {
-            self.big(ui, ctx, UA(Unavailable::Speech, "Vorlesen", "Read aloud", Icon::Accessibility));
+            self.big(ui, ctx, v(V::ReadStart));
+            self.big(ui, ctx, v(V::ReadStop));
+            self.smalls(ui, ctx, &[v(V::ReadBack), v(V::ReadForward), v(V::ReadShow)]);
+            self.smalls(ui, ctx, &[v(V::ReadPage), v(V::ReadToEnd), v(V::ReadSelection)]);
+            ui.vertical(|ui| {
+                let mut volume = self.settings.read_volume;
+                ui.add(egui::Slider::new(&mut volume, 0..=100).show_value(false)).on_hover_text(if de {
+                    "Lautstärke"
+                } else {
+                    "Volume"
+                });
+                self.settings.read_volume = volume;
+                let mut rate = self.settings.read_rate;
+                ui.add(egui::Slider::new(&mut rate, -10..=10).show_value(false)).on_hover_text(if de {
+                    "Tempo"
+                } else {
+                    "Speed"
+                });
+                self.settings.read_rate = rate;
+                ui.horizontal(|ui| {
+                    self.icon(ui, ctx, v(V::ReadFields));
+                    self.icon(ui, ctx, v(V::ReadAnnots));
+                    self.icon(
+                        ui,
+                        ctx,
+                        UA(
+                            Unavailable::Highlighting,
+                            "Wörter hervorheben",
+                            "Highlight words",
+                            Icon::Highlight,
+                        ),
+                    );
+                    self.icon(ui, ctx, v(V::ReadFollow));
+                });
+            });
         });
+    }
+
+    /// Editable page number "n / m".
+    fn page_box(&mut self, ui: &mut Ui) {
+        let Some(tab) = self.tab() else {
+            ui.add_enabled(false, egui::DragValue::new(&mut 1).suffix(" / 0"));
+            return;
+        };
+        let count = tab.doc.page_count().max(1);
+        let mut n = tab.current_page + 1;
+        let resp =
+            ui.add(egui::DragValue::new(&mut n).range(1..=count).speed(0.05).suffix(format!(" / {count}")));
+        if resp.changed() {
+            tab.jump_to_page(n - 1);
+        }
     }
 
     fn language_picker(&mut self, ui: &mut Ui) {

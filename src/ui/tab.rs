@@ -57,6 +57,62 @@ pub enum Interaction {
         page: usize,
         hits: Vec<usize>,
     },
+    /// Moving a guide ("Hilfslinie"); index into `DocTab::guides`.
+    Guide {
+        index: usize,
+    },
+    /// "Stufenlose Vergrößerung": zooming around the pressed point.
+    DynamicZoom {
+        anchor: Pos2,
+    },
+}
+
+/// A guide ("Hilfslinie") shown on every page; position in view points
+/// from the left (vertical guide) or top (horizontal guide) page edge.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Guide {
+    pub vertical: bool,
+    pub pos: f32,
+}
+
+/// "Teilen": how the document window is split.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Split {
+    #[default]
+    None,
+    /// Two views on top of each other.
+    Horizontal,
+    /// Two views side by side.
+    Vertical,
+    /// Four views ("Als Tabelle teilen").
+    Grid,
+}
+
+impl Split {
+    pub fn panes(self) -> usize {
+        match self {
+            Split::None => 1,
+            Split::Horizontal | Split::Vertical => 2,
+            Split::Grid => 4,
+        }
+    }
+}
+
+/// The view state of one pane of a split window.
+#[derive(Debug, Clone)]
+pub struct ViewState {
+    pub zoom: f32,
+    pub zoom_mode: ZoomMode,
+    pub layout_mode: PageLayout,
+    pub current_page: usize,
+    pub layout: Layout,
+    pub viewport: Rect,
+    pub scroll_offset: Vec2,
+    pub pending_scroll: Option<ScrollRequest>,
+    pub content_shift: Vec2,
+    pub canvas_origin: Pos2,
+    back: Vec<usize>,
+    forward: Vec<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -141,9 +197,26 @@ pub struct DocTab {
     pub show_annotations: bool,
     /// "Farben im Dokument ersetzen" (background, text); set by the app.
     pub recolor: Option<([u8; 3], [u8; 3])>,
+    /// "Transparenzgitter": pages are rendered without white paper.
+    pub transparent: bool,
     /// Vertices of a polygon tool in progress (view space of polygon_page).
     pub polygon: Vec<PointF>,
     pub polygon_page: usize,
+    /// Guides ("Hilfslinien") of this document.
+    pub guides: Vec<Guide>,
+    /// Pointer over a page in the last frame: page and view point.
+    pub pointer: Option<(usize, PointF)>,
+    /// Page and screen rectangle the rulers refer to (last frame).
+    pub ruler_page: Option<(usize, Rect)>,
+    /// "Lupe": page and view point at the centre of the magnifier.
+    pub loupe_at: Option<(usize, PointF)>,
+    /// "Teilen": split of the window, the other panes' view states (the
+    /// entry of the active pane is unused) and the active pane.
+    pub split: Split,
+    pub panes: Vec<ViewState>,
+    pub active_pane: usize,
+    /// Pane being drawn (for widget ids).
+    pub drawing_pane: usize,
 }
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
@@ -182,9 +255,78 @@ impl DocTab {
             view_rotation: Rotation::R0,
             show_annotations: true,
             recolor: None,
+            transparent: false,
             polygon: Vec::new(),
             polygon_page: 0,
+            guides: Vec::new(),
+            pointer: None,
+            ruler_page: None,
+            loupe_at: None,
+            split: Split::None,
+            panes: Vec::new(),
+            active_pane: 0,
+            drawing_pane: 0,
         }
+    }
+
+    /// The view state of the active pane.
+    pub fn view_state(&self) -> ViewState {
+        ViewState {
+            zoom: self.zoom,
+            zoom_mode: self.zoom_mode,
+            layout_mode: self.layout_mode,
+            current_page: self.current_page,
+            layout: self.layout.clone(),
+            viewport: self.viewport,
+            scroll_offset: self.scroll_offset,
+            pending_scroll: self.pending_scroll.clone(),
+            content_shift: self.content_shift,
+            canvas_origin: self.canvas_origin,
+            back: self.back.clone(),
+            forward: self.forward.clone(),
+        }
+    }
+
+    /// Exchanges the active view state with `v`.
+    pub fn swap_view(&mut self, v: &mut ViewState) {
+        std::mem::swap(&mut self.zoom, &mut v.zoom);
+        std::mem::swap(&mut self.zoom_mode, &mut v.zoom_mode);
+        std::mem::swap(&mut self.layout_mode, &mut v.layout_mode);
+        std::mem::swap(&mut self.current_page, &mut v.current_page);
+        std::mem::swap(&mut self.layout, &mut v.layout);
+        std::mem::swap(&mut self.viewport, &mut v.viewport);
+        std::mem::swap(&mut self.scroll_offset, &mut v.scroll_offset);
+        std::mem::swap(&mut self.pending_scroll, &mut v.pending_scroll);
+        std::mem::swap(&mut self.content_shift, &mut v.content_shift);
+        std::mem::swap(&mut self.canvas_origin, &mut v.canvas_origin);
+        std::mem::swap(&mut self.back, &mut v.back);
+        std::mem::swap(&mut self.forward, &mut v.forward);
+    }
+
+    /// "Teilen": splits the window (again: back to one view). New panes
+    /// start with the view of the active one.
+    pub fn set_split(&mut self, split: Split) {
+        let split = if self.split == split { Split::None } else { split };
+        if self.active_pane != 0 {
+            self.activate_pane(0);
+        }
+        self.split = split;
+        let state = self.view_state();
+        self.panes = vec![state; split.panes()];
+        self.active_pane = 0;
+    }
+
+    /// Makes another pane of a split window the active one.
+    pub fn activate_pane(&mut self, pane: usize) {
+        if pane == self.active_pane || pane >= self.panes.len() {
+            return;
+        }
+        let current = self.view_state();
+        let mut other = std::mem::replace(&mut self.panes[pane], current);
+        let old = self.active_pane;
+        self.swap_view(&mut other);
+        self.panes[old] = other;
+        self.active_pane = pane;
     }
 
     pub fn title(&self) -> String {
@@ -221,6 +363,7 @@ impl DocTab {
             rotation: self.view_rotation,
             annotations: self.show_annotations,
             recolor: self.recolor,
+            transparent: self.transparent,
             ..RenderOptions::default()
         }
     }

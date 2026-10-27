@@ -23,7 +23,7 @@ impl MrPdfApp {
         self.settings.language == Language::German
     }
 
-    fn info(&mut self, title: &str, text: String) {
+    pub(super) fn info(&mut self, title: &str, text: String) {
         self.dialog = Some(Dialog::Message { title: title.to_string(), text });
     }
 

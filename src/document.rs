@@ -53,6 +53,8 @@ pub struct RenderOptions {
     /// "Farben im Dokument ersetzen": (background, text) colours; light
     /// areas become the background colour, dark areas the text colour.
     pub recolor: Option<([u8; 3], [u8; 3])>,
+    /// No paper colour behind the content ("Transparenzgitter").
+    pub transparent: bool,
 }
 
 impl Default for RenderOptions {
@@ -63,6 +65,7 @@ impl Default for RenderOptions {
             background: [255, 255, 255],
             printing: false,
             recolor: None,
+            transparent: false,
         }
     }
 }
@@ -489,7 +492,12 @@ impl Document {
             .render_annotations(opts.annotations)
             .rotate(to_pdf_rotation(opts.rotation), false)
             .use_print_quality(opts.printing)
-            .set_clear_color(PdfColor::new(opts.background[0], opts.background[1], opts.background[2], 255));
+            .set_clear_color(PdfColor::new(
+                opts.background[0],
+                opts.background[1],
+                opts.background[2],
+                if opts.transparent { 0 } else { 255 },
+            ));
         page.render_into_bitmap_with_config(&mut bitmap, &config)?;
         let mut rgba = bitmap.as_rgba_bytes();
         if let Some((background, text)) = opts.recolor {
