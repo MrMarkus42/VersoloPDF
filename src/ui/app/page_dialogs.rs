@@ -262,11 +262,20 @@ pub enum OrientationFilter {
     Landscape,
 }
 
+/// Where "Seiten einfügen" takes the pages from.
+#[derive(Debug, Clone, PartialEq)]
+pub enum InsertSource {
+    File(PathBuf),
+    /// A document open in MrPDF (its current state, saved or not): tab id
+    /// and name.
+    Open(u64, String),
+}
+
 /// Which page dialog is open, with its input.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PageDialog {
     Insert {
-        path: Option<PathBuf>,
+        source: Option<InsertSource>,
         pages: usize,
         range: PageRange,
         target: Target,
@@ -745,7 +754,7 @@ impl MrPdfApp {
         let (n, cur) = self.doc_info();
         let dialog = match cmd {
             Cmd::InsertFromFile => PageDialog::Insert {
-                path: None,
+                source: None,
                 pages: 0,
                 range: PageRange::all(),
                 target: Target::after_current(),
@@ -953,47 +962,48 @@ impl MrPdfApp {
 
         let mut open_settings = false;
         match &mut state.dialog {
-            PageDialog::Insert { path, pages, range, target, error } => {
+            PageDialog::Insert { source, pages, range, target, error } => {
                 super::dialogs::set_title(ui, Cmd::InsertFromFile.label(lang));
                 section(ui, tr(de, "Quelle", "Source"), |ui| {
                     ui.horizontal(|ui| {
                         ui.label(tr(de, "Datei:", "File:"));
-                        let shown = path.as_deref().map(file_name).unwrap_or_else(|| {
-                            tr(
+                        let shown = match source {
+                            Some(InsertSource::File(p)) => file_name(p),
+                            Some(InsertSource::Open(_, name)) => name.clone(),
+                            None => tr(
                                 de,
                                 "Klicken Sie hier, um die Datei auszuwählen…",
                                 "Click here to choose the file…",
                             )
-                            .into()
-                        });
-                        let mut chosen: Option<PathBuf> = None;
+                            .into(),
+                        };
+                        let mut chosen: Option<InsertSource> = None;
                         egui::ComboBox::from_id_salt("insert-source")
                             .selected_text(shown)
-                            .width(300.0)
+                            .width(360.0)
+                            .height(420.0)
                             .show_ui(ui, |ui| {
-                                for recent in
-                                    self.settings.recent_files.iter().filter(|p| {
-                                        p.extension().is_some_and(|e| e.eq_ignore_ascii_case("pdf"))
-                                    })
-                                {
-                                    if ui
-                                        .selectable_label(
-                                            path.as_ref() == Some(recent),
-                                            recent.display().to_string(),
-                                        )
-                                        .clicked()
-                                    {
-                                        chosen = Some(recent.clone());
-                                    }
-                                }
+                                chosen = self.insert_source_list(ui, de, source.as_ref());
                             });
                         if icon_button(ui, Icon::Open, tr(de, "Datei auswählen", "Choose file"), false, true)
                             .clicked()
                         {
-                            chosen = rfd::FileDialog::new().add_filter("PDF", &["pdf", "PDF"]).pick_file();
+                            chosen = rfd::FileDialog::new()
+                                .add_filter("PDF", &["pdf", "PDF"])
+                                .pick_file()
+                                .map(InsertSource::File);
                         }
-                        if let Some(p) = chosen {
-                            match Document::file_page_count(&p, None) {
+                        if let Some(s) = chosen {
+                            let count = match &s {
+                                InsertSource::File(p) => Document::file_page_count(p, None),
+                                InsertSource::Open(id, _) => self
+                                    .tabs
+                                    .iter()
+                                    .find(|t| t.id == *id)
+                                    .map(|t| t.doc.page_count())
+                                    .ok_or_else(|| crate::Error::Invalid("document closed".into())),
+                            };
+                            match count {
                                 Ok(count) => {
                                     *pages = count;
                                     *error = None;
@@ -1003,7 +1013,7 @@ impl MrPdfApp {
                                     *error = Some(e.to_string());
                                 }
                             }
-                            *path = Some(p);
+                            *source = Some(s);
                         }
                     });
                     if let Some(e) = error {
@@ -1013,12 +1023,10 @@ impl MrPdfApp {
                 range.ui(ui, de, *pages, 0, &[RangeMode::All, RangeMode::Custom]);
                 target.ui(ui, de, n, cur);
                 let selection = range.resolve(*pages, 0);
-                let (ok, cancel, _) = footer(ui, de, path.is_some() && selection.is_some(), false, "OK");
-                if ok && let (Some(p), Some(sel)) = (path.clone(), selection) {
+                let (ok, cancel, _) = footer(ui, de, source.is_some() && selection.is_some(), false, "OK");
+                if ok && let (Some(s), Some(sel)) = (source.clone(), selection) {
                     let at = target.insert_index(n, cur);
-                    action = Some(Box::new(move |app, ctx| {
-                        app.edit(ctx, |tab| tab.doc.insert_pages_selected(at, &p, None, &sel).map(|_| ()))
-                    }));
+                    action = Some(Box::new(move |app, ctx| app.insert_from_source(ctx, s, at, &sel)));
                     close(&mut outcome);
                 } else if cancel {
                     close(&mut outcome);

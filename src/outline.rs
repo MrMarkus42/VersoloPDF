@@ -10,14 +10,14 @@ use crate::error::{Error, Result};
 use crate::pdf_edit::{Edit, guarded, text_string};
 
 const MAX_ITEMS: usize = 20_000;
-const MAX_DEPTH: usize = 32;
+pub(crate) const MAX_DEPTH: usize = 32;
 
-fn reference(dict: &Dictionary, key: &[u8]) -> Option<ObjectId> {
+pub(crate) fn reference(dict: &Dictionary, key: &[u8]) -> Option<ObjectId> {
     dict.get(key).ok().and_then(|o| o.as_reference().ok())
 }
 
 /// The `/Outlines` root dictionary, created if missing.
-fn outline_root(edit: &mut Edit, create: bool) -> Result<Option<ObjectId>> {
+pub(crate) fn outline_root(edit: &mut Edit, create: bool) -> Result<Option<ObjectId>> {
     let catalog_id = edit.prev().trailer.get(b"Root")?.as_reference()?;
     let existing = edit.object(catalog_id)?.as_dict()?.get(b"Outlines").ok().cloned();
     match existing {
@@ -39,7 +39,7 @@ fn outline_root(edit: &mut Edit, create: bool) -> Result<Option<ObjectId>> {
     }
 }
 
-fn children(edit: &Edit, parent: ObjectId) -> Result<Vec<ObjectId>> {
+pub(crate) fn children(edit: &Edit, parent: ObjectId) -> Result<Vec<ObjectId>> {
     let mut out = Vec::new();
     let mut next = reference(edit.object(parent)?.as_dict()?, b"First");
     while let Some(id) = next {
@@ -65,7 +65,7 @@ fn resolve_path(edit: &Edit, root: ObjectId, path: &[usize]) -> Result<ObjectId>
 
 /// Recomputes `/Count` of `node` and its descendants. Returns the number of
 /// items visible below `node` when it is open.
-fn recount(edit: &mut Edit, node: ObjectId, depth: usize) -> Result<i64> {
+pub(crate) fn recount(edit: &mut Edit, node: ObjectId, depth: usize) -> Result<i64> {
     if depth > MAX_DEPTH {
         return Ok(0);
     }
@@ -210,7 +210,7 @@ pub struct NewBookmark {
 }
 
 /// Sets First/Last/Prev/Next/Parent so `kids` become the children of `parent`.
-fn relink(edit: &mut Edit, parent: ObjectId, kids: &[ObjectId]) -> Result<()> {
+pub(crate) fn relink(edit: &mut Edit, parent: ObjectId, kids: &[ObjectId]) -> Result<()> {
     for (i, kid) in kids.iter().enumerate() {
         let d = edit.dict_mut(*kid)?;
         d.set("Parent", Object::Reference(parent));
@@ -242,7 +242,7 @@ fn relink(edit: &mut Edit, parent: ObjectId, kids: &[ObjectId]) -> Result<()> {
 }
 
 /// All items below `node` (depth first).
-fn descendants(edit: &Edit, node: ObjectId, depth: usize, out: &mut Vec<ObjectId>) -> Result<()> {
+pub(crate) fn descendants(edit: &Edit, node: ObjectId, depth: usize, out: &mut Vec<ObjectId>) -> Result<()> {
     if depth > MAX_DEPTH {
         return Ok(());
     }
@@ -256,7 +256,7 @@ fn descendants(edit: &Edit, node: ObjectId, depth: usize, out: &mut Vec<ObjectId
     Ok(())
 }
 
-fn title_of(edit: &Edit, id: ObjectId) -> String {
+pub(crate) fn title_of(edit: &Edit, id: ObjectId) -> String {
     edit.object(id)
         .ok()
         .and_then(|o| o.as_dict().ok())
@@ -264,18 +264,10 @@ fn title_of(edit: &Edit, id: ObjectId) -> String {
         .unwrap_or_default()
 }
 
-/// Page index of an item's explicit destination (`/Dest` or GoTo action).
+/// Page index of an item's destination (`/Dest` or GoTo action, explicit or
+/// named).
 fn page_of(edit: &Edit, id: ObjectId, pages: &[ObjectId]) -> Option<usize> {
-    let dict = edit.object(id).ok()?.as_dict().ok()?;
-    let dest = match dict.get(b"Dest") {
-        Ok(d) => edit.resolve(d).ok()?.clone(),
-        Err(_) => {
-            let action = edit.resolve(dict.get(b"A").ok()?).ok()?.as_dict().ok()?;
-            edit.resolve(action.get(b"D").ok()?).ok()?.clone()
-        }
-    };
-    let target = dest.as_array().ok()?.first()?.as_reference().ok()?;
-    pages.iter().position(|p| *p == target)
+    crate::outline_edit::target_page(edit, id, pages)
 }
 
 /// Rewrites every bookmark title with `f`. Returns the bytes and the number

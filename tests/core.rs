@@ -1256,6 +1256,77 @@ fn bookmark_tools() {
 }
 
 #[test]
+fn bookmark_destinations_and_order() {
+    use mrpdf::outline::NewBookmark;
+    use mrpdf::outline_edit::{Problem, Zoom};
+    let _guard = common::lock();
+    let mut doc = open(4);
+    let nb = |title: &str, page: usize, level: usize| NewBookmark { title: title.into(), page, level };
+    doc.append_bookmarks(&[nb("Kapitel A", 2, 0), nb("Kapitel B", 1, 0), nb("Teil", 3, 1)]).unwrap();
+    let pages = |doc: &Document| {
+        let b = doc.bookmarks();
+        (b[0].page, b[1].page, b[1].children[0].page)
+    };
+    assert_eq!(pages(&doc), (Some(2), Some(1), Some(3)));
+
+    // Named destinations and back; the targets stay the same.
+    assert_eq!(doc.bookmarks_to_named().unwrap(), 3);
+    assert_eq!(pages(&doc), (Some(2), Some(1), Some(3)));
+    assert!(doc.check_bookmarks().unwrap().is_empty());
+    assert_eq!(doc.bookmarks_resolve_named().unwrap(), 3);
+    assert_eq!(doc.bookmarks_resolve_named().unwrap(), 0, "nothing named left");
+    assert_eq!(doc.bookmarks_set_zoom(Zoom::Percent(150.0)).unwrap(), 3);
+    assert_eq!(doc.bookmarks_set_zoom(Zoom::Percent(150.0)).unwrap(), 0, "already set");
+    assert_eq!(doc.bookmarks_remove_actions().unwrap(), 0);
+    assert_eq!(pages(&doc), (Some(2), Some(1), Some(3)));
+
+    // Pages follow the bookmarks: A (page 3), B (page 2), Teil (page 4).
+    assert!(doc.sort_pages_by_bookmarks().unwrap());
+    assert!(doc.page_text(1).unwrap().all_text().contains("Page 3"));
+    assert!(doc.page_text(2).unwrap().all_text().contains("Page 2"));
+    assert_eq!(pages(&doc), (Some(1), Some(2), Some(3)));
+    assert!(!doc.sort_pages_by_bookmarks().unwrap(), "already in order");
+
+    // Bookmarks from a printed table of contents.
+    assert_eq!(doc.insert_toc("Inhalt").unwrap(), 1);
+    let toc = doc.toc_bookmarks(&[0], None).unwrap();
+    assert_eq!(
+        toc.iter().map(|b| (b.title.as_str(), b.page)).collect::<Vec<_>>(),
+        [("Kapitel A", 2), ("Kapitel B", 3), ("Teil", 4)],
+        "{toc:?}"
+    );
+    // Links from bookmark titles on the contents page (3 exist already).
+    assert_eq!(doc.links_from_bookmarks(&[0]).unwrap(), 3);
+    assert_eq!(doc.links(0).unwrap().len(), 6);
+
+    // Named destinations whose names are gone are reported and removed.
+    doc.bookmarks_to_named().unwrap();
+    let mut raw = lopdf::Document::load_mem(&doc.to_bytes().unwrap()).unwrap();
+    let catalog = raw.trailer.get(b"Root").unwrap().as_reference().unwrap();
+    raw.get_dictionary_mut(catalog).unwrap().remove(b"Dests");
+    let mut bytes = Vec::new();
+    raw.save_to(&mut bytes).unwrap();
+    let mut broken = Document::from_bytes(bytes, "broken.pdf", None).unwrap();
+    let problems = broken.check_bookmarks().unwrap();
+    assert_eq!(problems.len(), 3);
+    assert!(problems.iter().all(|(_, p)| *p == Problem::UnknownName));
+    assert_eq!(broken.remove_broken_bookmarks().unwrap(), 3);
+    assert!(broken.bookmarks().is_empty());
+}
+
+#[test]
+fn insert_pages_from_open_document() {
+    let _guard = common::lock();
+    let mut target = open(2);
+    let mut source = open(3);
+    source.delete_pages(&[0]).unwrap();
+    let (bytes, pw) = source.snapshot().unwrap();
+    assert_eq!(target.insert_pages_from_bytes(1, bytes, pw.as_deref(), &[1]).unwrap(), 1);
+    assert_eq!(target.page_count(), 3);
+    assert!(target.page_text(1).unwrap().all_text().contains("Page 3"), "unsaved state of the source");
+}
+
+#[test]
 fn review_and_conversion() {
     let _guard = common::lock();
     let mut doc = open(2);

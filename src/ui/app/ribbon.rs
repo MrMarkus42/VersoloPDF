@@ -1174,31 +1174,34 @@ impl MrPdfApp {
     fn ribbon_bookmarks(&mut self, ui: &mut Ui, ctx: &Context) {
         let de = self.settings.language == Language::German;
         group(ui, if de { "Erstellen" } else { "Create" }, |ui| {
-            for cmd in [
-                Cmd::BookmarkAdd,
-                Cmd::BookmarkFromSelection,
-                Cmd::BookmarkEveryNth,
-                Cmd::BookmarkFromHighlights,
-                Cmd::BookmarkFromTextFile,
-            ] {
-                self.big(ui, ctx, cmd);
-            }
+            self.big(ui, ctx, Cmd::BookmarkAdd);
+            self.smalls(ui, ctx, &[Cmd::BookmarkFromSelection, Cmd::BookmarkEveryNth, Cmd::BookmarkFromToc]);
+            self.smalls(ui, ctx, &[Cmd::BookmarkFromHighlights, Cmd::BookmarkFromTextFile]);
         });
         group(ui, if de { "Ändern" } else { "Change" }, |ui| {
-            self.menu(
+            ui.vertical(|ui| {
+                self.small(ui, ctx, Cmd::BookmarkAddText);
+                self.menu(
+                    ui,
+                    ctx,
+                    Icon::TextBox,
+                    if de { "Groß-/Kleinschreibung" } else { "Case" },
+                    &[Cmd::BookmarkUpper, Cmd::BookmarkLower, Cmd::BookmarkTitleCase],
+                );
+                self.small(ui, ctx, Cmd::BookmarkZoom);
+            });
+            self.smalls(
                 ui,
                 ctx,
-                Icon::TextBox,
-                if de { "Groß-/Kleinschreibung" } else { "Case" },
-                &[Cmd::BookmarkUpper, Cmd::BookmarkLower, Cmd::BookmarkTitleCase],
+                &[Cmd::BookmarkResolveNamed, Cmd::BookmarkReplace, Cmd::BookmarkRemoveActions],
             );
-            self.smalls(ui, ctx, &[Cmd::BookmarkReplace, Cmd::BookmarkSort]);
-            self.smalls(ui, ctx, &[Cmd::BookmarkDedupe, Cmd::BookmarkDeleteAll]);
+            self.smalls(ui, ctx, &[Cmd::BookmarkSort, Cmd::BookmarkCheck, Cmd::BookmarkDedupe]);
+            self.smalls(ui, ctx, &[Cmd::BookmarkDeleteAll]);
         });
         group(ui, if de { "Umwandeln" } else { "Convert" }, |ui| {
             self.big(ui, ctx, Cmd::BookmarkToc);
-            self.big(ui, ctx, Cmd::BookmarkExportHtml);
-            self.big(ui, ctx, Cmd::BookmarkExportText);
+            self.smalls(ui, ctx, &[Cmd::BookmarkLinks, Cmd::BookmarkSortPages, Cmd::BookmarkToNamed]);
+            self.smalls(ui, ctx, &[Cmd::BookmarkExportHtml, Cmd::BookmarkExportText]);
         });
     }
 

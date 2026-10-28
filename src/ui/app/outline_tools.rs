@@ -73,7 +73,7 @@ impl MrPdfApp {
             }
             Cmd::BookmarkExportHtml => self.export_bookmarks(ctx, true),
             Cmd::BookmarkExportText => self.export_bookmarks(ctx, false),
-            _ => return false,
+            _ => return self.run_outline_more(ctx, cmd),
         }
         true
     }
@@ -246,7 +246,7 @@ impl MrPdfApp {
                     outcome = Outcome::Close;
                 }
             }
-            _ => outcome = Outcome::Close,
+            other => return self.outline_more_dialog(ui, other),
         }
         (outcome, action)
     }

@@ -12,11 +12,13 @@ mod features;
 mod file_ops;
 pub mod form_cmds;
 mod formdata;
+mod insert_source;
 mod labels_dialog;
 mod layout_dialogs;
 mod marks_dialogs;
 mod office_dialogs;
 mod optimize_dialog;
+mod outline_more;
 mod outline_tools;
 mod page_dialogs;
 mod portfolio_view;
@@ -233,6 +235,30 @@ pub enum Dialog {
     },
     BookmarkSort {
         by_page: bool,
+    },
+    /// "Aus Inhaltsverzeichnis": pages of the contents and page offset.
+    BookmarkFromToc {
+        pages: String,
+        auto: bool,
+        offset: i32,
+    },
+    /// "Text hinzufügen".
+    BookmarkAddText {
+        prefix: String,
+        suffix: String,
+    },
+    /// "Vergrößerung ändern".
+    BookmarkZoom {
+        zoom: crate::outline_edit::Zoom,
+        percent: f32,
+    },
+    /// "Verweise aus Lesezeichen": pages to search.
+    BookmarkLinks {
+        pages: String,
+    },
+    /// "Überprüfen": broken bookmarks.
+    BookmarkCheck {
+        problems: Vec<(String, crate::outline_edit::Problem)>,
     },
     About,
     /// "Von URL öffnen".

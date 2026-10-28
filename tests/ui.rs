@@ -981,6 +981,63 @@ fn bookmark_tools_ui() {
     let tab = h.state().active_tab().unwrap();
     assert_eq!(tab.doc.page_count(), 4);
     save(&mut h, "27-table-of-contents");
+    save(&mut h, "les-01-ribbon");
+
+    // "Überprüfen": all bookmarks are fine.
+    quick(&mut h, "Überprüfen");
+    match h.state().dialog() {
+        Some(mrpdf::ui::app::Dialog::BookmarkCheck { problems }) => assert!(problems.is_empty()),
+        other => panic!("unexpected dialog {other:?}"),
+    }
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+
+    // "Vergrößerung ändern" > "Seitenbreite".
+    quick(&mut h, "Vergrößerung ändern");
+    h.get_by_label("Seitenbreite").click();
+    h.run_steps(2);
+    save(&mut h, "les-02-zoom");
+    h.get_by_label("OK").click();
+    h.run_steps(4);
+    assert!(h.state().dialog().is_none());
+
+    // "Aus Inhaltsverzeichnis": the contents page made above.
+    quick(&mut h, "Aus Inhaltsverzeichnis");
+    save(&mut h, "les-03-from-toc");
+    h.get_by_label("OK").click();
+    h.run_steps(4);
+    let tab = h.state().active_tab().unwrap();
+    assert_eq!(tab.doc.bookmarks().len(), 6, "three more from the contents page");
+    assert_eq!(tab.doc.bookmarks()[3].page, Some(1));
+}
+
+#[test]
+fn insert_pages_source_list() {
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let first = sample_file(&dir, 2);
+    let second = dir.path().join("Zweites.pdf");
+    std::fs::write(&second, common::text_pdf(3)).unwrap();
+    let mut h = harness(vec![first, second], false);
+    h.run_steps(10);
+    assert_eq!(h.state().tab_count(), 2);
+    h.state_mut().set_active_tab(0);
+    h.run_steps(3);
+    tab(&mut h, "Dokumentaufbau");
+    h.get_by_label("Einfügen").click();
+    h.run_steps(3);
+    h.get_by_label("Seiten einfügen…").click();
+    h.run_steps(3);
+    assert!(matches!(h.state().dialog(), Some(mrpdf::ui::app::Dialog::Pages(_))));
+    h.get_by_role(egui::accesskit::Role::ComboBox).click();
+    h.run_steps(3);
+    save(&mut h, "les-04-insert-source");
+    // The document tab carries the same name; the list entry comes last.
+    h.get_all_by_label("Zweites.pdf").last().unwrap().click();
+    h.run_steps(3);
+    h.get_by_label("OK").click();
+    h.run_steps(4);
+    assert_eq!(h.state().active_tab().unwrap().doc.page_count(), 5, "2 + 3 pages of the open document");
 }
 
 #[test]
