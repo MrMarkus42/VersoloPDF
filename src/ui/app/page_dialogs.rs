@@ -27,7 +27,9 @@ use crate::ui::pickers::{
 use crate::ui::widgets::{icon_button, small_button};
 
 /// Image files accepted by "Bilder einfügen".
-const IMAGE_EXT: [&str; 7] = ["png", "jpg", "jpeg", "gif", "bmp", "tif", "tiff"];
+/// Image files MrPDF can read (the image crate's enabled decoders).
+pub(super) const IMAGE_EXT: [&str; 14] =
+    ["png", "jpg", "jpeg", "gif", "bmp", "tif", "tiff", "webp", "pbm", "pgm", "ppm", "pnm", "tga", "ico"];
 /// Upper bounds for file lists and text files.
 const MAX_FILES: usize = 1000;
 const MAX_TEXT_FILE: u64 = 32 * 1024 * 1024;
@@ -689,7 +691,7 @@ fn decode_files(
 /// File types of "Öffnen": PDF is opened, the others become new documents.
 pub const OPEN_TYPES: &[(&str, &str, &[&str])] = &[
     ("PDF-Dokument", "PDF document", &["pdf"]),
-    ("Bilder", "Images", &["png", "jpg", "jpeg"]),
+    ("Bilder", "Images", &IMAGE_EXT),
     ("Textdateien", "Text files", &["txt", "text", "log"]),
     ("Rich-Text-Format-Dokument", "Rich text format document", &["rtf"]),
     ("Markdown", "Markdown", &["md", "markdown"]),
@@ -891,7 +893,7 @@ impl MrPdfApp {
         let layout = TextLayout::default();
         let text = |rtf: bool| decode_files(&files, rtf, TextEncoding::Auto);
         let result = match extension(&path).as_str() {
-            "png" | "jpg" | "jpeg" => load_images(&files)
+            ext if IMAGE_EXT.contains(&ext) => load_images(&files)
                 .and_then(|imgs| crate::compose::images_to_pdf(&imgs, &ImageLayout::default())),
             "rtf" => text(true).and_then(|docs| crate::compose::text_to_pdf(&docs, &layout)),
             "md" | "markdown" => text(false).and_then(|docs| crate::compose::markdown_to_pdf(&docs, &layout)),

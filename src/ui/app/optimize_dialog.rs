@@ -476,6 +476,8 @@ impl MrPdfApp {
                                 ui.label(tr(de, "Anmerkungen einbetten", "Embed comments"));
                                 let names = [
                                     (EmbedAnnots::None, tr(de, "Keine Anmerkung einbetten", "Embed no comment")),
+                                    (EmbedAnnots::Fields, tr(de, "Formularfelder einbetten", "Embed form fields")),
+                                    (EmbedAnnots::Markup, tr(de, "Markierungs-Anmerkungen einbetten", "Embed markup comments")),
                                     (EmbedAnnots::All, tr(de, "Anmerkungen und Formularfelder einbetten", "Embed comments and form fields")),
                                 ];
                                 let current = names.iter().find(|n| n.0 == o.embed_annots).map_or("", |n| n.1);
@@ -503,9 +505,7 @@ impl MrPdfApp {
                             ui.checkbox(&mut o.attachments, tr(de, "Datei-Anhänge entfernen", "Remove file attachments"));
                             ui.checkbox(&mut o.external_refs, tr(de, "Externe Querverweise entfernen", "Remove external cross references"));
                             ui.checkbox(&mut o.private_data, tr(de, "Private Daten anderer Anwendungen entfernen", "Remove private data of other applications"));
-                            let mut layers = false;
-                            ui.add_enabled(false, egui::Checkbox::new(&mut layers, tr(de, "Versteckte Ebenen entfernen und sichtbare Ebenen zusammenfassen", "Remove hidden layers and merge visible layers")))
-                                .on_disabled_hover_text(tr(de, "Wird von MrPDF nicht unterstützt.", "Not supported by MrPDF."));
+                            ui.checkbox(&mut o.hidden_layers, tr(de, "Versteckte Ebenen entfernen und sichtbare Ebenen zusammenfassen", "Remove hidden layers and merge visible layers"));
                         });
                     }),
                     _ => ui.add_enabled_ui(o.cleanup, |ui| {
@@ -642,18 +642,24 @@ impl MrPdfApp {
     ) -> crate::Result<(Vec<u8>, crate::optimize::OptimizeReport)> {
         let mut bytes = tab.doc.to_bytes()?;
         let before = bytes.len();
-        let engine_steps = options.objects && options.embed_annots == EmbedAnnots::All
-            || options.cleanup && options.outside_crop;
-        if engine_steps {
+        let embed = options.objects && options.embed_annots != EmbedAnnots::None;
+        let partial = embed && options.embed_annots != EmbedAnnots::All;
+        if embed || options.cleanup && options.outside_crop {
+            if partial {
+                bytes = crate::optimize::park_annotations(&bytes, options.embed_annots)?;
+            }
             let mut copy = crate::Document::from_bytes(bytes, "copy.pdf", None)?;
             let pages: Vec<usize> = (0..copy.page_count()).collect();
-            if options.objects && options.embed_annots == EmbedAnnots::All {
+            if embed {
                 copy.flatten_pages(&pages)?;
             }
             if options.cleanup && options.outside_crop {
                 copy.remove_outside(&pages, true, true, true)?;
             }
             bytes = copy.to_bytes()?;
+            if partial {
+                bytes = crate::optimize::restore_annotations(&bytes)?;
+            }
         }
         let (out, mut report) = crate::optimize::optimize(&bytes, None, options)?;
         report.before = before;

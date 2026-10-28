@@ -32,3 +32,9 @@ First version:
 * Bookmark tools and table of contents
 * Review and convert: word count, document comparison, accessibility report,
   new document from files, contents to images, grayscale, text/Word export
+* File backstage: recent files with pins, sessions, recovery, PDF optimizer
+  (images, fonts, embedding all or only form fields / markup comments,
+  hidden layers, clean-up), space usage, own print dialog, document
+  properties, settings dialog
+* Images in GIF, TIFF, WebP, PBM/PGM/PPM, TGA and ICO can be opened and
+  inserted; page export also as GIF, WebP and PBM/PGM/PPM

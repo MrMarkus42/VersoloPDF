@@ -21,7 +21,9 @@ use crate::ui::pickers::{PageRange, length, preset_combo, section, segmented, un
 use crate::ui::widgets::{from_color32, icon_button, small_button, to_color32};
 
 /// Image files and PDFs accepted as watermark/background.
-const IMAGE_EXT: [&str; 6] = ["png", "jpg", "jpeg", "bmp", "gif", "pdf"];
+const IMAGE_EXT: [&str; 15] = [
+    "png", "jpg", "jpeg", "gif", "bmp", "tif", "tiff", "webp", "pbm", "pgm", "ppm", "pnm", "tga", "ico", "pdf",
+];
 const MM: f32 = 72.0 / 25.4;
 
 fn kind_of(k: MarkKind) -> Kind {

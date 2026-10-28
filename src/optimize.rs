@@ -117,9 +117,49 @@ pub enum EmbedAnnots {
     /// "Keine Anmerkung einbetten"
     #[default]
     None,
+    /// "Formularfelder einbetten"
+    Fields,
+    /// "Markierungs-Anmerkungen einbetten" (comments, not links or fields)
+    Markup,
     /// "Anmerkungen und Formularfelder einbetten"
     All,
 }
+
+impl EmbedAnnots {
+    /// Whether an annotation of `subtype` becomes page content.
+    pub fn embeds(self, subtype: &[u8]) -> bool {
+        match self {
+            EmbedAnnots::None => false,
+            EmbedAnnots::Fields => subtype == b"Widget",
+            EmbedAnnots::Markup => MARKUP_SUBTYPES.contains(&subtype),
+            EmbedAnnots::All => true,
+        }
+    }
+}
+
+/// Markup annotations of PDF 32000-1, 12.5.6.2 (table 170).
+const MARKUP_SUBTYPES: [&[u8]; 17] = [
+    b"Text",
+    b"FreeText",
+    b"Line",
+    b"Square",
+    b"Circle",
+    b"Polygon",
+    b"PolyLine",
+    b"Highlight",
+    b"Underline",
+    b"Squiggly",
+    b"StrikeOut",
+    b"Stamp",
+    b"Caret",
+    b"Ink",
+    b"FileAttachment",
+    b"Sound",
+    b"Redact",
+];
+
+/// Private page key that holds the annotations a partial embed keeps.
+const PARKED_ANNOTS: &[u8] = b"MrPDFKeptAnnots";
 
 /// All settings of the "PDF optimieren" dialog.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -159,6 +199,8 @@ pub struct OptimizeOptions {
     pub attachments: bool,
     pub external_refs: bool,
     pub private_data: bool,
+    /// "Versteckte Ebenen entfernen und sichtbare Ebenen zusammenfassen"
+    pub hidden_layers: bool,
 
     pub cleanup: bool,
     pub dup_fonts: bool,
@@ -205,6 +247,7 @@ impl Default for OptimizeOptions {
             attachments: false,
             external_refs: false,
             private_data: false,
+            hidden_layers: false,
             cleanup: true,
             dup_fonts: true,
             dup_images: true,
@@ -1409,6 +1452,232 @@ fn remove_unused_layers(doc: &mut Document) -> usize {
     unused.len()
 }
 
+/// The layers (OCGs) that the default configuration hides.
+fn hidden_layers(doc: &Document, props: &Dictionary) -> HashSet<ObjectId> {
+    let refs = |obj: Option<&Object>| -> Vec<ObjectId> {
+        obj.and_then(|a| resolve(doc, a).as_array().ok())
+            .map(|a| a.iter().filter_map(|o| o.as_reference().ok()).collect())
+            .unwrap_or_default()
+    };
+    let all = refs(props.get(b"OCGs").ok());
+    let config = props.get(b"D").ok().and_then(|d| dict_of(doc, d));
+    let on = refs(config.and_then(|d| d.get(b"ON").ok()));
+    let off = refs(config.and_then(|d| d.get(b"OFF").ok()));
+    if config.and_then(|d| name_of(d, b"BaseState")).as_deref() == Some(b"OFF") {
+        all.into_iter().filter(|id| !on.contains(id)).collect()
+    } else {
+        off.into_iter().collect()
+    }
+}
+
+/// Whether an /OC entry (layer or membership dictionary) is visible.
+fn oc_visible(doc: &Document, oc: &Object, hidden: &HashSet<ObjectId>) -> bool {
+    let Some(dict) = dict_of(doc, oc) else { return true };
+    if name_of(dict, b"Type").as_deref() != Some(b"OCMD") {
+        return oc.as_reference().map_or(true, |id| !hidden.contains(&id));
+    }
+    let states: Vec<bool> = match dict.get(b"OCGs") {
+        Ok(Object::Reference(id)) => vec![!hidden.contains(id)],
+        Ok(other) => resolve(doc, other)
+            .as_array()
+            .map(|a| a.iter().filter_map(|o| o.as_reference().ok()).map(|id| !hidden.contains(&id)).collect())
+            .unwrap_or_default(),
+        Err(_) => Vec::new(),
+    };
+    if states.is_empty() {
+        return true;
+    }
+    match name_of(dict, b"P").as_deref() {
+        Some(b"AllOn") => states.iter().all(|&s| s),
+        Some(b"AnyOff") => states.iter().any(|&s| !s),
+        Some(b"AllOff") => states.iter().all(|&s| !s),
+        _ => states.iter().any(|&s| s),
+    }
+}
+
+/// Drops the content of hidden layers and the layer markers of visible
+/// ones. Returns None if nothing changed.
+fn filter_layers(
+    doc: &Document,
+    ops: Vec<lopdf::content::Operation>,
+    resources: &Dictionary,
+    hidden: &HashSet<ObjectId>,
+) -> Option<Vec<lopdf::content::Operation>> {
+    let entry = |kind: &[u8], name: &Object| -> Option<Object> {
+        let d = resources.get(kind).ok().and_then(|d| dict_of(doc, d))?;
+        d.get(name.as_name().ok()?).ok().cloned()
+    };
+    // Per open marked-content block: true = layer marker (dropped).
+    let mut stack: Vec<bool> = Vec::new();
+    // Depth of the stack where a hidden block started.
+    let mut hidden_from: Option<usize> = None;
+    let mut out = Vec::with_capacity(ops.len());
+    let mut changed = false;
+    for op in ops {
+        let keep = match op.operator.as_str() {
+            "BDC" | "BMC" => {
+                let layer = op.operator == "BDC"
+                    && op.operands.first().and_then(|o| o.as_name().ok()) == Some(b"OC".as_slice());
+                if layer && hidden_from.is_none() {
+                    let oc = match op.operands.get(1) {
+                        Some(n @ Object::Name(_)) => entry(b"Properties", n),
+                        other => other.cloned(),
+                    };
+                    if !oc.is_some_and(|oc| oc_visible(doc, &oc, hidden)) {
+                        hidden_from = Some(stack.len());
+                    }
+                }
+                stack.push(layer);
+                hidden_from.is_none() && !layer
+            }
+            "EMC" => {
+                let layer = stack.pop().unwrap_or(false);
+                let inside = hidden_from.is_some();
+                if hidden_from == Some(stack.len()) {
+                    hidden_from = None;
+                }
+                !inside && !layer
+            }
+            "Do" if hidden_from.is_none() => op
+                .operands
+                .first()
+                .and_then(|n| entry(b"XObject", n))
+                .and_then(|x| dict_of(doc, &x).and_then(|d| d.get(b"OC").ok()).cloned())
+                .is_none_or(|oc| oc_visible(doc, &oc, hidden)),
+            _ => hidden_from.is_none(),
+        };
+        if keep {
+            out.push(op);
+        } else {
+            changed = true;
+        }
+    }
+    changed.then_some(out)
+}
+
+/// "Versteckte Ebenen entfernen und sichtbare Ebenen zusammenfassen": the
+/// content of layers hidden by default is deleted, visible layers become
+/// normal content and the layer list is removed. Streams with inline images
+/// are not rewritten; then the layer list stays so nothing hidden shows up.
+fn merge_layers(doc: &mut Document) {
+    let Some(props) = catalog_id(doc)
+        .and_then(|c| doc.get_dictionary(c).ok())
+        .and_then(|c| c.get(b"OCProperties").ok())
+        .and_then(|p| dict_of(doc, p))
+        .cloned()
+    else {
+        return;
+    };
+    let hidden = hidden_layers(doc, &props);
+    let mut complete = true;
+    let rewrite = |doc: &Document, plain: &[u8], resources: &Dictionary, complete: &mut bool| -> Option<Vec<u8>> {
+        if plain.windows(3).any(|w| w == b"BI ") {
+            *complete = false;
+            return None;
+        }
+        let Ok(content) = Content::decode(plain) else {
+            *complete = false;
+            return None;
+        };
+        let ops = filter_layers(doc, content.operations, resources, &hidden)?;
+        Content { operations: ops }.encode().ok()
+    };
+    // Pages: the contents (possibly split into several streams) as one stream.
+    for page in doc.get_pages().into_values() {
+        let resources = page_resources(doc, page).unwrap_or_default();
+        let plain = doc.get_page_content(page);
+        if let Some(new) = rewrite(doc, &plain, &resources, &mut complete) {
+            let id = doc.add_object(Stream::new(Dictionary::new(), new));
+            if let Ok(d) = doc.get_object_mut(page).and_then(Object::as_dict_mut) {
+                d.set("Contents", id);
+            }
+        }
+    }
+    // Form XObjects with their own resources.
+    let forms: Vec<ObjectId> = doc
+        .objects
+        .iter()
+        .filter(|(_, o)| matches!(o, Object::Stream(s) if name_of(&s.dict, b"Subtype").as_deref() == Some(b"Form")))
+        .map(|(id, _)| *id)
+        .collect();
+    for id in forms {
+        let Ok(Object::Stream(s)) = doc.get_object(id) else { continue };
+        let resources = s.dict.get(b"Resources").ok().and_then(|r| dict_of(doc, r)).cloned().unwrap_or_default();
+        let Ok(plain) = s.decompressed_content_with_limit(MAX_STREAM) else { continue };
+        if let Some(new) = rewrite(doc, &plain, &resources, &mut complete)
+            && let Ok(Object::Stream(s)) = doc.get_object_mut(id)
+        {
+            s.set_plain_content(new);
+            s.dict.remove(b"Filter");
+            s.dict.remove(b"DecodeParms");
+        }
+    }
+    // Annotations of hidden layers.
+    for page in doc.get_pages().into_values() {
+        let Some(annots) = doc
+            .get_dictionary(page)
+            .ok()
+            .and_then(|d| d.get(b"Annots").ok())
+            .and_then(|a| resolve(doc, a).as_array().ok())
+            .cloned()
+        else {
+            continue;
+        };
+        let keep: Vec<Object> = annots
+            .into_iter()
+            .filter(|a| {
+                dict_of(doc, a).and_then(|d| d.get(b"OC").ok()).is_none_or(|oc| oc_visible(doc, oc, &hidden))
+            })
+            .collect();
+        if let Ok(d) = doc.get_object_mut(page).and_then(Object::as_dict_mut) {
+            d.set("Annots", Object::Array(keep));
+        }
+    }
+    if !complete {
+        return;
+    }
+    // No layers any more: drop /OC entries and the layers in /Properties.
+    let layer_type = |d: &Dictionary| matches!(name_of(d, b"Type").as_deref(), Some(b"OCG" | b"OCMD"));
+    let layers: HashSet<ObjectId> = doc
+        .objects
+        .iter()
+        .filter(|(_, o)| o.as_dict().is_ok_and(layer_type))
+        .map(|(id, _)| *id)
+        .collect();
+    let strip = |resources: &mut Dictionary| {
+        if let Ok(Object::Dictionary(props)) = resources.get_mut(b"Properties") {
+            let names: Vec<Vec<u8>> = props
+                .iter()
+                .filter(|(_, v)| match v {
+                    Object::Reference(id) => layers.contains(id),
+                    Object::Dictionary(d) => layer_type(d),
+                    _ => false,
+                })
+                .map(|(k, _)| k.clone())
+                .collect();
+            for k in names {
+                props.remove(&k);
+            }
+        }
+    };
+    for obj in doc.objects.values_mut() {
+        let dict = match obj {
+            Object::Dictionary(d) => d,
+            Object::Stream(s) => &mut s.dict,
+            _ => continue,
+        };
+        dict.remove(b"OC");
+        // A resource dictionary of its own, or one inside a page or form.
+        strip(dict);
+        if let Ok(Object::Dictionary(resources)) = dict.get_mut(b"Resources") {
+            strip(resources);
+        }
+    }
+    if let Some(cat) = catalog_mut(doc) {
+        cat.remove(b"OCProperties");
+    }
+}
+
 fn collect_refs(obj: &Object, out: &mut Vec<ObjectId>) {
     match obj {
         Object::Reference(id) => out.push(*id),
@@ -1472,6 +1741,79 @@ fn compress_streams(doc: &mut Document, o: &OptimizeOptions) {
 }
 
 // ---------------------------------------------------------------------------
+// Partial embedding of annotations
+
+fn save(doc: &mut Document) -> Result<Vec<u8>> {
+    let mut out = Vec::new();
+    doc.save_to(&mut out).map_err(|e| Error::Structure(e.to_string()))?;
+    Ok(out)
+}
+
+/// Prepares a partial "Anmerkungen einbetten": the annotations `embed` does
+/// not embed (and their pop-ups) move from /Annots to a private page key, so
+/// the engine's flatten only sees the others. [`restore_annotations`] puts
+/// them back after flattening.
+pub fn park_annotations(bytes: &[u8], embed: EmbedAnnots) -> Result<Vec<u8>> {
+    crate::pdf_edit::guarded(|| {
+        let mut doc = load(bytes, None)?;
+        let pages: Vec<ObjectId> = doc.get_pages().into_values().collect();
+        for page in pages {
+            let Some(annots) = doc
+                .get_dictionary(page)
+                .ok()
+                .and_then(|d| d.get(b"Annots").ok())
+                .map(|a| resolve(&doc, a).clone())
+                .and_then(|a| a.as_array().ok().cloned())
+            else {
+                continue;
+            };
+            let subtype_of = |obj: &Object| dict_of(&doc, obj).and_then(|d| name_of(d, b"Subtype")).unwrap_or_default();
+            let kept_parent = |obj: &Object| {
+                dict_of(&doc, obj)
+                    .and_then(|d| d.get(b"Parent").ok())
+                    .is_some_and(|p| !embed.embeds(&subtype_of(p)))
+            };
+            let (mut flatten, mut keep) = (Vec::new(), Vec::new());
+            for a in annots {
+                let subtype = subtype_of(&a);
+                let parked = if subtype == b"Popup" { kept_parent(&a) } else { !embed.embeds(&subtype) };
+                if parked { keep.push(a) } else { flatten.push(a) }
+            }
+            if let Ok(d) = doc.get_object_mut(page).and_then(Object::as_dict_mut) {
+                d.set("Annots", Object::Array(flatten));
+                if !keep.is_empty() {
+                    d.set(PARKED_ANNOTS, Object::Array(keep));
+                }
+            }
+        }
+        save(&mut doc)
+    })
+}
+
+/// Undoes [`park_annotations`] after the engine flattened the pages.
+pub fn restore_annotations(bytes: &[u8]) -> Result<Vec<u8>> {
+    crate::pdf_edit::guarded(|| {
+        let mut doc = load(bytes, None)?;
+        let pages: Vec<ObjectId> = doc.get_pages().into_values().collect();
+        let mut changed = false;
+        for page in pages {
+            let mut annots = doc
+                .get_dictionary(page)
+                .ok()
+                .and_then(|d| d.get(b"Annots").ok())
+                .and_then(|a| resolve(&doc, a).as_array().ok().cloned())
+                .unwrap_or_default();
+            let Ok(d) = doc.get_object_mut(page).and_then(Object::as_dict_mut) else { continue };
+            let Some(Object::Array(kept)) = d.remove(PARKED_ANNOTS) else { continue };
+            annots.extend(kept);
+            d.set("Annots", Object::Array(annots));
+            changed = true;
+        }
+        if changed { save(&mut doc) } else { Ok(bytes.to_vec()) }
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Main entry
 
 /// Optimizes `bytes` (unencrypted or opened with `password`) and returns
@@ -1488,6 +1830,9 @@ pub fn optimize(
         let objects_before = doc.objects.len();
 
         report.objects_removed += remove_objects(&mut doc, o);
+        if o.user_data && o.hidden_layers {
+            merge_layers(&mut doc);
+        }
         if o.cleanup {
             report.objects_removed += remove_invalid(&mut doc, o);
             if o.unused_dests {
@@ -1760,6 +2105,65 @@ mod tests {
         let mut out = Vec::new();
         doc.save_to(&mut out).unwrap();
         out
+    }
+
+    #[test]
+    fn hidden_layers_are_removed_and_visible_ones_merged() {
+        let mut doc = Document::with_version("1.7");
+        let pages_id = doc.new_object_id();
+        let a = doc.add_object(dictionary! {"Type" => "OCG", "Name" => Object::string_literal("Sichtbar")});
+        let b = doc.add_object(dictionary! {"Type" => "OCG", "Name" => Object::string_literal("Versteckt")});
+        // Visible only if both layers are on: hidden.
+        let both = doc.add_object(dictionary! {"Type" => "OCMD", "OCGs" => vec![a.into(), b.into()], "P" => "AllOn"});
+        let form = doc.add_object(Stream::new(
+            dictionary! {"Type" => "XObject", "Subtype" => "Form", "BBox" => vec![0.into(), 0.into(), 10.into(), 10.into()], "OC" => b},
+            b"(InForm) Tj".to_vec(),
+        ));
+        let content = doc.add_object(Stream::new(
+            dictionary! {},
+            b"BT /OC /A BDC (Visible) Tj EMC /OC /B BDC (Hidden) Tj /Span <<>> BDC (Inner) Tj EMC EMC \
+              /Artifact BMC (Art) Tj EMC /OC /M BDC (Both) Tj EMC ET /X1 Do"
+                .to_vec(),
+        ));
+        let rect = vec![0.into(), 0.into(), 10.into(), 10.into()];
+        let hidden_note = doc.add_object(dictionary! {"Type" => "Annot", "Subtype" => "Square", "Rect" => rect.clone(), "OC" => b});
+        let note = doc.add_object(dictionary! {"Type" => "Annot", "Subtype" => "Square", "Rect" => rect, "OC" => a});
+        let page = doc.add_object(dictionary! {"Type" => "Page", "Parent" => pages_id,
+            "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()], "Contents" => content,
+            "Annots" => vec![hidden_note.into(), note.into()],
+            "Resources" => dictionary! {"Properties" => dictionary! {"A" => a, "B" => b, "M" => both}, "XObject" => dictionary! {"X1" => form}}});
+        doc.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {"Type" => "Pages", "Kids" => vec![page.into()], "Count" => 1}),
+        );
+        let catalog = doc.add_object(dictionary! {"Type" => "Catalog", "Pages" => pages_id,
+            "OCProperties" => dictionary! {"OCGs" => vec![a.into(), b.into()], "D" => dictionary! {"OFF" => vec![b.into()]}}});
+        doc.trailer.set("Root", catalog);
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).unwrap();
+
+        let layer_options = |on: bool| OptimizeOptions { hidden_layers: on, ..OptimizeOptions::default() };
+        let (out, _) = optimize(&bytes, None, &layer_options(true)).unwrap();
+        let doc = load(&out, None).unwrap();
+        let page = *doc.get_pages().values().next().unwrap();
+        let text = String::from_utf8_lossy(&doc.get_page_content(page)).into_owned();
+        for kept in ["Visible", "Art", "BMC", "EMC"] {
+            assert!(text.contains(kept), "{kept} missing: {text}");
+        }
+        for gone in ["Hidden", "Inner", "Both", "Do", "/OC", "BDC"] {
+            assert!(!text.contains(gone), "{gone} left: {text}");
+        }
+        let catalog = doc.get_dictionary(catalog_id(&doc).unwrap()).unwrap();
+        assert!(catalog.get(b"OCProperties").is_err());
+        let annots = doc.get_dictionary(page).unwrap().get(b"Annots").unwrap().as_array().unwrap();
+        assert_eq!(annots.len(), 1);
+        assert!(!doc.objects.values().any(|o| o.as_dict().is_ok_and(|d| name_of(d, b"Type").as_deref() == Some(b"OCG"))));
+
+        // Without the option the layers stay.
+        let (out, _) = optimize(&bytes, None, &layer_options(false)).unwrap();
+        let doc = load(&out, None).unwrap();
+        let catalog = doc.get_dictionary(catalog_id(&doc).unwrap()).unwrap();
+        assert!(catalog.get(b"OCProperties").is_ok());
     }
 
     #[test]

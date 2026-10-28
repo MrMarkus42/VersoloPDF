@@ -89,9 +89,7 @@ impl MrPdfApp {
                                     for f in ImageFormat::ALL {
                                         ui.selectable_value(&mut o.format, f, f.label());
                                     }
-                                    for other in
-                                        ["GIF", "WebP", "JPEG2000", "JBIG2", "PCX/DCX", "PBM/PGM/PPM"]
-                                    {
+                                    for other in ["JPEG2000", "JBIG2", "PCX/DCX", "WBMP"] {
                                         let _ = ui
                                             .add_enabled(false, egui::Button::new(other).frame(false))
                                             .on_disabled_hover_text(tr(

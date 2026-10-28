@@ -1480,3 +1480,95 @@ fn page_label_ranges() {
     .unwrap();
     assert_eq!(d.page_label_ranges().unwrap().len(), 1);
 }
+
+/// A page with a square comment, a text field and a link, each with an
+/// appearance where the format has one.
+fn annotations_pdf() -> Vec<u8> {
+    use lopdf::{Document as Lo, Object, Stream, dictionary};
+    let mut doc = Lo::with_version("1.7");
+    let pages_id = doc.new_object_id();
+    let page_id = doc.new_object_id();
+    let ap = |doc: &mut Lo, color: &str| {
+        let s = Stream::new(
+            dictionary! { "Type" => "XObject", "Subtype" => "Form", "BBox" => vec![0.into(), 0.into(), 100.into(), 50.into()] },
+            format!("{color} rg 0 0 100 50 re f").into_bytes(),
+        );
+        doc.add_object(s)
+    };
+    let red = ap(&mut doc, "1 0 0");
+    let green = ap(&mut doc, "0 1 0");
+    let rect = |y: i64| Object::Array(vec![100.into(), y.into(), 200.into(), (y + 50).into()]);
+    let square = doc.add_object(dictionary! {
+        "Type" => "Annot", "Subtype" => "Square", "Rect" => rect(700), "P" => page_id, "F" => 4, "AP" => dictionary! { "N" => red },
+    });
+    let field = doc.add_object(dictionary! {
+        "Type" => "Annot", "Subtype" => "Widget", "FT" => "Tx", "T" => Object::string_literal("Name"),
+        "Rect" => rect(600), "P" => page_id, "F" => 4, "AP" => dictionary! { "N" => green },
+    });
+    let link = doc.add_object(dictionary! {
+        "Type" => "Annot", "Subtype" => "Link", "Rect" => rect(500), "Border" => vec![0.into(), 0.into(), 0.into()],
+        "A" => dictionary! { "S" => "URI", "URI" => Object::string_literal("https://example.org") },
+    });
+    doc.objects.insert(
+        page_id,
+        Object::Dictionary(dictionary! {
+            "Type" => "Page", "Parent" => pages_id, "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+            "Annots" => vec![square.into(), field.into(), link.into()],
+        }),
+    );
+    doc.objects.insert(
+        pages_id,
+        Object::Dictionary(dictionary! { "Type" => "Pages", "Kids" => vec![page_id.into()], "Count" => 1 }),
+    );
+    let catalog = doc.add_object(dictionary! {
+        "Type" => "Catalog", "Pages" => pages_id, "AcroForm" => dictionary! { "Fields" => vec![field.into()] },
+    });
+    doc.trailer.set("Root", catalog);
+    let mut out = Vec::new();
+    doc.save_to(&mut out).unwrap();
+    out
+}
+
+#[test]
+fn optimizer_embeds_only_chosen_annotations() {
+    use mrpdf::optimize::{EmbedAnnots, park_annotations, restore_annotations};
+    let _guard = common::lock();
+    let subtypes = |pdf: &[u8]| -> Vec<String> {
+        let doc = lopdf::Document::load_mem(pdf).unwrap();
+        let page = *doc.get_pages().values().next().unwrap();
+        let annots = match doc.get_dictionary(page).unwrap().get(b"Annots") {
+            Ok(lopdf::Object::Array(a)) => a.clone(),
+            Ok(lopdf::Object::Reference(id)) => doc.get_object(*id).unwrap().as_array().unwrap().clone(),
+            _ => Vec::new(),
+        };
+        let mut names: Vec<String> = annots
+            .iter()
+            .map(|a| {
+                let d = doc.get_dictionary(a.as_reference().unwrap()).unwrap();
+                String::from_utf8_lossy(d.get(b"Subtype").unwrap().as_name().unwrap()).into_owned()
+            })
+            .collect();
+        names.sort();
+        names
+    };
+    let original = annotations_pdf();
+    assert_eq!(subtypes(&original), ["Link", "Square", "Widget"]);
+    for (embed, left) in [
+        (EmbedAnnots::Markup, vec!["Link", "Widget"]),
+        (EmbedAnnots::Fields, vec!["Link", "Square"]),
+        (EmbedAnnots::All, vec![]),
+    ] {
+        let parked = park_annotations(&original, embed).unwrap();
+        let mut doc = Document::from_bytes(parked, "a.pdf", None).unwrap();
+        doc.flatten_pages(&[0]).unwrap();
+        let out = restore_annotations(&doc.to_bytes().unwrap()).unwrap();
+        assert_eq!(subtypes(&out), left, "{embed:?}");
+        // An embedded comment is page content: visible with comments hidden.
+        let check = Document::from_bytes(out, "b.pdf", None).unwrap();
+        let opts = mrpdf::document::RenderOptions { annotations: false, ..Default::default() };
+        let img = check.render_tile(0, 595, 842, 0, 0, 595, 842, opts).unwrap();
+        let red = common::average(&img, 110, 100, 190, 135);
+        let is_red = red[0] > 200.0 && red[1] < 60.0;
+        assert_eq!(is_red, matches!(embed, EmbedAnnots::Markup | EmbedAnnots::All), "{embed:?} {red:?}");
+    }
+}

@@ -88,7 +88,7 @@ impl MrPdfApp {
             .set_title(Cmd::FromFiles.label(self.settings.language))
             .add_filter(
                 if de { "PDF und Bilder" } else { "PDF and images" },
-                &["pdf", "PDF", "png", "PNG", "jpg", "JPG", "jpeg", "JPEG"],
+                &[&["pdf"][..], &super::page_dialogs::IMAGE_EXT[..]].concat(),
             )
             .pick_files()
         else {

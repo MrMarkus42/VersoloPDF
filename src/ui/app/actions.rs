@@ -625,7 +625,7 @@ impl MrPdfApp {
         let t = self.t();
         let Some(path) = rfd::FileDialog::new()
             .set_title(t.insert_image)
-            .add_filter(t.images, &["png", "jpg", "jpeg", "PNG", "JPG", "JPEG"])
+            .add_filter(t.images, &super::page_dialogs::IMAGE_EXT)
             .pick_file()
         else {
             return;

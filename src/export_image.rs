@@ -15,11 +15,28 @@ pub enum ImageFormat {
     Bmp,
     #[default]
     Tiff,
+    Gif,
+    /// Black and white (threshold at mid grey).
+    Pbm,
+    Pgm,
+    Ppm,
+    /// Lossless WebP.
+    WebP,
 }
 
 impl ImageFormat {
-    pub const ALL: [ImageFormat; 4] =
-        [ImageFormat::Bmp, ImageFormat::Png, ImageFormat::Jpeg, ImageFormat::Tiff];
+    /// In the order of the list.
+    pub const ALL: [ImageFormat; 9] = [
+        ImageFormat::Bmp,
+        ImageFormat::Png,
+        ImageFormat::Gif,
+        ImageFormat::Pbm,
+        ImageFormat::Pgm,
+        ImageFormat::Ppm,
+        ImageFormat::Jpeg,
+        ImageFormat::Tiff,
+        ImageFormat::WebP,
+    ];
 
     pub fn extension(self) -> &'static str {
         match self {
@@ -27,6 +44,11 @@ impl ImageFormat {
             ImageFormat::Jpeg => "jpg",
             ImageFormat::Bmp => "bmp",
             ImageFormat::Tiff => "tif",
+            ImageFormat::Gif => "gif",
+            ImageFormat::Pbm => "pbm",
+            ImageFormat::Pgm => "pgm",
+            ImageFormat::Ppm => "ppm",
+            ImageFormat::WebP => "webp",
         }
     }
 
@@ -37,6 +59,11 @@ impl ImageFormat {
             ImageFormat::Jpeg => "JPEG - Joint Photographic Experts Group",
             ImageFormat::Bmp => "BMP - Windows Bitmap",
             ImageFormat::Tiff => "TIFF - Tag Image File Format",
+            ImageFormat::Gif => "GIF - Graphics Interchange Format",
+            ImageFormat::Pbm => "PBM - Portable Bitmap",
+            ImageFormat::Pgm => "PGM - Portable Graymap",
+            ImageFormat::Ppm => "PPM - Portable Pixmap",
+            ImageFormat::WebP => "WebP - Web Picture (verlustfrei)",
         }
     }
 
@@ -133,8 +160,42 @@ pub fn encode(pages: &[image::RgbImage], o: &ImageExportOptions) -> Result<Vec<u
                 .encode_image(first)
                 .map_err(err)?;
         }
+        ImageFormat::Gif => first.write_to(&mut out, image::ImageFormat::Gif).map_err(err)?,
+        ImageFormat::WebP => first.write_to(&mut out, image::ImageFormat::WebP).map_err(err)?,
+        ImageFormat::Pbm | ImageFormat::Pgm | ImageFormat::Ppm => return Ok(write_pnm(first, o.format)),
     }
     Ok(out.into_inner())
+}
+
+/// Writes a binary PBM (P4), PGM (P5) or PPM (P6) file.
+fn write_pnm(img: &image::RgbImage, format: ImageFormat) -> Vec<u8> {
+    let (w, h) = img.dimensions();
+    let luma = |p: &image::Rgb<u8>| ((p[0] as u32 * 299 + p[1] as u32 * 587 + p[2] as u32 * 114) / 1000) as u8;
+    let mut out = Vec::new();
+    match format {
+        ImageFormat::Pbm => {
+            out.extend_from_slice(format!("P4\n{w} {h}\n").as_bytes());
+            for row in img.rows() {
+                let mut bits = vec![0u8; (w as usize).div_ceil(8)];
+                for (x, p) in row.enumerate() {
+                    // 1 = black
+                    if luma(p) < 128 {
+                        bits[x / 8] |= 0x80 >> (x % 8);
+                    }
+                }
+                out.extend_from_slice(&bits);
+            }
+        }
+        ImageFormat::Pgm => {
+            out.extend_from_slice(format!("P5\n{w} {h}\n255\n").as_bytes());
+            out.extend(img.pixels().map(luma));
+        }
+        _ => {
+            out.extend_from_slice(format!("P6\n{w} {h}\n255\n").as_bytes());
+            out.extend_from_slice(img.as_raw());
+        }
+    }
+    out
 }
 
 /// Writes RGB pages as a (multi-page) baseline TIFF, optionally Deflate
@@ -318,7 +379,30 @@ mod tests {
                 &ImageExportOptions { format, ..ImageExportOptions::default() },
             )
             .unwrap();
-            assert!(data.len() > 20, "{format:?}");
+            // An 8×8 PBM needs 8 bytes plus the header.
+            assert!(data.len() > 12, "{format:?}");
+        }
+    }
+
+    #[test]
+    fn every_format_reads_back() {
+        // Left half black, right half light grey; 11 px wide to test PBM padding.
+        let img = image::RgbImage::from_fn(11, 3, |x, _| if x < 5 { image::Rgb([0, 0, 0]) } else { image::Rgb([200, 200, 200]) });
+        for format in ImageFormat::ALL {
+            let data = encode(
+                std::slice::from_ref(&img),
+                &ImageExportOptions { format, jpeg_quality: 100, ..ImageExportOptions::default() },
+            )
+            .unwrap();
+            let back = image::load_from_memory(&data).unwrap_or_else(|e| panic!("{format:?}: {e}")).to_rgb8();
+            assert_eq!(back.dimensions(), (11, 3), "{format:?}");
+            let left = back.get_pixel(1, 1)[0];
+            let right = back.get_pixel(9, 1)[0];
+            assert!(left < 30, "{format:?} left {left}");
+            match format {
+                ImageFormat::Pbm => assert_eq!(right, 255, "PBM is black and white"),
+                _ => assert!((180..=220).contains(&right), "{format:?} right {right}"),
+            }
         }
     }
 }
