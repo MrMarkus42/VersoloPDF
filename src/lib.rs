@@ -22,6 +22,7 @@ pub mod engine;
 pub mod error;
 pub mod export_image;
 pub mod files;
+pub mod form_fill;
 pub mod forms;
 pub mod geometry;
 pub mod import;

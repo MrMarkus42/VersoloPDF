@@ -48,6 +48,10 @@ pub enum Tool {
     FieldList,
     FieldCombo,
     FieldSignature,
+    /// "Datum": text field for a date.
+    FieldDate,
+    /// "Bild": button showing an image chosen when it is clicked.
+    FieldImage,
     /// Draw a rectangle to crop the page (Seite zuschneiden).
     Crop,
     /// "Stufenlose Vergrößerung": drag up or down to zoom.
@@ -131,6 +135,8 @@ impl Tool {
             Tool::FieldList => Icon::ListBox,
             Tool::FieldCombo => Icon::ComboBox,
             Tool::FieldSignature => Icon::Signature,
+            Tool::FieldDate => Icon::Numbering,
+            Tool::FieldImage => Icon::Image,
             Tool::Crop => Icon::Crop,
             Tool::DynamicZoom => Icon::ZoomIn,
             Tool::Loupe => Icon::Search,
@@ -180,6 +186,8 @@ impl Tool {
             | Tool::FieldList
             | Tool::FieldCombo
             | Tool::FieldSignature
+            | Tool::FieldDate
+            | Tool::FieldImage
             | Tool::Crop => Gesture::Rect,
             Tool::Line | Tool::Arrow | Tool::MeasureDistance | Tool::Callout => Gesture::Line,
             Tool::Pencil | Tool::Signature => Gesture::Freehand,
@@ -227,6 +235,8 @@ impl Tool {
                 | Tool::FieldList
                 | Tool::FieldCombo
                 | Tool::FieldSignature
+                | Tool::FieldDate
+                | Tool::FieldImage
         )
     }
 

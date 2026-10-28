@@ -109,6 +109,11 @@ pub enum CanvasEvent {
     },
     /// Open the file of a media annotation with the system's program.
     PlayMedia(AnnotRef),
+    /// A push button was clicked while filling in ("Bild" fields).
+    PressButton {
+        page: usize,
+        annot_index: usize,
+    },
     CopySelection,
     DeleteSelected,
     ShowProperties,
@@ -154,6 +159,9 @@ pub struct CanvasCtx<'a> {
     pub view: ViewOptions,
     /// "Exklusiver Modus" (see `Settings::exclusive_mode`).
     pub exclusive: bool,
+    /// "Felder hervorheben ▾": kinds not highlighted, only required fields.
+    pub highlight_off: Vec<crate::ui::settings::FieldGroup>,
+    pub highlight_required_only: bool,
 }
 
 /// Placement of a page on screen for one frame.
@@ -737,9 +745,15 @@ fn draw_overlays(
             StrokeKind::Middle,
         );
     }
-    if cx.highlight_fields || cx.tool == Tool::SelectFields || cx.tool.is_field() {
+    let designing = cx.tool == Tool::SelectFields || cx.tool.is_field();
+    if cx.highlight_fields || designing {
         for f in tab.fields(page).iter() {
-            if !f.read_only && f.kind != FieldKind::PushButton {
+            let group = crate::ui::settings::FieldGroup::of(&f.kind);
+            let shown = designing
+                || (!f.read_only
+                    && group.is_some_and(|g| !cx.highlight_off.contains(&g))
+                    && (f.required || !cx.highlight_required_only));
+            if shown {
                 painter.rect_filled(
                     pos.pdf_rect_to_screen(&f.rect),
                     0.0,
@@ -1360,6 +1374,8 @@ fn default_size(tool: Tool) -> (f32, f32) {
         Tool::FieldList => (150.0, 60.0),
         Tool::FieldButton => (80.0, 22.0),
         Tool::FieldSignature => (180.0, 50.0),
+        Tool::FieldDate => (100.0, 20.0),
+        Tool::FieldImage => (120.0, 90.0),
         Tool::Video | Tool::Model3d => (160.0, 90.0),
         Tool::AudioClip => (120.0, 40.0),
         _ => (100.0, 60.0),
@@ -1602,6 +1618,9 @@ fn click_hand(tab: &mut DocTab, cx: &mut CanvasCtx, pos: &PageOnScreen, pdf: Poi
                     options: field.options.clone(),
                     current: field.value.clone(),
                 })
+            }
+            FieldKind::PushButton => {
+                cx.events.push(CanvasEvent::PressButton { page: field.page, annot_index: field.annot_index })
             }
             _ => cx.events.push(CanvasEvent::Status(cx.t.field_not_supported.into())),
         }

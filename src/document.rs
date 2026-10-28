@@ -723,6 +723,7 @@ impl Document {
                 checked: false,
                 options: Vec::new(),
                 read_only: field.is_read_only(),
+                required: field.is_required(),
             };
             if let Some(text) = field.as_text_field() {
                 info.kind = FieldKind::Text { multiline: text.is_multiline(), password: text.is_password() };
@@ -1580,6 +1581,129 @@ impl Document {
             Ok(bytes)
         })?;
         Ok(used)
+    }
+
+    /// Date format, image button and required flag of a widget.
+    pub fn field_extras(&mut self, page: usize, annot_index: usize) -> Result<forms::FieldExtras> {
+        self.sync_bytes()?;
+        forms::field_extras(&self.bytes, self.password.as_deref(), page, annot_index)
+    }
+
+    /// "Bild" field: shows `image` in the button.
+    pub fn set_button_image(
+        &mut self,
+        page: usize,
+        annot_index: usize,
+        image: &pdf_edit::RgbaImage,
+    ) -> Result<()> {
+        self.check_page(page)?;
+        if !self.permissions().fill_forms {
+            return Err(Error::NotPermitted);
+        }
+        self.edit_bytes("fill form", |b, pw| forms::set_button_image(b, pw, page, annot_index, image))
+    }
+
+    /// "Formulare erkennen": places for fields on `page` – runs of
+    /// underscores and lines become text fields, small squares check boxes.
+    pub fn detect_fields(&self, page_index: usize) -> Result<Vec<(RectF, forms::NewFieldKind)>> {
+        let page = self.page(page_index)?;
+        let mut found: Vec<(RectF, forms::NewFieldKind)> = Vec::new();
+        let text_field = || forms::NewFieldKind::Text { multiline: false };
+        // Underscore runs ("Name: ________").
+        let text = self.page_text(page_index)?;
+        let mut run: Option<RectF> = None;
+        let flush = |run: &mut Option<RectF>, found: &mut Vec<(RectF, forms::NewFieldKind)>| {
+            if let Some(r) = run.take()
+                && r.width() >= 30.0
+            {
+                let h = r.height().clamp(10.0, 20.0) + 4.0;
+                found.push((RectF::new(r.x0, r.y0, r.x1, r.y0 + h), text_field()));
+            }
+        };
+        for c in &text.chars {
+            if c.ch == '_' && c.rect.width() > 0.0 {
+                run = Some(match run {
+                    Some(r) if (c.rect.x0 - r.x1).abs() < 3.0 && (c.rect.y0 - r.y0).abs() < 2.0 => {
+                        RectF::new(r.x0, r.y0.min(c.rect.y0), c.rect.x1, r.y1.max(c.rect.y1))
+                    }
+                    _ => {
+                        flush(&mut run, &mut found);
+                        c.rect
+                    }
+                });
+            } else {
+                flush(&mut run, &mut found);
+            }
+        }
+        flush(&mut run, &mut found);
+        // Drawn lines and boxes.
+        for object in page.objects().iter().take(20_000) {
+            if object.object_type() != PdfPageObjectType::Path {
+                continue;
+            }
+            let Ok(quad) = object.bounds() else { continue };
+            let r = to_rectf(&quad.to_rect());
+            let (w, h) = (r.width(), r.height());
+            let overlaps = |a: &RectF| found.iter().any(|(b, _)| a.intersects(b));
+            if (6.0..=20.0).contains(&w) && (w - h).abs() <= 2.0 {
+                let cell = RectF::new(r.x0, r.y0, r.x1, r.y1);
+                if !overlaps(&cell) {
+                    found.push((cell, forms::NewFieldKind::CheckBox));
+                }
+            } else if w >= 40.0 && h <= 2.5 {
+                let cell = RectF::new(r.x0, r.y1, r.x1, r.y1 + 16.0);
+                if !overlaps(&cell) {
+                    found.push((cell, text_field()));
+                }
+            }
+        }
+        // Not where a field already is.
+        if let Ok(fields) = self.form_fields(page_index) {
+            found.retain(|(r, _)| !fields.iter().any(|f| f.rect.intersects(r)));
+        }
+        found.truncate(500);
+        Ok(found)
+    }
+
+    /// Creates the fields found by [`Self::detect_fields`] (one undo step).
+    /// Returns the number of new fields.
+    pub fn create_detected_fields(
+        &mut self,
+        fields: &[(usize, RectF, forms::NewFieldKind)],
+    ) -> Result<usize> {
+        self.require(self.permissions().modify)?;
+        if fields.is_empty() {
+            return Ok(0);
+        }
+        for (page, _, _) in fields {
+            self.check_page(*page)?;
+        }
+        self.edit_bytes("detect form fields", |b, pw| {
+            let mut bytes = b.to_vec();
+            for (page, rect, kind) in fields {
+                bytes = forms::create_field(&bytes, pw, *page, *rect, kind, "")?.0;
+            }
+            Ok(bytes)
+        })?;
+        Ok(fields.len())
+    }
+
+    /// "Alle JavaScripte" (for display only).
+    pub fn all_javascripts(&mut self) -> Result<Vec<(String, String)>> {
+        self.sync_bytes()?;
+        crate::doc_props::all_javascripts(&self.bytes, self.password.as_deref())
+    }
+
+    /// Sets fields by full name (used by "Formulare ausfüllen").
+    pub fn set_values_by_name(&mut self, values: &[(String, String)]) -> Result<usize> {
+        self.require(self.permissions().fill_forms)?;
+        let mut count = 0;
+        self.edit_bytes("fill form", |b, pw| {
+            let (bytes, n) = forms::set_values_by_name(b, pw, values)?;
+            count = n;
+            Ok(bytes)
+        })?;
+        Ok(count)
     }
 
     pub fn field_values(&mut self) -> Result<Vec<(String, String)>> {

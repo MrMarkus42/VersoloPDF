@@ -967,46 +967,6 @@ impl MrPdfApp {
         });
     }
 
-    fn ribbon_form(&mut self, ui: &mut Ui, ctx: &Context) {
-        let de = self.settings.language == Language::German;
-        self.tools_group(ui, ctx);
-        group(ui, if de { "Felder" } else { "Fields" }, |ui| {
-            self.big(ui, ctx, Cmd::Tool(Tool::SelectFields));
-        });
-        group(ui, if de { "Formularfelder" } else { "Form fields" }, |ui| {
-            for tool in [
-                Tool::FieldText,
-                Tool::FieldButton,
-                Tool::FieldCheckBox,
-                Tool::FieldRadio,
-                Tool::FieldList,
-                Tool::FieldCombo,
-                Tool::FieldSignature,
-            ] {
-                self.big(ui, ctx, Cmd::Tool(tool));
-            }
-            self.smalls(ui, ctx, &[Cmd::HighlightFields]);
-        });
-        group(ui, if de { "Formulardaten" } else { "Form data" }, |ui| {
-            self.smalls(ui, ctx, &[Cmd::ResetForm, Cmd::ImportFormData, Cmd::ExportFormData]);
-            let fill = if de { "Formulare ausfüllen" } else { "Fill in forms" };
-            if big_button(ui, Icon::Form, fill, self.tool == Tool::Hand, !self.tabs.is_empty()).clicked() {
-                self.select_tool(Tool::Hand);
-            }
-        });
-        group(ui, "JavaScript", |ui| {
-            self.smalls(
-                ui,
-                ctx,
-                &[
-                    UA(Unavailable::JavaScript, "JavaScript-Konsole", "JavaScript console", Icon::Console),
-                    UA(Unavailable::JavaScript, "Dokumentaktionen", "Document actions", Icon::Console),
-                    UA(Unavailable::JavaScript, "Alle JavaScripte", "All JavaScripts", Icon::Console),
-                ],
-            );
-        });
-    }
-
     fn ribbon_organize(&mut self, ui: &mut Ui, ctx: &Context) {
         let de = self.settings.language == Language::German;
         self.tools_group(ui, ctx);

@@ -497,6 +497,83 @@ fn comment_tab_features() {
 }
 
 #[test]
+fn form_tab_features() {
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let file = sample_file(&dir, 1);
+    let mut h = harness(vec![file], false);
+    h.run_steps(10);
+    let at = |h: &Harness<'_, MrPdfApp>, x: f32, y: f32| {
+        h.state().active_tab().unwrap().screen_pos(0, mrpdf::geometry::PointF::new(x, y)).unwrap()
+    };
+    tab(&mut h, "Formular");
+    save(&mut h, "frm-01-ribbon");
+
+    // "Datum": draw the field, then type a date in any common way.
+    h.get_by_label("Datum").click();
+    h.run_steps(2);
+    let (a, b) = (at(&h, 72.0, 480.0), at(&h, 200.0, 460.0));
+    drag(&mut h, a, b);
+    // "Bild": a button that shows an image.
+    h.get_by_label("Bild").click();
+    h.run_steps(2);
+    let (a, b) = (at(&h, 300.0, 480.0), at(&h, 420.0, 380.0));
+    drag(&mut h, a, b);
+    let fields = h.state_mut().active_tab_mut().unwrap().doc.form_fields(0).unwrap();
+    assert_eq!(fields.len(), 2, "{fields:?}");
+    let image = fields[1].annot_index;
+    let ctx = h.ctx.clone();
+    let green = mrpdf::pdf_edit::RgbaImage { width: 1, height: 1, rgba: vec![30, 160, 60, 255] };
+    h.state_mut().set_field_image(&ctx, 0, image, &green);
+    h.get_by_label("Hand").click();
+    h.run_steps(2);
+    let p = at(&h, 130.0, 470.0);
+    click(&mut h, p);
+    h.run_steps(2);
+    h.input_mut().events.push(Event::Text("3.4.26".into()));
+    h.run_steps(2);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(4);
+    let fields = h.state_mut().active_tab_mut().unwrap().doc.form_fields(0).unwrap();
+    assert_eq!(fields[0].value, "03.04.2026");
+    save(&mut h, "frm-02-date-image");
+
+    // "Felder hervorheben ▾" per kind.
+    h.get_by_label("Felder hervorheben").click();
+    h.run_steps(3);
+    save(&mut h, "frm-03-highlight-menu");
+    h.get_by_label("Textfelder").click();
+    h.run_steps(3);
+    assert!(h.state().settings().highlight_off.contains(&mrpdf::ui::settings::FieldGroup::TextFields));
+
+    // The form pane (Ctrl+I) lists the fields.
+    h.key_press_modifiers(Modifiers::COMMAND, egui::Key::I);
+    h.run_steps(4);
+    save(&mut h, "frm-04-form-pane");
+    assert!(h.query_by_label_contains("= 03.04.2026").is_some(), "form pane should list the date field");
+
+    // "Alle JavaScripte" shows the date format scripts.
+    quick(&mut h, "Alle JavaScripte");
+    assert!(h.query_by_label_contains("Format").is_some());
+    save(&mut h, "frm-05-javascripts");
+    h.get_all_by_label("Schließen").last().unwrap().click();
+    h.run_steps(2);
+
+    // "Formulare ausfüllen" dialog.
+    quick(&mut h, "Formulare ausfüllen");
+    assert!(h.query_by_label("Automatisch ermitteln").is_some());
+    save(&mut h, "frm-06-fill-forms");
+    h.get_all_by_label("Abbrechen").last().unwrap().click();
+    h.run_steps(2);
+
+    // "Formulare erkennen" finds nothing new on this page.
+    tab(&mut h, "Formular");
+    h.get_by_label("Formulare erkennen").click();
+    h.run_steps(3);
+    assert_eq!(h.state_mut().active_tab_mut().unwrap().doc.form_fields(0).unwrap().len(), 2);
+}
+
+#[test]
 fn delete_key_removes_selected_annotation() {
     let _guard = common::lock();
     let dir = tempfile::tempdir().unwrap();

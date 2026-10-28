@@ -596,7 +596,29 @@ impl MrPdfApp {
                     self.dialog = Some(Dialog::ConfirmLink { uri, trust: false });
                 }
             }
-            CanvasEvent::CommitField { page, annot_index, value } => {
+            CanvasEvent::CommitField { page, annot_index, mut value } => {
+                // "Datum": the input is checked and written in the field's format.
+                let format = self
+                    .tab()
+                    .and_then(|t| t.doc.field_extras(page, annot_index).ok())
+                    .and_then(|e| e.date_format);
+                if let Some(format) = format
+                    && !value.trim().is_empty()
+                {
+                    match crate::forms::normalize_date(&value, &format) {
+                        Some(date) => value = date,
+                        None => {
+                            let de = self.settings.language == crate::ui::i18n::Language::German;
+                            let msg = if de {
+                                format!("Kein gültiges Datum (Format {format})")
+                            } else {
+                                format!("Not a valid date (format {format})")
+                            };
+                            self.set_status(ctx, msg);
+                            return;
+                        }
+                    }
+                }
                 let unchanged = self
                     .tab()
                     .and_then(|t| {

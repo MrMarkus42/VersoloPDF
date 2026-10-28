@@ -43,6 +43,7 @@ impl MrPdfApp {
                 (SidePanel::Bookmarks, Icon::Bookmarks, t.bookmarks),
                 (SidePanel::Comments, Icon::Comments, t.comments),
                 (SidePanel::Attachments, Icon::Attachment, t.attachments),
+                (SidePanel::Fields, Icon::Form, t.form_pane),
                 (SidePanel::Search, Icon::Search, t.search),
             ] {
                 if icon_button(ui, icon, label, self.side == panel, true).clicked() {
@@ -59,6 +60,7 @@ impl MrPdfApp {
                         SidePanel::Bookmarks => t.bookmarks,
                         SidePanel::Comments => t.comments,
                         SidePanel::Attachments => t.attachments,
+                        SidePanel::Fields => t.form_pane,
                         SidePanel::Search => t.search,
                     };
                     ui.strong(title);
@@ -74,6 +76,7 @@ impl MrPdfApp {
                     SidePanel::Bookmarks => self.bookmarks_panel(ui),
                     SidePanel::Comments => self.comments_panel(ui),
                     SidePanel::Attachments => self.attachments_panel(ui),
+                    SidePanel::Fields => self.fields_panel(ui),
                     SidePanel::Search => self.search_panel(ui),
                 }
             },

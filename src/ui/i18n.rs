@@ -267,6 +267,7 @@ strings! {
     no_selection: "Keine Auswahl", "Nothing selected";
     no_text_here: "Hier ist kein Text", "No text here";
     no_content_here: "Hier ist kein Inhalt", "No content here";
+    form_pane: "Formular", "Form";
     hint_correction: "Entf: löschen · Einfg: einfügen · Text tippen: ersetzen", "Del: delete · Ins: insert · type: replace";
     stamp_approved: "Genehmigt", "Approved";
     stamp_not_approved: "Nicht genehmigt", "Not approved";

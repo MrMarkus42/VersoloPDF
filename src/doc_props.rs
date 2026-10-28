@@ -354,6 +354,92 @@ pub fn read(bytes: &[u8], password: Option<&str>) -> Result<DocProps> {
     })
 }
 
+/// "Alle JavaScripte": every JavaScript of the document as (where, code):
+/// document level, document actions, open action, page actions, links and
+/// form fields. Only read for display; MrPDF never runs JavaScript.
+pub fn all_javascripts(bytes: &[u8], password: Option<&str>) -> Result<Vec<(String, String)>> {
+    guarded(|| {
+        let doc = load(bytes, password)?;
+        let props = read(bytes, password)?;
+        let mut out: Vec<(String, String)> = Vec::new();
+        for (name, code) in props.javascript {
+            out.push((format!("Dokument: {name}"), code));
+        }
+        for (key, code) in props.actions {
+            out.push((format!("Dokumentaktion: {key}"), code));
+        }
+        let is_js = |a: &Dictionary| name(a, b"S").as_deref() == Some(b"JavaScript");
+        let js_text = |obj: &Object| -> Option<String> {
+            let a = dict_of(&doc, obj)?;
+            if is_js(a) { text(&doc, a.get(b"JS").ok()?) } else { None }
+        };
+        let cat = doc.get_dictionary(doc.trailer.get(b"Root")?.as_reference()?)?;
+        if let Some(code) = cat.get(b"OpenAction").ok().and_then(js_text) {
+            out.push(("Beim Öffnen".into(), code));
+        }
+        for (no, page_id) in doc.get_pages() {
+            let Ok(page) = doc.get_dictionary(page_id) else { continue };
+            if let Some(aa) = page.get(b"AA").ok().and_then(|a| dict_of(&doc, a)) {
+                for (key, label) in [(&b"O"[..], "öffnen"), (b"C", "schließen")] {
+                    if let Some(code) = aa.get(key).ok().and_then(js_text) {
+                        out.push((format!("Seite {no} {label}"), code));
+                    }
+                }
+            }
+            let annots = page.get(b"Annots").ok().and_then(|a| match a {
+                Object::Reference(id) => doc.get_object(*id).ok().and_then(|o| o.as_array().ok()).cloned(),
+                Object::Array(v) => Some(v.clone()),
+                _ => None,
+            });
+            for annot in annots.unwrap_or_default().iter().take(5000) {
+                let Some(d) = dict_of(&doc, annot) else { continue };
+                let field = d
+                    .get(b"T")
+                    .ok()
+                    .or_else(|| {
+                        d.get(b"Parent").ok().and_then(|p| dict_of(&doc, p)).and_then(|p| p.get(b"T").ok())
+                    })
+                    .and_then(|t| text(&doc, t))
+                    .unwrap_or_default();
+                let place = if field.is_empty() {
+                    format!("Seite {no}, Verknüpfung")
+                } else {
+                    format!("Feld „{field}“")
+                };
+                if let Some(code) = d.get(b"A").ok().and_then(js_text) {
+                    out.push((format!("{place}: Mausklick"), code));
+                }
+                let aa = d
+                    .get(b"AA")
+                    .ok()
+                    .or_else(|| {
+                        d.get(b"Parent").ok().and_then(|p| dict_of(&doc, p)).and_then(|p| p.get(b"AA").ok())
+                    })
+                    .and_then(|a| dict_of(&doc, a));
+                if let Some(aa) = aa {
+                    for (key, label) in [
+                        (&b"K"[..], "Tastenanschlag"),
+                        (b"F", "Format"),
+                        (b"V", "Prüfen"),
+                        (b"C", "Berechnen"),
+                        (b"U", "Maus loslassen"),
+                        (b"Fo", "Fokus"),
+                        (b"Bl", "Fokus verlieren"),
+                    ] {
+                        if let Some(code) = aa.get(key).ok().and_then(js_text) {
+                            out.push((format!("{place}: {label}"), code));
+                        }
+                    }
+                }
+                if out.len() > 5000 {
+                    break;
+                }
+            }
+        }
+        Ok(out)
+    })
+}
+
 fn collect_names(doc: &Document, node: &Dictionary, out: &mut Vec<(String, String)>, depth: u32) {
     if depth > 16 || out.len() > 1000 {
         return;

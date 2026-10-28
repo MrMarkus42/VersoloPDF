@@ -9,6 +9,7 @@ mod dialogs;
 mod export_dialog;
 mod features;
 mod file_ops;
+pub mod form_cmds;
 mod formdata;
 mod labels_dialog;
 mod layout_dialogs;
@@ -76,6 +77,8 @@ pub enum SidePanel {
     Bookmarks,
     Comments,
     Attachments,
+    /// "Formular": all form fields of the document.
+    Fields,
     Search,
 }
 
@@ -241,6 +244,10 @@ pub enum Dialog {
     NewPortfolio(Box<portfolio_view::NewPortfolioState>),
     /// "Formate für Anmerkungen": the tool whose style is edited.
     CommentStyles(Tool),
+    /// "PDF-Formulare ausfüllen".
+    FillForms(Box<form_cmds::FillState>),
+    /// "Alle JavaScripte".
+    Scripts(Box<form_cmds::ScriptList>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -588,6 +595,8 @@ impl MrPdfApp {
         // Shift variants first: Ctrl+D would also match Ctrl+Shift+D.
         if pressed(cmd | Modifiers::SHIFT, Key::I) {
             self.run(ctx, commands::Cmd::InsertFromFile);
+        } else if pressed(cmd, Key::I) {
+            self.run(ctx, commands::Cmd::Form(form_cmds::FormCmd::FormPane));
         }
         if pressed(cmd | Modifiers::SHIFT, Key::D) {
             self.run(ctx, commands::Cmd::DeletePages);
@@ -794,6 +803,8 @@ impl MrPdfApp {
                 t,
                 view,
                 exclusive: self.settings.exclusive_mode,
+                highlight_off: self.settings.highlight_off.clone(),
+                highlight_required_only: self.settings.highlight_required_only,
             };
             canvas::show_document(ui, tab, &mut cx);
             if tab.search.is_running() && tab.continue_search(Duration::from_millis(15)) {

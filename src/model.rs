@@ -309,6 +309,8 @@ pub struct FormFieldInfo {
     pub checked: bool,
     pub options: Vec<String>,
     pub read_only: bool,
+    /// "Erforderlich".
+    pub required: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]

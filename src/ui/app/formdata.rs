@@ -261,6 +261,10 @@ impl MrPdfApp {
             Tool::FieldSignature => {
                 NewFieldKind::Signature { label: if de { "Unterschrift".into() } else { "Signature".into() } }
             }
+            Tool::FieldDate => {
+                NewFieldKind::Date { format: if de { "dd.mm.yyyy".into() } else { "mm/dd/yyyy".into() } }
+            }
+            Tool::FieldImage => NewFieldKind::Image,
             Tool::FieldRadio | Tool::FieldList | Tool::FieldCombo => {
                 let (group, n) = self.last_radio.clone();
                 self.dialog = Some(Dialog::NewField(Box::new(FieldForm {

@@ -358,13 +358,32 @@ fn regenerate_text(
 /// Type of a new form field.
 #[derive(Debug, Clone, PartialEq)]
 pub enum NewFieldKind {
-    Text { multiline: bool },
+    Text {
+        multiline: bool,
+    },
     CheckBox,
-    Radio { group: String, export: String },
-    ComboBox { options: Vec<String> },
-    ListBox { options: Vec<String> },
-    ResetButton { caption: String },
-    Signature { label: String },
+    Radio {
+        group: String,
+        export: String,
+    },
+    ComboBox {
+        options: Vec<String>,
+    },
+    ListBox {
+        options: Vec<String>,
+    },
+    ResetButton {
+        caption: String,
+    },
+    Signature {
+        label: String,
+    },
+    /// Text field for a date in `format` (e.g. "dd.mm.yyyy").
+    Date {
+        format: String,
+    },
+    /// Button that shows an image chosen when it is clicked ("Bild").
+    Image,
 }
 
 impl NewFieldKind {
@@ -378,6 +397,8 @@ impl NewFieldKind {
             NewFieldKind::ListBox { .. } => "ListBox",
             NewFieldKind::ResetButton { .. } => "Button",
             NewFieldKind::Signature { .. } => "Signature",
+            NewFieldKind::Date { .. } => "Date",
+            NewFieldKind::Image => "Image",
         }
     }
 }
@@ -573,6 +594,43 @@ pub fn create_field(
                     widget.set("Ff", Object::Integer(i64::from(FLAG_MULTILINE)));
                 }
             }
+            NewFieldKind::Date { format } => {
+                widget.set("FT", Object::Name(b"Tx".to_vec()));
+                widget.set("V", text_string(""));
+                // The usual format scripts, so other programs check the
+                // date too (MrPDF never runs them; see `normalize_date`).
+                let fmt = date_format_clean(format);
+                let js = |code: String| {
+                    let mut a = Dictionary::new();
+                    a.set("S", Object::Name(b"JavaScript".to_vec()));
+                    a.set("JS", Object::string_literal(code));
+                    Object::Dictionary(a)
+                };
+                let mut aa = Dictionary::new();
+                aa.set("F", js(format!("AFDate_FormatEx(\"{fmt}\");")));
+                aa.set("K", js(format!("AFDate_KeystrokeEx(\"{fmt}\");")));
+                widget.set("AA", Object::Dictionary(aa));
+            }
+            NewFieldKind::Image => {
+                widget.set("FT", Object::Name(b"Btn".to_vec()));
+                widget.set("Ff", Object::Integer(i64::from(FLAG_PUSHBUTTON)));
+                mk.set("TP", Object::Integer(1));
+                mk.set("BG", Object::Array(vec![Object::Real(0.92), Object::Real(0.92), Object::Real(0.92)]));
+                let mut a = Dictionary::new();
+                a.set("S", Object::Name(b"JavaScript".to_vec()));
+                a.set("JS", Object::string_literal("event.target.buttonImportIcon();"));
+                widget.set("A", Object::Dictionary(a));
+                let content = format!(
+                    "0.92 g 0 0 {} {} re f 0.6 G 1 w 0.5 0.5 {} {} re S\n{}",
+                    num(w),
+                    num(h),
+                    num(w - 1.0),
+                    num(h - 1.0),
+                    centered_text(w, h, "Bild", (h * 0.25).clamp(6.0, 12.0))
+                );
+                let id = edit.add(form_stream(w, h, content, true));
+                ap.set("N", Object::Reference(id));
+            }
             NewFieldKind::ComboBox { options } | NewFieldKind::ListBox { options } => {
                 let combo = matches!(kind, NewFieldKind::ComboBox { .. });
                 widget.set("FT", Object::Name(b"Ch".to_vec()));
@@ -763,7 +821,10 @@ pub fn create_field(
         }
         edit.annots_mut(page_id)?.push(Object::Reference(wid));
         // Text-like fields get their (empty) appearance generated.
-        if matches!(kind, NewFieldKind::Text { .. } | NewFieldKind::ComboBox { .. }) {
+        if matches!(
+            kind,
+            NewFieldKind::Text { .. } | NewFieldKind::ComboBox { .. } | NewFieldKind::Date { .. }
+        ) {
             let form = acroform(&edit);
             let flags =
                 if matches!(kind, NewFieldKind::Text { multiline: true }) { FLAG_MULTILINE } else { 0 };
@@ -886,9 +947,190 @@ fn set_terminal_value(
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Date and image fields
+
+/// Keeps only the characters of a date format ("dd.mm.yyyy" by default).
+fn date_format_clean(format: &str) -> String {
+    let f: String =
+        format.chars().filter(|c| matches!(c, 'd' | 'm' | 'y' | '.' | '/' | '-' | ' ')).take(20).collect();
+    if f.contains('d') && f.contains('m') && f.contains('y') { f } else { "dd.mm.yyyy".into() }
+}
+
+/// Reads a date typed in a common way (day.month.year, year-month-day,
+/// month/day/year when the format starts with the month) and writes it in
+/// `format` (tokens d, dd, m, mm, yy, yyyy). None if it is no valid date.
+pub fn normalize_date(input: &str, format: &str) -> Option<String> {
+    let format = date_format_clean(format);
+    let parts: Vec<u32> = input
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|p| !p.is_empty())
+        .map(|p| p.parse().ok())
+        .collect::<Option<_>>()?;
+    let [a, b, c] = parts[..] else { return None };
+    let month_first = format.find('m') < format.find('d');
+    let (day, month, mut year) = if a > 31 {
+        (c, b, a)
+    } else if month_first {
+        (b, a, c)
+    } else {
+        (a, b, c)
+    };
+    if year < 100 {
+        year += if year < 70 { 2000 } else { 1900 };
+    }
+    let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+    let days = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => return None,
+    };
+    if day == 0 || day > days || year > 9999 {
+        return None;
+    }
+    let mut out = String::new();
+    let mut rest = format.as_str();
+    while let Some(ch) = rest.chars().next() {
+        let run = rest.chars().take_while(|c| *c == ch).count();
+        match (ch, run) {
+            ('d', 1) => out.push_str(&day.to_string()),
+            ('d', _) => out.push_str(&format!("{day:02}")),
+            ('m', 1) => out.push_str(&month.to_string()),
+            ('m', _) => out.push_str(&format!("{month:02}")),
+            ('y', n) if n < 4 => out.push_str(&format!("{:02}", year % 100)),
+            ('y', _) => out.push_str(&format!("{year:04}")),
+            (c, n) => out.extend(std::iter::repeat_n(c, n)),
+        }
+        rest = &rest[run * ch.len_utf8()..];
+    }
+    Some(out)
+}
+
+/// What MrPDF needs to know about a widget beyond PDFium's field info.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct FieldExtras {
+    /// Date format of a date field.
+    pub date_format: Option<String>,
+    /// "Bild": a button that imports an image when clicked.
+    pub image: bool,
+    /// "Erforderlich".
+    pub required: bool,
+}
+
+pub fn field_extras(bytes: &[u8], password: Option<&str>, page: usize, index: usize) -> Result<FieldExtras> {
+    guarded(|| {
+        let mut edit = Edit::open(bytes, password)?;
+        let page_id = edit.page_id(page)?;
+        let id = edit.annotation_id(page_id, index)?;
+        let js_of = |obj: &Object| -> Option<String> {
+            let a = edit.resolve(obj).ok()?.as_dict().ok()?;
+            let js = edit.resolve(a.get(b"JS").ok()?).ok()?;
+            match js {
+                Object::String(s, _) => Some(crate::pdf_edit::decode_text_string(s)),
+                Object::Stream(s) => {
+                    Some(String::from_utf8_lossy(&s.decompressed_content().unwrap_or_default()).into_owned())
+                }
+                _ => None,
+            }
+        };
+        let mut extras = FieldExtras::default();
+        if let Some(aa) = inherited(&edit, id, b"AA")
+            && let Ok(aa) = edit.resolve(&aa).and_then(|o| Ok(o.as_dict()?.clone()))
+            && let Some(code) = aa.get(b"F").ok().and_then(js_of)
+            && let Some(start) = code.find("AFDate_FormatEx(\"")
+        {
+            let rest = &code[start + 17..];
+            extras.date_format = rest.find('"').map(|end| rest[..end].to_string());
+        }
+        let ff = inherited(&edit, id, b"Ff").and_then(|o| o.as_i64().ok()).unwrap_or(0) as u32;
+        extras.required = ff & 2 != 0;
+        let widget = edit.object(id)?.as_dict()?;
+        let pushbutton = ff & FLAG_PUSHBUTTON != 0;
+        let icon_only = widget
+            .get(b"MK")
+            .ok()
+            .and_then(|mk| edit.resolve(mk).ok())
+            .and_then(|mk| mk.as_dict().ok())
+            .and_then(|mk| mk.get(b"TP").ok())
+            .and_then(|tp| tp.as_i64().ok())
+            == Some(1);
+        let imports = widget.get(b"A").ok().and_then(js_of).is_some_and(|c| c.contains("buttonImportIcon"));
+        extras.image = pushbutton && (icon_only || imports);
+        Ok(extras)
+    })
+}
+
+/// "Bild": shows `image` in the button, fitted and centred.
+pub fn set_button_image(
+    bytes: &[u8],
+    password: Option<&str>,
+    page: usize,
+    index: usize,
+    image: &crate::pdf_edit::RgbaImage,
+) -> Result<Vec<u8>> {
+    let (iw, ih) = (image.width, image.height);
+    if iw == 0 || ih == 0 || image.rgba.len() != (iw as usize) * (ih as usize) * 4 {
+        return Err(Error::Invalid("invalid image".into()));
+    }
+    guarded(|| {
+        let mut edit = Edit::open(bytes, password)?;
+        let page_id = edit.page_id(page)?;
+        let id = edit.annotation_id(page_id, index)?;
+        let rect = read_rect(edit.object(id)?.as_dict()?)
+            .ok_or_else(|| Error::Invalid("field without area".into()))?;
+        let (w, h) = (rect.width().max(1.0), rect.height().max(1.0));
+        let mut rgb = Vec::with_capacity((iw * ih * 3) as usize);
+        let mut alpha = Vec::with_capacity((iw * ih) as usize);
+        for px in image.rgba.as_chunks::<4>().0 {
+            rgb.extend_from_slice(&px[..3]);
+            alpha.push(px[3]);
+        }
+        let smask = if alpha.iter().any(|&a| a != 255) {
+            Some(edit.add(crate::pdf_edit::image_xobject(alpha, iw, ih, true, None)?))
+        } else {
+            None
+        };
+        let image_id = edit.add(crate::pdf_edit::image_xobject(rgb, iw, ih, false, smask)?);
+        let scale = (w / iw as f32).min(h / ih as f32);
+        let (dw, dh) = (iw as f32 * scale, ih as f32 * scale);
+        let content = format!(
+            "q {} 0 0 {} {} {} cm /Im0 Do Q\n",
+            num(dw),
+            num(dh),
+            num((w - dw) / 2.0),
+            num((h - dh) / 2.0)
+        );
+        let mut stream = form_stream(w, h, content, false);
+        let mut xobjects = Dictionary::new();
+        xobjects.set("Im0", Object::Reference(image_id));
+        let mut resources = Dictionary::new();
+        resources.set("XObject", Object::Dictionary(xobjects));
+        stream.dict.set("Resources", Object::Dictionary(resources));
+        let ap_id = edit.add(stream);
+        let mut ap = Dictionary::new();
+        ap.set("N", Object::Reference(ap_id));
+        edit.dict_mut(id)?.set("AP", Object::Dictionary(ap));
+        edit.finish()
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dates_are_normalized() {
+        assert_eq!(normalize_date("3.4.26", "dd.mm.yyyy").as_deref(), Some("03.04.2026"));
+        assert_eq!(normalize_date("2026-12-24", "dd.mm.yyyy").as_deref(), Some("24.12.2026"));
+        assert_eq!(normalize_date("12/24/2026", "mm/dd/yyyy").as_deref(), Some("12/24/2026"));
+        assert_eq!(normalize_date("29.2.2024", "d.m.yy").as_deref(), Some("29.2.24"));
+        assert_eq!(normalize_date("29.2.2023", "dd.mm.yyyy"), None);
+        assert_eq!(normalize_date("31.4.2026", "dd.mm.yyyy"), None);
+        assert_eq!(normalize_date("morgen", "dd.mm.yyyy"), None);
+        assert_eq!(date_format_clean("<script>"), "dd.mm.yyyy");
+    }
 
     #[test]
     fn default_appearance_is_split() {

@@ -165,6 +165,60 @@ pub struct Settings {
     pub exclusive_mode: bool,
     /// Tax rate of the calculator in percent ("TAX+", "TAX−").
     pub tax_rate: f64,
+    /// "Felder hervorheben ▾": field kinds that are not highlighted.
+    pub highlight_off: Vec<FieldGroup>,
+    /// "Nur erforderliche Felder".
+    pub highlight_required_only: bool,
+}
+
+/// Kinds of form fields in "Felder hervorheben ▾".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum FieldGroup {
+    Buttons,
+    CheckBoxes,
+    RadioButtons,
+    ComboBoxes,
+    ListBoxes,
+    TextFields,
+    Signatures,
+}
+
+impl FieldGroup {
+    pub const ALL: [FieldGroup; 7] = [
+        FieldGroup::Buttons,
+        FieldGroup::CheckBoxes,
+        FieldGroup::RadioButtons,
+        FieldGroup::ComboBoxes,
+        FieldGroup::ListBoxes,
+        FieldGroup::TextFields,
+        FieldGroup::Signatures,
+    ];
+
+    pub fn of(kind: &crate::model::FieldKind) -> Option<FieldGroup> {
+        use crate::model::FieldKind;
+        Some(match kind {
+            FieldKind::PushButton => FieldGroup::Buttons,
+            FieldKind::CheckBox => FieldGroup::CheckBoxes,
+            FieldKind::RadioButton => FieldGroup::RadioButtons,
+            FieldKind::ComboBox => FieldGroup::ComboBoxes,
+            FieldKind::ListBox => FieldGroup::ListBoxes,
+            FieldKind::Text { .. } => FieldGroup::TextFields,
+            FieldKind::Signature => FieldGroup::Signatures,
+            FieldKind::Unknown => return None,
+        })
+    }
+
+    pub fn names(self) -> (&'static str, &'static str) {
+        match self {
+            FieldGroup::Buttons => ("Schaltflächen", "Buttons"),
+            FieldGroup::CheckBoxes => ("Auswahlfelder (Häkchen)", "Check boxes"),
+            FieldGroup::RadioButtons => ("Auswahlfelder (Knöpfe)", "Radio buttons"),
+            FieldGroup::ComboBoxes => ("Auswahlmenüs", "Combo boxes"),
+            FieldGroup::ListBoxes => ("Listen", "List boxes"),
+            FieldGroup::TextFields => ("Textfelder", "Text fields"),
+            FieldGroup::Signatures => ("Signaturen", "Signatures"),
+        }
+    }
 }
 
 /// Folder offered by "Speichern unter".
@@ -289,6 +343,9 @@ impl Default for Settings {
             keep_tool: Vec::new(),
             exclusive_mode: false,
             tax_rate: 19.0,
+            // Buttons and combo boxes are not highlighted.
+            highlight_off: vec![FieldGroup::Buttons, FieldGroup::ComboBoxes],
+            highlight_required_only: false,
         }
     }
 }

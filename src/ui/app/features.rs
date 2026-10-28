@@ -168,6 +168,7 @@ impl MrPdfApp {
             CanvasEvent::CreateField { page, rect, tool } => self.create_field(ctx, page, rect, tool),
             CanvasEvent::AddMedia { page, rect, tool } => self.add_media_file(ctx, page, rect, tool),
             CanvasEvent::PlayMedia(annot) => self.play_media(ctx, annot),
+            CanvasEvent::PressButton { page, annot_index } => self.press_button(ctx, page, annot_index),
             _ => {}
         }
     }

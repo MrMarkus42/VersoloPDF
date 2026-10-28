@@ -282,6 +282,8 @@ pub enum Cmd {
     View(super::view_cmds::ViewCmd),
     /// Commands of the ribbon tab "Anmerkungen" (see `comment_cmds.rs`).
     Comment(super::comment_cmds::CommentCmd),
+    /// Commands of the ribbon tab "Formular" (see `form_cmds.rs`).
+    Form(super::form_cmds::FormCmd),
 }
 
 pub const HOMEPAGE: &str = "https://github.com/MrMarkus42/MrPDF";
@@ -334,6 +336,13 @@ pub const SEARCHABLE: &[Cmd] = &[
     Cmd::Comment(CommentCmd::ClosePopups),
     Cmd::Comment(CommentCmd::Calculator),
     Cmd::Comment(CommentCmd::CommentStyles),
+    Cmd::Tool(Tool::FieldDate),
+    Cmd::Tool(Tool::FieldImage),
+    Cmd::Form(super::form_cmds::FormCmd::FormPane),
+    Cmd::Form(super::form_cmds::FormCmd::DetectForms),
+    Cmd::Form(super::form_cmds::FormCmd::EmailFormData),
+    Cmd::Form(super::form_cmds::FormCmd::FillForms),
+    Cmd::Form(super::form_cmds::FormCmd::AllJavaScripts),
     Cmd::Tool(Tool::Note),
     Cmd::Tool(Tool::FileAttach),
     Cmd::Tool(Tool::TextBox),
@@ -585,6 +594,7 @@ impl Cmd {
             Panel(SidePanel::Bookmarks) => ("Lesezeichen", "Bookmarks"),
             Panel(SidePanel::Comments) => ("Kommentare", "Comments"),
             Panel(SidePanel::Attachments) => ("Anhänge", "Attachments"),
+            Panel(SidePanel::Fields) => ("Formular", "Form"),
             Panel(SidePanel::Search) => ("Suchen", "Search"),
             CommentList => ("Kommentarliste", "Comment list"),
             ToggleAnnotations => ("Anzeigen", "Show"),
@@ -701,6 +711,7 @@ impl Cmd {
             Unavailable(_, de, en, _) => (de, en),
             View(v) => v.names(),
             Comment(c) => c.names(),
+            Form(f) => f.names(),
         }
     }
 
@@ -768,6 +779,7 @@ impl Cmd {
             Panel(SidePanel::Bookmarks) => Icon::Bookmarks,
             Panel(SidePanel::Comments) => Icon::Comments,
             Panel(SidePanel::Attachments) => Icon::Attachment,
+            Panel(SidePanel::Fields) => Icon::Form,
             Panel(SidePanel::Search) => Icon::Search,
             CommentList => Icon::Comments,
             ToggleAnnotations => Icon::Eye,
@@ -862,6 +874,7 @@ impl Cmd {
             Unavailable(_, _, _, icon) => icon,
             View(v) => v.icon(),
             Comment(c) => c.icon(),
+            Form(f) => f.icon(),
         }
     }
 
@@ -929,6 +942,7 @@ impl Cmd {
             Panel(SidePanel::Attachments) => ("Strg+Umschalt+A", "Ctrl+Shift+A"),
             View(v) => return v.shortcut(),
             Comment(c) => return c.shortcut(),
+            Form(f) => return f.shortcut(),
             _ => return None,
         })
     }
@@ -977,6 +991,8 @@ pub fn tool_names(tool: Tool) -> (&'static str, &'static str) {
         Tool::FieldList => ("Liste", "List box"),
         Tool::FieldCombo => ("Menü", "Combo box"),
         Tool::FieldSignature => ("Signatur", "Signature field"),
+        Tool::FieldDate => ("Datum", "Date"),
+        Tool::FieldImage => ("Bild", "Image"),
         Tool::Crop => ("Seite zuschneiden (Werkzeug)", "Crop page (tool)"),
         Tool::DynamicZoom => ("Stufenlose Vergrößerung", "Dynamic zoom"),
         Tool::Loupe => ("Lupe", "Loupe"),
@@ -1033,6 +1049,7 @@ impl MrPdfApp {
             LayoutCover => true,
             View(v) => self.view_enabled(v),
             Comment(c) => self.comment_enabled(c),
+            Form(f) => self.form_enabled(f),
             _ => has_doc,
         }
     }
@@ -1051,6 +1068,7 @@ impl MrPdfApp {
             LayoutCover => self.settings.cover_alone,
             View(v) => self.view_selected(v),
             Comment(c) => self.comment_selected(c),
+            Form(f) => self.form_selected(f),
             ToggleSidebar => self.settings.show_sidebar,
             ToggleProperties => self.settings.show_properties,
             DarkMode => self.settings.dark_mode,
@@ -1091,6 +1109,10 @@ impl MrPdfApp {
         }
         if let Comment(c) = cmd {
             self.run_comment(ctx, c);
+            return;
+        }
+        if let Form(f) = cmd {
+            self.run_form(ctx, f);
             return;
         }
         if self.run_page_dialog(cmd)
@@ -1167,6 +1189,7 @@ impl MrPdfApp {
             LayoutCover => self.settings.cover_alone = !self.settings.cover_alone,
             View(v) => self.run_view(ctx, v),
             Comment(c) => self.run_comment(ctx, c),
+            Form(f) => self.run_form(ctx, f),
             ToggleSidebar => self.settings.show_sidebar = !self.settings.show_sidebar,
             ToggleProperties => self.settings.show_properties = !self.settings.show_properties,
             Fullscreen => {

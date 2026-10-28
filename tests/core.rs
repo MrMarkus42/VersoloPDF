@@ -274,6 +274,95 @@ fn comment_filter_and_content_objects() {
     assert!(doc.object_at(0, PointF::new(500.0, 300.0)).unwrap().is_none());
 }
 
+/// A page with "Name: ____" (for "Formulare erkennen").
+fn underscore_pdf() -> Vec<u8> {
+    use pdfium_render::prelude::*;
+    let pdfium = mrpdf::engine::pdfium().unwrap();
+    let mut doc = pdfium.create_new_pdf().unwrap();
+    let font = doc.fonts_mut().helvetica();
+    let mut page = doc.pages_mut().create_page_at_end(PdfPagePaperSize::a4()).unwrap();
+    page.objects_mut()
+        .create_text_object(
+            PdfPoints::new(72.0),
+            PdfPoints::new(500.0),
+            "Name: ____________________",
+            font,
+            PdfPoints::new(12.0),
+        )
+        .unwrap();
+    doc.save_to_bytes().unwrap()
+}
+
+#[test]
+fn form_tab_core() {
+    use mrpdf::forms::NewFieldKind;
+    let _guard = common::lock();
+    let mut doc = open(1);
+    doc.create_field(
+        0,
+        RectF::new(72.0, 400.0, 172.0, 420.0),
+        &NewFieldKind::Date { format: "dd.mm.yyyy".into() },
+        "",
+    )
+    .unwrap();
+    doc.create_field(0, RectF::new(300.0, 300.0, 400.0, 380.0), &NewFieldKind::Image, "").unwrap();
+    let fields = doc.form_fields(0).unwrap();
+    assert_eq!(fields.len(), 2);
+    let (date, image) = (fields[0].annot_index, fields[1].annot_index);
+    assert_eq!(doc.field_extras(0, date).unwrap().date_format.as_deref(), Some("dd.mm.yyyy"));
+    assert!(doc.field_extras(0, image).unwrap().image);
+    assert!(!doc.field_extras(0, date).unwrap().image);
+
+    // The image is drawn into the button.
+    let red = mrpdf::pdf_edit::RgbaImage { width: 2, height: 2, rgba: [220, 20, 20, 255].repeat(4) };
+    doc.set_button_image(0, image, &red).unwrap();
+    let img = doc.render_page(0, 595, 842).unwrap();
+    let c = common::average(&img, 330, 480, 370, 520);
+    assert!(c[0] > 180.0 && c[1] < 80.0, "image field should show red: {c:?}");
+
+    // "Alle JavaScripte" lists the date format scripts (never run).
+    let scripts = doc.all_javascripts().unwrap();
+    assert!(
+        scripts.iter().any(|(place, code)| place.contains("Format") && code.contains("AFDate_FormatEx")),
+        "{scripts:?}"
+    );
+
+    // "Formulare ausfüllen": one PDF per row.
+    doc.create_field(
+        0,
+        RectF::new(72.0, 600.0, 272.0, 620.0),
+        &NewFieldKind::Text { multiline: false },
+        "Name",
+    )
+    .unwrap();
+    let form = doc.to_bytes().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let table = vec![vec!["Anna".to_string()], vec!["Bernd".to_string()]];
+    let files = mrpdf::form_fill::fill_all(
+        &form,
+        "Antrag",
+        &table,
+        &[("Name".into(), 0)],
+        &[0, 1],
+        dir.path(),
+        "%[FileName]_%[RowIndex]",
+    )
+    .unwrap();
+    assert_eq!(files.len(), 2);
+    assert!(files[1].ends_with("Antrag_2.pdf"));
+    let mut second = Document::open(&files[1], None).unwrap();
+    assert!(second.field_values().unwrap().contains(&("Name".to_string(), "Bernd".to_string())));
+
+    // "Formulare erkennen": the underscore line becomes a text field.
+    let mut blank = Document::from_bytes(underscore_pdf(), "blank.pdf", None).unwrap();
+    let found = blank.detect_fields(0).unwrap();
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(found[0].0.x0 > 100.0 && (found[0].0.y0 - 500.0).abs() < 6.0, "{found:?}");
+    assert_eq!(blank.create_detected_fields(&[(0, found[0].0, found[0].1.clone())]).unwrap(), 1);
+    assert_eq!(blank.form_fields(0).unwrap().len(), 1);
+    assert!(blank.detect_fields(0).unwrap().is_empty(), "no second field on the same place");
+}
+
 #[test]
 fn page_operations() {
     let _guard = common::lock();
