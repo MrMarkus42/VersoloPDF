@@ -351,8 +351,23 @@ impl MrPdfApp {
                         outcome = o;
                         action = a;
                     }
-                    Dialog::ExportWord { range, images } => {
-                        let (o, a) = self.export_word_dialog(ui, range, images);
+                    Dialog::ExportWord(state) => {
+                        let (o, a) = self.word_dialog(ui, state);
+                        outcome = o;
+                        action = a;
+                    }
+                    Dialog::RecognizeText(state) => {
+                        let (o, a) = self.recognize_text_dialog(ui, state);
+                        outcome = o;
+                        action = a;
+                    }
+                    Dialog::ReplaceFonts(state) => {
+                        let (o, a) = self.replace_fonts_dialog(ui, state);
+                        outcome = o;
+                        action = a;
+                    }
+                    Dialog::Recolor(state) => {
+                        let (o, a) = self.recolor_dialog(ui, state);
                         outcome = o;
                         action = a;
                     }

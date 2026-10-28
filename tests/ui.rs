@@ -597,9 +597,36 @@ fn convert_tab_dialogs() {
     h.get_by_label("In MS Word").click();
     h.run_steps(3);
     assert!(h.query_by_label("Bilder übernehmen").is_some());
+    h.get_by_label("Seitenlayout erhalten").click();
+    h.run_steps(2);
     save(&mut h, "umw-04-word");
     h.get_all_by_label("Abbrechen").last().unwrap().click();
     h.run_steps(2);
+    h.get_by_label("Text auf Seiten erkennen").click();
+    h.run_steps(3);
+    save(&mut h, "umw-05-ocr");
+    h.get_all_by_label("Abbrechen").last().unwrap().click();
+    h.run_steps(2);
+    h.get_by_label("Schriften ersetzen").click();
+    h.run_steps(3);
+    h.get_by_label("Vorschläge übernehmen").click();
+    h.run_steps(2);
+    save(&mut h, "umw-06-fonts");
+    h.get_all_by_label("OK").last().unwrap().click();
+    h.run_steps(4);
+    let fonts = h.state_mut().active_tab_mut().unwrap().doc.fonts().unwrap();
+    assert!(
+        fonts.iter().all(|f| mrpdf::font_replace::STANDARD_FONTS.contains(&f.name.as_str())),
+        "{fonts:?}"
+    );
+    quick(&mut h, "Seiten neu einfärben");
+    h.get_all_by_label_contains("Dunkel").last().expect("preset button").click();
+    h.run_steps(2);
+    save(&mut h, "umw-07-recolor");
+    h.get_all_by_label("OK").last().unwrap().click();
+    h.run_steps(6);
+    save(&mut h, "umw-08-recolored");
+    assert!(h.state().active_tab().unwrap().doc.can_undo().is_some());
 }
 
 #[test]

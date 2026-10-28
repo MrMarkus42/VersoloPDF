@@ -2281,6 +2281,7 @@ dependencies = [
  "ron",
  "serde",
  "sha2",
+ "skrifa",
  "stringprep",
  "tempfile",
  "thiserror 2.0.21",

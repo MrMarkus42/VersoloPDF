@@ -6,7 +6,7 @@
 //! metadata) are applied to the serialised bytes by [`crate::pdf_edit`] and
 //! the result is reloaded. Every edit records an undo snapshot.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -569,6 +569,166 @@ impl Document {
         Ok(RenderedImage { width: w, height: h, rgba })
     }
 
+    /// Recognises the words of a page with Tesseract: (text, box in PDF
+    /// space). `dpi` is the resolution of the picture handed over.
+    pub fn ocr_words(
+        &self,
+        index: usize,
+        engine: &crate::ocr::Engine,
+        dpi: f32,
+    ) -> Result<Vec<(String, RectF)>> {
+        let geo = *self.geometry(index).ok_or(Error::PageOutOfRange(index))?;
+        let (w, h) = geo.view_size();
+        let scale = (dpi / 72.0).clamp(1.0, 600.0 / 72.0);
+        let px = |v: f32| ((v * scale).round() as u32).clamp(1, MAX_BITMAP_EDGE);
+        let opts = RenderOptions { annotations: false, ..RenderOptions::default() };
+        let img = self.render_tile(index, px(w), px(h), 0, 0, px(w), px(h), opts)?;
+        let dir = std::env::temp_dir().join("mrpdf-ocr");
+        fs::create_dir_all(&dir).map_err(|e| Error::io(&dir, e))?;
+        let png = dir.join(format!("{}-{index}.png", std::process::id()));
+        image::RgbaImage::from_raw(img.width, img.height, img.rgba)
+            .ok_or_else(|| Error::Invalid("image".into()))?
+            .save(&png)
+            .map_err(|e| Error::Invalid(e.to_string()))?;
+        let words = crate::ocr::recognize(&engine.exe, &png, &engine.languages);
+        let _ = fs::remove_file(&png);
+        Ok(words?
+            .into_iter()
+            .filter(|w| w.confidence >= 30.0)
+            .map(|w| {
+                let view = RectF::new(
+                    w.left / scale,
+                    w.top / scale,
+                    (w.left + w.width) / scale,
+                    (w.top + w.height) / scale,
+                );
+                (w.text, geo.view_rect_to_pdf(&view))
+            })
+            .collect())
+    }
+
+    /// Page text built from recognised words (for exports of scanned
+    /// pages: "Beschädigten Text mit Texterkennung verbessern").
+    pub fn ocr_page_text(&self, index: usize, engine: &crate::ocr::Engine) -> Result<PageText> {
+        let mut out = PageText::default();
+        for (text, r) in self.ocr_words(index, engine, 300.0)? {
+            let r = r.normalized();
+            let n = text.chars().count().max(1) as f32;
+            for (i, ch) in text.chars().enumerate() {
+                let x0 = r.x0 + r.width() * i as f32 / n;
+                out.chars.push(CharInfo {
+                    ch,
+                    rect: RectF::new(x0, r.y0, x0 + r.width() / n, r.y1),
+                    generated: false,
+                });
+            }
+            out.chars.push(CharInfo { ch: ' ', rect: RectF::default(), generated: true });
+        }
+        Ok(out)
+    }
+
+    /// "Text auf Seiten erkennen": adds an invisible text layer to `pages`
+    /// (one undo step). Pages that already have text are skipped when
+    /// `skip_text` is set. Returns the number of recognised words.
+    pub fn recognize_text(
+        &mut self,
+        pages: &[usize],
+        engine: &crate::ocr::Engine,
+        dpi: f32,
+        skip_text: bool,
+    ) -> Result<usize> {
+        self.require(self.permissions().modify)?;
+        let mut layers = Vec::new();
+        for &page in pages {
+            self.check_page(page)?;
+            if skip_text
+                && self
+                    .page_text(page)?
+                    .chars
+                    .iter()
+                    .filter(|c| !c.ch.is_whitespace() && !c.generated)
+                    .count()
+                    > 20
+            {
+                continue;
+            }
+            let words = self.ocr_words(page, engine, dpi)?;
+            if !words.is_empty() {
+                layers.push((page, words));
+            }
+        }
+        let count = layers.iter().map(|(_, w)| w.len()).sum();
+        if count > 0 {
+            self.edit_bytes("recognize text", |b, pw| {
+                let mut bytes = b.to_vec();
+                for (page, words) in &layers {
+                    bytes = crate::ocr::add_text_layer(&bytes, pw, *page, words)?;
+                }
+                Ok(bytes)
+            })?;
+        }
+        Ok(count)
+    }
+
+    /// The embedded TrueType/OpenType font programs of a page by font name
+    /// (without subset prefix), for "In Kurven umwandeln".
+    pub fn font_programs(&mut self, index: usize) -> Result<HashMap<String, Vec<u8>>> {
+        self.sync_bytes()?;
+        let bytes = self.bytes.clone();
+        let password = self.password.clone();
+        pdf_edit::guarded(|| {
+            let edit = pdf_edit::Edit::open(&bytes, password.as_deref())?;
+            let mut out = HashMap::new();
+            let mut node = Some(edit.page_id(index)?);
+            let mut fonts = None;
+            for _ in 0..32 {
+                let Some(id) = node else { break };
+                let dict = edit.object(id)?.as_dict()?;
+                if let Ok(res) = dict.get(b"Resources") {
+                    fonts = edit.resolve(res)?.as_dict()?.get(b"Font").ok().cloned();
+                    break;
+                }
+                node = dict.get(b"Parent").ok().and_then(|p| p.as_reference().ok());
+            }
+            let Some(fonts) = fonts else { return Ok(out) };
+            for (_, font) in edit.resolve(&fonts)?.as_dict()?.iter() {
+                let Ok(font) = edit.resolve(font).and_then(|f| Ok(f.as_dict()?)) else { continue };
+                let name = font
+                    .get(b"BaseFont")
+                    .ok()
+                    .and_then(|n| n.as_name().ok())
+                    .map(|n| String::from_utf8_lossy(n).into_owned());
+                let Some(name) = name else { continue };
+                // Type0 fonts keep the descriptor in the descendant font.
+                let mut desc_holder = font.clone();
+                if let Ok(desc) = font.get(b"DescendantFonts")
+                    && let Some(first) =
+                        edit.resolve(desc).ok().and_then(|d| d.as_array().ok()).and_then(|a| a.first())
+                    && let Ok(d) = edit.resolve(first).and_then(|d| Ok(d.as_dict()?.clone()))
+                {
+                    desc_holder = d;
+                }
+                let descriptor = desc_holder
+                    .get(b"FontDescriptor")
+                    .ok()
+                    .and_then(|d| edit.resolve(d).ok())
+                    .and_then(|d| d.as_dict().ok())
+                    .cloned();
+                let Some(descriptor) = descriptor else { continue };
+                for key in [&b"FontFile2"[..], b"FontFile3"] {
+                    if let Ok(file) = descriptor.get(key)
+                        && let Ok(stream) = edit.resolve(file).and_then(|s| Ok(s.as_stream()?.clone()))
+                    {
+                        let data = stream.decompressed_content().unwrap_or_else(|_| stream.content.clone());
+                        out.insert(crate::outlines::base_name(&name).to_string(), data);
+                        break;
+                    }
+                }
+            }
+            Ok(out)
+        })
+    }
+
     /// Renders a page into `width` × `height` pixels for an export. With
     /// `without_text` the text objects are left out (they become editable
     /// text elsewhere); the document itself is not changed.
@@ -611,7 +771,51 @@ impl Document {
                 generated: c.is_generated().unwrap_or(false),
             })
             .collect();
-        Ok(PageText { chars })
+        Ok(PageText { chars, ..PageText::default() })
+    }
+
+    /// Like [`Self::page_text`] plus font and colour of every character
+    /// (for exports that keep the look of the text).
+    pub fn page_text_styled(&self, index: usize) -> Result<PageText> {
+        let page = self.page(index)?;
+        let text = page.text()?;
+        let mut out = PageText::default();
+        let mut known: HashMap<String, u16> = HashMap::new();
+        for c in text.chars().iter() {
+            out.chars.push(CharInfo {
+                ch: c.unicode_char().unwrap_or('\u{FFFD}'),
+                rect: c.loose_bounds().map(|r| to_rectf(&r)).unwrap_or_default(),
+                generated: c.is_generated().unwrap_or(false),
+            });
+            let name = c.font_name();
+            let font = match known.get(&name) {
+                Some(i) => *i,
+                None => {
+                    let bold = c.font_weight().is_some_and(|w| {
+                        matches!(
+                            w,
+                            PdfFontWeight::Weight600
+                                | PdfFontWeight::Weight700Bold
+                                | PdfFontWeight::Weight800
+                                | PdfFontWeight::Weight900
+                        )
+                    }) || c.font_is_bold_reenforced();
+                    let i = out.fonts.len().min(u16::MAX as usize) as u16;
+                    out.fonts.push(crate::text::FontInfo {
+                        name: name.clone(),
+                        bold,
+                        italic: c.font_is_italic(),
+                    });
+                    known.insert(name, i);
+                    i
+                }
+            };
+            let color = c.fill_color().map(|f| [f.red(), f.green(), f.blue()]).unwrap_or([0, 0, 0]);
+            let origin = c.origin().map(|(x, y)| [x.value, y.value]).unwrap_or_default();
+            let size = c.scaled_font_size().value;
+            out.styles.push(crate::text::CharStyle { font, color, size, origin });
+        }
+        Ok(out)
     }
 
     pub fn bookmarks(&self) -> Vec<Bookmark> {
@@ -1912,31 +2116,12 @@ impl Document {
 
     /// Word export; `images`: also transfer the pictures of the pages.
     pub fn export_word_with(&self, dest: &Path, selection: &[usize], images: bool) -> Result<()> {
-        use crate::convert::DocBlock;
-        let headings: Vec<(usize, String)> =
-            self.heading_bookmarks()?.into_iter().map(|b| (b.page, b.title)).collect();
-        let mut pages = Vec::new();
         for &page in selection {
             self.check_page(page)?;
-            // (top edge, block) sorted from the top of the page.
-            let mut blocks: Vec<(f32, DocBlock)> = crate::office::segments(&self.page_text(page)?)
-                .into_iter()
-                .map(|line| {
-                    let top = line.iter().map(|s| s.rect.y1).fold(f32::MIN, f32::max);
-                    let t = line.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join(" ");
-                    let heading = headings.iter().any(|(p, h)| *p == page && *h == t);
-                    (top, DocBlock::Text(t, heading))
-                })
-                .collect();
-            if images {
-                for (rect, png) in self.page_images(page)? {
-                    blocks.push((rect.y1, DocBlock::Image(png, rect.width(), rect.height())));
-                }
-            }
-            blocks.sort_by(|a, b| b.0.total_cmp(&a.0));
-            pages.push(blocks.into_iter().map(|(_, b)| b).collect());
         }
-        write_atomic(dest, &crate::convert::docx(&self.display_name, &pages))
+        let o =
+            crate::office::WordOptions { keep_layout: false, tables: true, images, dpi: 150.0, ocr: None };
+        crate::office::export_word_flow(self, dest, selection, &o, None)
     }
 
     /// The pictures on a page as PNG with their place (PDF space); tiny
@@ -1962,6 +2147,26 @@ impl Document {
             }
         }
         Ok(out)
+    }
+
+    /// "Seiten neu einfärben": dark parts become `text`, light parts and the
+    /// paper `background` (RGB).
+    pub fn recolor_pages(&mut self, background: [u8; 3], text: [u8; 3]) -> Result<()> {
+        self.require(self.has_full_access())?;
+        self.edit_bytes("recolor pages", |b, pw| crate::convert::recolor(b, pw, background, text))
+    }
+
+    /// "Schriften ersetzen": (font name, standard font) pairs. Returns the
+    /// number of fonts replaced.
+    pub fn replace_fonts(&mut self, map: &[(String, String)]) -> Result<usize> {
+        self.require(self.permissions().modify)?;
+        let mut count = 0;
+        self.edit_bytes("replace fonts", |b, pw| {
+            let (bytes, n) = crate::font_replace::replace_fonts(b, pw, map)?;
+            count = n;
+            Ok(bytes)
+        })?;
+        Ok(count)
     }
 
     pub fn to_grayscale(&mut self) -> Result<()> {

@@ -1120,11 +1120,7 @@ impl MrPdfApp {
         group(ui, if de { "Ändern" } else { "Change" }, |ui| {
             self.big(ui, ctx, Cmd::ContentsToImages);
             self.big(ui, ctx, Cmd::SaveOptimized);
-            self.big(
-                ui,
-                ctx,
-                UA(Unavailable::TextEditing, "Schriften ersetzen", "Replace fonts", Icon::TextBox),
-            );
+            self.big(ui, ctx, Cmd::ReplaceFonts);
         });
         group(ui, if de { "Exportieren" } else { "Export" }, |ui| {
             for cmd in
@@ -1134,11 +1130,7 @@ impl MrPdfApp {
             }
         });
         group(ui, if de { "Texterkennung" } else { "Text recognition" }, |ui| {
-            self.big(
-                ui,
-                ctx,
-                UA(Unavailable::Ocr, "Text auf Seiten erkennen", "Recognize text", Icon::Search),
-            );
+            self.big(ui, ctx, Cmd::RecognizeText);
         });
         group(ui, if de { "Seiten erweitern" } else { "Enhance pages" }, |ui| {
             for (de_label, en) in [
@@ -1151,7 +1143,7 @@ impl MrPdfApp {
         });
         group(ui, if de { "Farben umwandeln" } else { "Convert colours" }, |ui| {
             self.big(ui, ctx, Cmd::Grayscale);
-            self.big(ui, ctx, UA(Unavailable::Recolor, "Seiten neu einfärben", "Recolor pages", Icon::Theme));
+            self.big(ui, ctx, Cmd::RecolorPages);
         });
     }
 

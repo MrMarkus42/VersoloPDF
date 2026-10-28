@@ -57,11 +57,12 @@ impl MrPdfApp {
                     preset_name: String::new(),
                 })));
             }
-            Cmd::ExportWord => {
-                self.dialog = Some(Dialog::ExportWord { range: PageRange::all(), images: true })
-            }
+            Cmd::ExportWord => self.open_word_export(),
             Cmd::ExportExcel => self.open_excel_export(),
             Cmd::ExportPowerPoint => self.open_powerpoint_export(),
+            Cmd::RecognizeText => self.open_recognize_text(),
+            Cmd::ReplaceFonts => self.open_replace_fonts(),
+            Cmd::RecolorPages => self.open_recolor(),
             _ => return false,
         }
         true
@@ -285,79 +286,6 @@ impl MrPdfApp {
                         {
                             super::features::reveal_in_file_manager(first);
                         }
-                    }
-                    Err(err) => app.show_error(&err),
-                }
-            })),
-        )
-    }
-
-    /// "Einstellungen für Word-Umwandlung".
-    pub(super) fn export_word_dialog(
-        &mut self,
-        ui: &mut Ui,
-        range: &mut PageRange,
-        images: &mut bool,
-    ) -> (Outcome, Option<Action>) {
-        let de = self.ex_de();
-        let (n, cur) = self.active_tab().map_or((0, 0), |t| (t.doc.page_count(), t.current_page));
-        super::dialogs::set_title(
-            ui,
-            tr(de, "Einstellungen für Word-Umwandlung", "Word conversion settings"),
-        );
-        range.ui(ui, de, n, cur, &[RangeMode::All, RangeMode::Current, RangeMode::Custom]);
-        section(ui, tr(de, "Einstellungen für Layout", "Layout settings"), |ui| {
-            let mut flow = true;
-            ui.horizontal(|ui| {
-                let _ = ui
-                    .add_enabled(
-                        false,
-                        egui::RadioButton::new(false, tr(de, "Seitenlayout erhalten", "Keep page layout")),
-                    )
-                    .on_disabled_hover_text(tr(
-                        de,
-                        "MrPDF überträgt den Text mit Überschriften, aber nicht die genaue Seitengestaltung.",
-                        "MrPDF transfers the text with headings, but not the exact page layout.",
-                    ));
-                ui.radio_value(&mut flow, true, tr(de, "Textfluss erhalten", "Keep text flow"));
-            });
-            ui.checkbox(images, tr(de, "Bilder übernehmen", "Transfer pictures"));
-        });
-        ui.label(
-            RichText::new(tr(
-                de,
-                "Überschriften werden an der Schriftgröße erkannt, Bilder an ihrer Stelle im Text eingefügt. Tabellen und Kommentare werden nicht übernommen.",
-                "Headings are recognised by their font size, pictures are placed where they stand. Tables and comments are not transferred.",
-            ))
-            .small()
-            .weak(),
-        );
-        let pages = range.resolve(n, cur);
-        let (ok, cancel, _) = footer(ui, de, pages.is_some(), false, "OK");
-        if cancel {
-            return (Outcome::Close, None);
-        }
-        let (true, Some(pages)) = (ok, pages) else { return (Outcome::Keep, None) };
-        let images = *images;
-        (
-            Outcome::Close,
-            Some(Box::new(move |app, ctx| {
-                let Some(tab) = app.tabs.get(app.active) else { return };
-                let stem =
-                    tab.doc.display_name().trim_end_matches(".pdf").trim_end_matches(".PDF").to_string();
-                let Some(path) = rfd::FileDialog::new()
-                    .set_title(Cmd::ExportWord.label(app.settings.language))
-                    .add_filter("Word", &["docx"])
-                    .set_file_name(format!("{stem}.docx"))
-                    .save_file()
-                else {
-                    return;
-                };
-                let tab = &app.tabs[app.active];
-                match tab.doc.export_word_with(&path, &pages, images) {
-                    Ok(()) => {
-                        let msg = if app.ex_de() { "Exportiert: " } else { "Exported: " };
-                        app.set_status(ctx, format!("{msg}{}", path.display()));
                     }
                     Err(err) => app.show_error(&err),
                 }

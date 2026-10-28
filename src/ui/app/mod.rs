@@ -5,6 +5,7 @@ mod backstage;
 mod calculator_ui;
 pub mod commands;
 pub mod comment_cmds;
+mod convert_dialogs;
 mod dialogs;
 mod export_dialog;
 mod features;
@@ -164,11 +165,14 @@ pub enum Dialog {
     /// "Als Bilddateien exportieren".
     ExportImages(Box<export_dialog::ExportImagesState>),
     /// "Einstellungen für Word-Umwandlung".
-    ExportWord {
-        range: crate::ui::pickers::PageRange,
-        /// "Bilder übernehmen".
-        images: bool,
-    },
+    /// "Einstellungen für Word-Umwandlung".
+    ExportWord(Box<office_dialogs::WordState>),
+    /// "Text auf Seiten erkennen".
+    RecognizeText(Box<convert_dialogs::OcrState>),
+    /// "Schriften ersetzen".
+    ReplaceFonts(Box<convert_dialogs::FontsState>),
+    /// "Seiten neu einfärben".
+    Recolor(Box<convert_dialogs::RecolorState>),
     /// "Einstellungen für Excel-Umwandlung".
     ExportExcel(Box<office_dialogs::ExcelState>),
     /// "Einstellungen für PowerPoint-Umwandlung".

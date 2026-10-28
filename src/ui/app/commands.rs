@@ -28,13 +28,11 @@ pub enum Side {
 pub enum Unavailable {
     Signatures,
     JavaScript,
-    Ocr,
     Scanner,
     Media,
     Spelling,
     TextEditing,
     Speech,
-    Office,
     Barcodes,
     Guides,
     Cloud,
@@ -45,7 +43,6 @@ pub enum Unavailable {
     Highlighting,
     Layers,
     ScanCleanup,
-    Recolor,
 }
 
 impl Unavailable {
@@ -58,10 +55,6 @@ impl Unavailable {
             Unavailable::JavaScript => (
                 "JavaScript in PDF-Dateien wird aus Sicherheitsgründen bewusst nicht ausgeführt.",
                 "JavaScript in PDF files is deliberately not executed for security reasons.",
-            ),
-            Unavailable::Ocr => (
-                "Texterkennung (OCR) benötigt eine eigene Erkennungs-Software und ist noch nicht enthalten.",
-                "Text recognition (OCR) needs a recognition engine and is not included yet.",
             ),
             Unavailable::Scanner => {
                 ("Scannen wird noch nicht unterstützt.", "Scanning is not supported yet.")
@@ -79,10 +72,6 @@ impl Unavailable {
             Unavailable::Speech => {
                 ("Vorlesen wird noch nicht unterstützt.", "Read aloud is not supported yet.")
             }
-            Unavailable::Office => (
-                "Export nach Excel/PowerPoint wird nicht unterstützt (Text- und Word-Export sind möglich).",
-                "Export to Excel/PowerPoint is not supported (text and Word export are available).",
-            ),
             Unavailable::Barcodes => ("Barcodes werden nicht unterstützt.", "Barcodes are not supported."),
             Unavailable::Guides => (
                 "MrPDF hat keine Hilfslinien. Bitte „Seiten aufteilen“ verwenden und die Trennlinien dort setzen.",
@@ -116,10 +105,6 @@ impl Unavailable {
             Unavailable::ScanCleanup => (
                 "Das Aufbereiten gescannter Seiten (begradigen, säubern) ist noch nicht enthalten.",
                 "Cleaning up scanned pages (deskew, despeckle) is not included yet.",
-            ),
-            Unavailable::Recolor => (
-                "Seiten dauerhaft neu einzufärben ist noch nicht enthalten. Zum Lesen gibt es „Dokumentfarben ersetzen“ unter Ansicht.",
-                "Recolouring pages permanently is not included yet. For reading use \"Replace document colours\" in View.",
             ),
         };
         if lang == Language::German { de } else { en }
@@ -258,6 +243,9 @@ pub enum Cmd {
     ExportWord,
     ExportExcel,
     ExportPowerPoint,
+    RecognizeText,
+    ReplaceFonts,
+    RecolorPages,
     Grayscale,
     // Review / accessibility
     WordCount,
@@ -487,6 +475,9 @@ pub const SEARCHABLE: &[Cmd] = &[
     Cmd::ExportWord,
     Cmd::ExportExcel,
     Cmd::ExportPowerPoint,
+    Cmd::RecognizeText,
+    Cmd::ReplaceFonts,
+    Cmd::RecolorPages,
     Cmd::Grayscale,
     Cmd::WordCount,
     Cmd::CompareDocuments,
@@ -697,6 +688,9 @@ impl Cmd {
             ExportWord => ("In MS Word", "To MS Word"),
             ExportExcel => ("In MS Excel", "To MS Excel"),
             ExportPowerPoint => ("In MS PowerPoint", "To MS PowerPoint"),
+            RecognizeText => ("Text auf Seiten erkennen", "Recognize text"),
+            ReplaceFonts => ("Schriften ersetzen", "Replace fonts"),
+            RecolorPages => ("Seiten neu einfärben", "Recolor pages"),
             Grayscale => ("Farben umwandeln", "Convert colours"),
             WordCount => ("Wörter zählen", "Count words"),
             CompareDocuments => ("Dokumente vergleichen", "Compare documents"),
@@ -848,6 +842,9 @@ impl Cmd {
             ExportWord => Icon::WordFile,
             ExportExcel => Icon::Thumbnails,
             ExportPowerPoint => Icon::Fullscreen,
+            RecognizeText => Icon::Search,
+            ReplaceFonts => Icon::TextBox,
+            RecolorPages => Icon::Theme,
             Grayscale => Icon::Theme,
             WordCount => Icon::Count,
             CompareDocuments => Icon::Compare,

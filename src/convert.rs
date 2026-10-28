@@ -395,6 +395,226 @@ pub fn to_grayscale(bytes: &[u8], password: Option<&str>) -> Result<Vec<u8>> {
 }
 
 // ---------------------------------------------------------------------------
+// Recolour ("Seiten neu einfärben")
+
+/// Colour for a gray value: dark parts take `text`, light parts `background`.
+fn tint(v: f32, background: [u8; 3], text: [u8; 3]) -> [f32; 3] {
+    let v = v.clamp(0.0, 1.0);
+    let c = |i: usize| (f32::from(text[i]) + (f32::from(background[i]) - f32::from(text[i])) * v) / 255.0;
+    [c(0), c(1), c(2)]
+}
+
+fn rgb_op(op: &str, c: [f32; 3]) -> Operation {
+    Operation::new(op, c.iter().map(|v| Object::Real((v * 1000.0).round() / 1000.0)).collect())
+}
+
+/// Rewrites the gray colour operators of a (grayscale) content stream.
+fn tint_operations(
+    ops: Vec<Operation>,
+    gray_names: &HashSet<Vec<u8>>,
+    bg: [u8; 3],
+    fg: [u8; 3],
+) -> Vec<Operation> {
+    let (mut fill_gray, mut stroke_gray) = (false, false);
+    let mut out = Vec::with_capacity(ops.len());
+    for op in ops {
+        let vals: Vec<f32> = op.operands.iter().filter_map(num).collect();
+        match op.operator.as_str() {
+            "g" if vals.len() == 1 => out.push(rgb_op("rg", tint(vals[0], bg, fg))),
+            "G" if vals.len() == 1 => out.push(rgb_op("RG", tint(vals[0], bg, fg))),
+            "cs" | "CS" => {
+                let gray = match op.operands.first() {
+                    Some(Object::Name(n)) => n == b"DeviceGray" || gray_names.contains(n),
+                    _ => false,
+                };
+                if op.operator == "cs" {
+                    fill_gray = gray;
+                } else {
+                    stroke_gray = gray;
+                }
+                if gray {
+                    out.push(Operation::new(&op.operator, vec![Object::Name(b"DeviceRGB".to_vec())]));
+                } else {
+                    out.push(op);
+                }
+            }
+            "sc" | "scn" if fill_gray && vals.len() == 1 && op.operands.len() == 1 => {
+                out.push(rgb_op(&op.operator, tint(vals[0], bg, fg)))
+            }
+            "SC" | "SCN" if stroke_gray && vals.len() == 1 && op.operands.len() == 1 => {
+                out.push(rgb_op(&op.operator, tint(vals[0], bg, fg)))
+            }
+            _ => out.push(op),
+        }
+    }
+    out
+}
+
+/// "Seiten neu einfärben": the document is made gray first, then every gray
+/// value becomes a colour between `text` (black) and `background`
+/// (white), the paper included. Images are recoloured through a palette.
+pub fn recolor(bytes: &[u8], password: Option<&str>, background: [u8; 3], text: [u8; 3]) -> Result<Vec<u8>> {
+    let gray = to_grayscale(bytes, password)?;
+    guarded(|| {
+        let options =
+            LoadOptions { max_decompressed_size: Some(MAX_DECOMPRESSED_STREAM), ..LoadOptions::default() };
+        let mut doc = Document::load_mem_with_options(&gray, options)?;
+        let palette: Vec<u8> = (0..=255u8)
+            .flat_map(|v| tint(f32::from(v) / 255.0, background, text).map(|c| (c * 255.0).round() as u8))
+            .collect();
+        // Named colour spaces that are gray now become RGB.
+        let mut gray_names: HashSet<Vec<u8>> = HashSet::new();
+        let ids: Vec<ObjectId> = doc.objects.keys().copied().collect();
+        for id in &ids {
+            let Ok(obj) = doc.get_object_mut(*id) else { continue };
+            let dict = match obj {
+                Object::Dictionary(d) => d,
+                Object::Stream(s) => &mut s.dict,
+                _ => continue,
+            };
+            if dict.get(b"Subtype").ok().and_then(|s| s.as_name().ok()) == Some(b"Image") {
+                continue;
+            }
+            if let Ok(Object::Dictionary(res)) = dict.get_mut(b"ColorSpace") {
+                let keys: Vec<Vec<u8>> = res
+                    .iter()
+                    .filter(|(_, v)| v.as_name().ok() == Some(b"DeviceGray"))
+                    .map(|(k, _)| k.clone())
+                    .collect();
+                for k in keys {
+                    res.set(k.clone(), Object::Name(b"DeviceRGB".to_vec()));
+                    gray_names.insert(k);
+                }
+            }
+        }
+        let mut content_ids: HashSet<ObjectId> = HashSet::new();
+        let pages: Vec<ObjectId> = doc.get_pages().values().copied().collect();
+        for page_id in &pages {
+            if let Ok(page) = doc.get_dictionary(*page_id) {
+                match page.get(b"Contents") {
+                    Ok(Object::Reference(r)) => match doc.get_object(*r) {
+                        Ok(Object::Array(a)) => {
+                            content_ids.extend(a.iter().filter_map(|o| o.as_reference().ok()))
+                        }
+                        _ => {
+                            content_ids.insert(*r);
+                        }
+                    },
+                    Ok(Object::Array(a)) => {
+                        content_ids.extend(a.iter().filter_map(|o| o.as_reference().ok()))
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let gray_cs = Object::Name(b"DeviceGray".to_vec());
+        // Soft masks stay gray (they are transparency, not colour).
+        let smasks: HashSet<ObjectId> = doc
+            .objects
+            .values()
+            .filter_map(|o| match o {
+                Object::Stream(s) => s.dict.get(b"SMask").ok().and_then(|r| r.as_reference().ok()),
+                _ => None,
+            })
+            .collect();
+        for id in ids {
+            let snapshot = doc.get_object(id)?.clone();
+            match snapshot {
+                Object::Stream(mut s) => {
+                    let subtype =
+                        s.dict.get(b"Subtype").ok().and_then(|n| n.as_name().ok()).map(<[u8]>::to_vec);
+                    if subtype.as_deref() == Some(b"Image") {
+                        let mask = s.dict.get(b"ImageMask").ok().and_then(|m| m.as_bool().ok()) == Some(true);
+                        let bpc = s.dict.get(b"BitsPerComponent").ok().and_then(|b| b.as_i64().ok());
+                        let is_smask = smasks.contains(&id);
+                        if !mask
+                            && !is_smask
+                            && bpc == Some(8)
+                            && s.dict.get(b"ColorSpace").ok() == Some(&gray_cs)
+                        {
+                            s.dict.set(
+                                "ColorSpace",
+                                Object::Array(vec![
+                                    Object::Name(b"Indexed".to_vec()),
+                                    Object::Name(b"DeviceRGB".to_vec()),
+                                    Object::Integer(255),
+                                    Object::String(palette.clone(), lopdf::StringFormat::Hexadecimal),
+                                ]),
+                            );
+                            s.dict.remove(b"Decode");
+                        }
+                    } else if subtype.as_deref() == Some(b"Form") || content_ids.contains(&id) {
+                        let data = s.decompressed_content().unwrap_or_else(|_| s.content.clone());
+                        let Ok(content) = Content::decode(&data) else { continue };
+                        let ops = tint_operations(content.operations, &gray_names, background, text);
+                        let encoded = Content { operations: ops }.encode()?;
+                        s.dict.remove(b"Filter");
+                        s.dict.remove(b"DecodeParms");
+                        s.set_plain_content(encoded);
+                        s.compress()?;
+                    } else {
+                        continue;
+                    }
+                    doc.objects.insert(id, Object::Stream(s));
+                }
+                Object::Dictionary(mut d)
+                    if d.get(b"Type").ok().and_then(|t| t.as_name().ok()) == Some(b"Annot") =>
+                {
+                    for key in [&b"C"[..], b"IC"] {
+                        if let Ok(Object::Array(a)) = d.get_mut(key)
+                            && let [v] = a.as_slice()
+                            && let Some(v) = num(v)
+                        {
+                            *a = tint(v, background, text).iter().map(|c| Object::Real(*c)).collect();
+                        }
+                    }
+                    doc.objects.insert(id, Object::Dictionary(d));
+                }
+                _ => {}
+            }
+        }
+        // The paper gets the background colour; text without a colour of
+        // its own (default black) gets the text colour.
+        let [br, bgc, bb] = background.map(|c| f32::from(c) / 255.0);
+        let [tr, tg, tb] = text.map(|c| f32::from(c) / 255.0);
+        for page_id in pages {
+            let media = doc
+                .get_dictionary(page_id)
+                .ok()
+                .and_then(|p| p.get(b"MediaBox").ok().cloned())
+                .and_then(|m| m.as_array().ok().cloned())
+                .map(|a| a.iter().filter_map(num).collect::<Vec<f32>>())
+                .filter(|v| v.len() == 4)
+                .unwrap_or_else(|| vec![-10_000.0, -10_000.0, 10_000.0, 10_000.0]);
+            let prefix = format!(
+                "q {br:.3} {bgc:.3} {bb:.3} rg {} {} {} {} re f Q {tr:.3} {tg:.3} {tb:.3} rg {tr:.3} {tg:.3} {tb:.3} RG\n",
+                media[0],
+                media[1],
+                media[2] - media[0],
+                media[3] - media[1]
+            );
+            let stream_id = doc.add_object(Stream::new(Dictionary::new(), prefix.into_bytes()));
+            let current = doc.get_dictionary(page_id).ok().and_then(|p| p.get(b"Contents").ok().cloned());
+            let mut list = match current {
+                Some(Object::Array(a)) => a,
+                Some(Object::Reference(r)) => match doc.get_object(r) {
+                    Ok(Object::Array(a)) => a.clone(),
+                    _ => vec![Object::Reference(r)],
+                },
+                _ => Vec::new(),
+            };
+            list.insert(0, Object::Reference(stream_id));
+            let contents = list;
+            let Ok(page) = doc.get_dictionary_mut(page_id) else { continue };
+            page.set("Contents", Object::Array(contents));
+        }
+        let mut out = Vec::new();
+        doc.save_to(&mut out).map_err(|e| Error::Structure(e.to_string()))?;
+        Ok(out)
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Image pages
 
 /// A one-page PDF showing `image` at `dpi` (page size follows the image).
@@ -488,14 +708,62 @@ pub enum DocBlock {
     Text(String, bool),
     /// A PNG picture and its size in points.
     Image(Vec<u8>, f32, f32),
+    /// A table: rows of cells.
+    Table(Vec<Vec<String>>),
 }
 
 /// Widest picture: the text width of an A4 page with 2 cm margins.
 const DOCX_TEXT_WIDTH: f32 = 481.0;
 
-/// A minimal Word document: one paragraph per text line, pictures in
-/// between, a page break between PDF pages.
+/// A table with thin borders, columns as wide as their longest text.
+fn docx_table(rows: &[Vec<String>]) -> String {
+    let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
+    if columns == 0 {
+        return String::new();
+    }
+    let longest: Vec<usize> = (0..columns)
+        .map(|c| rows.iter().filter_map(|r| r.get(c)).map(|t| t.chars().count()).max().unwrap_or(1).max(3))
+        .collect();
+    let total: usize = longest.iter().sum();
+    let widths: Vec<u32> = longest.iter().map(|l| (9638 * *l / total.max(1)) as u32).collect();
+    let border = "w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"999999\"";
+    let mut out = format!(
+        "<w:tbl><w:tblPr><w:tblW w:w=\"0\" w:type=\"auto\"/><w:tblBorders><w:top {border}/><w:left {border}/><w:bottom {border}/><w:right {border}/><w:insideH {border}/><w:insideV {border}/></w:tblBorders><w:tblLayout w:type=\"fixed\"/></w:tblPr><w:tblGrid>"
+    );
+    for w in &widths {
+        out.push_str(&format!("<w:gridCol w:w=\"{w}\"/>"));
+    }
+    out.push_str("</w:tblGrid>");
+    for row in rows {
+        out.push_str("<w:tr>");
+        for (c, w) in widths.iter().enumerate() {
+            let text = row.get(c).map_or("", String::as_str);
+            out.push_str(&format!(
+                "<w:tc><w:tcPr><w:tcW w:w=\"{w}\" w:type=\"dxa\"/></w:tcPr><w:p><w:r><w:t xml:space=\"preserve\">{}</w:t></w:r></w:p></w:tc>",
+                xml_escape(text)
+            ));
+        }
+        out.push_str("</w:tr>");
+    }
+    out.push_str("</w:tbl><w:p/>");
+    out
+}
+
+/// Drawing of picture `n` (relationship `rIdImg{n}`), `cx` × `cy` EMU.
+pub(crate) fn docx_picture(n: usize, cx: i64, cy: i64) -> String {
+    format!(
+        "<a:graphic xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:pic xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:nvPicPr><pic:cNvPr id=\"{n}\" name=\"Bild {n}\"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed=\"rIdImg{n}\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic>"
+    )
+}
+
+/// A minimal Word document: one paragraph per text line, pictures and
+/// tables in between, a page break between PDF pages.
 pub fn docx(title: &str, pages: &[Vec<DocBlock>]) -> Vec<u8> {
+    docx_protected(title, pages, None)
+}
+
+/// As [`docx`]; with `password` the document can only be changed with it.
+pub fn docx_protected(title: &str, pages: &[Vec<DocBlock>], password: Option<&str>) -> Vec<u8> {
     let mut body = String::new();
     let mut images: Vec<&[u8]> = Vec::new();
     for (i, page) in pages.iter().enumerate() {
@@ -520,20 +788,34 @@ pub fn docx(title: &str, pages: &[Vec<DocBlock>]) -> Vec<u8> {
                     let cx = (w * scale * 12_700.0).round().max(12_700.0) as i64;
                     let cy = (h * scale * 12_700.0).round().max(12_700.0) as i64;
                     body.push_str(&format!(
-                        "<w:p><w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\"><wp:extent cx=\"{cx}\" cy=\"{cy}\"/><wp:docPr id=\"{n}\" name=\"Bild {n}\"/><a:graphic xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:pic xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:nvPicPr><pic:cNvPr id=\"{n}\" name=\"Bild {n}\"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed=\"rIdImg{n}\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>"
+                        "<w:p><w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\"><wp:extent cx=\"{cx}\" cy=\"{cy}\"/><wp:docPr id=\"{n}\" name=\"Bild {n}\"/>{}</wp:inline></w:drawing></w:r></w:p>",
+                        docx_picture(n, cx, cy)
                     ));
                 }
+                DocBlock::Table(rows) => body.push_str(&docx_table(rows)),
             }
         }
     }
+    body.push_str("<w:sectPr><w:pgSz w:w=\"11906\" w:h=\"16838\"/><w:pgMar w:top=\"1134\" w:right=\"1134\" w:bottom=\"1134\" w:left=\"1134\" w:header=\"709\" w:footer=\"709\" w:gutter=\"0\"/></w:sectPr>");
+    docx_package(title, &body, &images, password)
+}
+
+/// The Word file around `body` (incl. its final `w:sectPr`) with the
+/// pictures `rIdImg1…` and optional write protection.
+pub(crate) fn docx_package(title: &str, body: &str, images: &[&[u8]], password: Option<&str>) -> Vec<u8> {
     let document = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\"><w:body>{body}<w:sectPr><w:pgSz w:w=\"11906\" w:h=\"16838\"/><w:pgMar w:top=\"1134\" w:right=\"1134\" w:bottom=\"1134\" w:left=\"1134\" w:header=\"709\" w:footer=\"709\" w:gutter=\"0\"/></w:sectPr></w:body></w:document>"
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\"><w:body>{body}</w:body></w:document>"
+    );
+    let protection = password.filter(|p| !p.is_empty()).map(crate::office::word_write_protection);
+    let settings = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<w:settings xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">{}</w:settings>",
+        protection.unwrap_or_default()
     );
     let styles = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<w:styles xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii=\"Calibri\" w:hAnsi=\"Calibri\" w:cs=\"Calibri\"/><w:sz w:val=\"22\"/></w:rPr></w:rPrDefault></w:docDefaults><w:style w:type=\"paragraph\" w:default=\"1\" w:styleId=\"Normal\"><w:name w:val=\"Normal\"/></w:style><w:style w:type=\"paragraph\" w:styleId=\"Heading1\"><w:name w:val=\"heading 1\"/><w:basedOn w:val=\"Normal\"/><w:next w:val=\"Normal\"/><w:pPr><w:spacing w:before=\"240\" w:after=\"120\"/><w:outlineLvl w:val=\"0\"/></w:pPr><w:rPr><w:b/><w:sz w:val=\"32\"/></w:rPr></w:style></w:styles>";
-    let content_types = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Default Extension=\"png\" ContentType=\"image/png\"/><Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/><Override PartName=\"/word/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml\"/><Override PartName=\"/docProps/core.xml\" ContentType=\"application/vnd.openxmlformats-package.core-properties+xml\"/></Types>";
+    let content_types = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Default Extension=\"png\" ContentType=\"image/png\"/><Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/><Override PartName=\"/word/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml\"/><Override PartName=\"/word/settings.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml\"/><Override PartName=\"/docProps/core.xml\" ContentType=\"application/vnd.openxmlformats-package.core-properties+xml\"/></Types>";
     let rels = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"word/document.xml\"/><Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties\" Target=\"docProps/core.xml\"/></Relationships>";
     let mut doc_rels = String::from(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>",
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/><Relationship Id=\"rIdSettings\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings\" Target=\"settings.xml\"/>",
     );
     for n in 1..=images.len() {
         doc_rels.push_str(&format!(
@@ -551,6 +833,7 @@ pub fn docx(title: &str, pages: &[Vec<DocBlock>]) -> Vec<u8> {
     zip.add("docProps/core.xml", core.as_bytes());
     zip.add("word/_rels/document.xml.rels", doc_rels.as_bytes());
     zip.add("word/styles.xml", styles.as_bytes());
+    zip.add("word/settings.xml", settings.as_bytes());
     zip.add("word/document.xml", document.as_bytes());
     for (i, png) in images.iter().enumerate() {
         zip.add(&format!("word/media/image{}.png", i + 1), png);
@@ -661,7 +944,7 @@ mod tests {
         // End of central directory with six entries.
         let eocd = bytes.len() - 22;
         assert_eq!(&bytes[eocd..eocd + 4], &0x0605_4b50u32.to_le_bytes());
-        assert_eq!(u16::from_le_bytes([bytes[eocd + 10], bytes[eocd + 11]]), 6);
+        assert_eq!(u16::from_le_bytes([bytes[eocd + 10], bytes[eocd + 11]]), 7);
     }
 
     #[test]

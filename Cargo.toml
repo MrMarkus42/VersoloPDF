@@ -34,6 +34,8 @@ ron = "=0.12.2"
 # Same version and features egui-winit already uses (clipboard).
 arboard = { version = "=3.6.1", features = ["image-data"] }
 sha2 = "0.11"
+# Same version epaint already uses; glyph outlines for "In Kurven umwandeln".
+skrifa = { version = "=0.44.0", default-features = false, features = ["std"] }
 stringprep = "0.1"
 image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg", "bmp", "gif", "tiff", "webp", "pnm", "tga", "ico"] }
 log = "0.4"

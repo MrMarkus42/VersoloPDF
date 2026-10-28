@@ -22,6 +22,8 @@ pub struct ExcelState {
     pub detect_tables: bool,
     pub sheet_per_page: bool,
     pub row_per_paragraph: bool,
+    pub ocr: bool,
+    pub protect: Protect,
 }
 
 /// State of the PowerPoint dialog.
@@ -32,17 +34,60 @@ pub struct PowerPointState {
     pub dpi: u32,
     pub comments: bool,
     pub links: bool,
+    /// "Modus: In Kurven umwandeln".
+    pub curves: bool,
+    pub ocr: bool,
+    pub protect: Protect,
+}
+
+/// State of the Word dialog.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WordState {
+    pub range: PageRange,
+    /// "Seitenlayout erhalten" (false: "Textfluss erhalten").
+    pub keep_layout: bool,
+    pub tables: bool,
+    pub images: bool,
+    pub ocr: bool,
+    pub protect: Protect,
+}
+
+/// "Vor Änderung mit Kennwort schützen".
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Protect {
+    pub on: bool,
+    pub password: String,
+}
+
+impl Protect {
+    pub fn password(&self) -> Option<String> {
+        (self.on && !self.password.is_empty()).then(|| self.password.clone())
+    }
+
+    pub fn ready(&self) -> bool {
+        !self.on || !self.password.is_empty()
+    }
+
+    pub fn ui(&mut self, ui: &mut Ui, de: bool) {
+        ui.horizontal(|ui| {
+            ui.checkbox(
+                &mut self.on,
+                tr(de, "Vor Änderung mit Kennwort schützen:", "Protect from changes with password:"),
+            );
+            ui.add_enabled(
+                self.on,
+                egui::TextEdit::singleline(&mut self.password).password(true).desired_width(160.0),
+            )
+            .on_hover_text(tr(
+                de,
+                "Die Datei lässt sich ohne Kennwort nur lesen. Sie wird nicht verschlüsselt.",
+                "Without the password the file can only be read. It is not encrypted.",
+            ));
+        });
+    }
 }
 
 const DPIS: [u32; 5] = [72, 96, 150, 200, 300];
-
-fn not_offered(ui: &mut Ui, de: bool, label: &str) {
-    let _ = ui.add_enabled(false, egui::Checkbox::new(&mut false, label)).on_disabled_hover_text(tr(
-        de,
-        "Texterkennung (OCR) ist in MrPDF noch nicht enthalten.",
-        "Text recognition (OCR) is not included in MrPDF yet.",
-    ));
-}
 
 impl MrPdfApp {
     fn od_de(&self) -> bool {
@@ -51,6 +96,78 @@ impl MrPdfApp {
 
     fn local_numbers(&self) -> NumberFormat {
         if self.od_de() { NumberFormat::GERMAN } else { NumberFormat::ENGLISH }
+    }
+
+    pub(super) fn open_word_export(&mut self) {
+        self.dialog = Some(Dialog::ExportWord(Box::new(WordState {
+            range: PageRange::all(),
+            keep_layout: false,
+            tables: true,
+            images: true,
+            ocr: false,
+            protect: Protect::default(),
+        })));
+    }
+
+    pub(super) fn word_dialog(&mut self, ui: &mut Ui, s: &mut WordState) -> (Outcome, Option<Action>) {
+        let de = self.od_de();
+        let (n, cur) = self.active_tab().map_or((0, 0), |t| (t.doc.page_count(), t.current_page));
+        super::dialogs::set_title(
+            ui,
+            tr(de, "Einstellungen für Word-Umwandlung", "Word conversion settings"),
+        );
+        s.range.ui(ui, de, n, cur, &[RangeMode::All, RangeMode::Current, RangeMode::Custom]);
+        section(ui, tr(de, "Einstellungen für Layout", "Layout settings"), |ui| {
+            ui.horizontal(|ui| {
+                ui.radio_value(&mut s.keep_layout, true, tr(de, "Seitenlayout erhalten", "Keep page layout"));
+                ui.radio_value(&mut s.keep_layout, false, tr(de, "Textfluss erhalten", "Keep text flow"));
+            });
+            ui.label(
+                RichText::new(if s.keep_layout {
+                    tr(
+                        de,
+                        "Jede Seite wird eine Word-Seite gleicher Größe: Grafiken als Bild im Hintergrund, der Text in Rahmen an der Originalstelle mit Originalschrift.",
+                        "Every page becomes a Word page of the same size: graphics as picture behind, the text in frames at the original place with the original font.",
+                    )
+                } else {
+                    tr(
+                        de,
+                        "Der Text fließt; Überschriften werden an Lesezeichen erkannt, Tabellen an ihren Spalten.",
+                        "The text flows; headings are recognised by bookmarks, tables by their columns.",
+                    )
+                })
+                .small()
+                .weak(),
+            );
+            ui.add_enabled_ui(!s.keep_layout, |ui| {
+                ui.checkbox(&mut s.tables, tr(de, "Tabellen erkennen", "Detect tables"));
+                ui.checkbox(&mut s.images, tr(de, "Bilder übernehmen", "Transfer pictures"));
+            });
+        });
+        self.ocr_option(ui, &mut s.ocr);
+        s.protect.ui(ui, de);
+        let pages = s.range.resolve(n, cur);
+        let (ok, cancel, _) = footer(ui, de, pages.is_some() && s.protect.ready(), false, "OK");
+        if cancel {
+            return (Outcome::Close, None);
+        }
+        let (true, Some(pages)) = (ok, pages) else { return (Outcome::Keep, None) };
+        let o = crate::office::WordOptions {
+            keep_layout: s.keep_layout,
+            tables: s.tables,
+            images: s.images,
+            dpi: 150.0,
+            ocr: if s.ocr { self.ocr_engine() } else { None },
+        };
+        let password = s.protect.password();
+        (
+            Outcome::Close,
+            Some(Box::new(move |app, ctx| {
+                app.save_office(ctx, Cmd::ExportWord, "docx", "Word", |doc, path| {
+                    crate::office::export_word(doc, path, &pages, &o, password.as_deref())
+                });
+            })),
+        )
     }
 
     pub(super) fn open_excel_export(&mut self) {
@@ -63,6 +180,8 @@ impl MrPdfApp {
             detect_tables: true,
             sheet_per_page: true,
             row_per_paragraph: false,
+            ocr: false,
+            protect: Protect::default(),
         })));
     }
 
@@ -73,11 +192,36 @@ impl MrPdfApp {
             dpi: 150,
             comments: true,
             links: true,
+            curves: false,
+            ocr: false,
+            protect: Protect::default(),
         })));
     }
 
+    /// The OCR program with the chosen languages, if installed.
+    pub(super) fn ocr_engine(&self) -> Option<crate::ocr::Engine> {
+        crate::ocr::find_tesseract(self.settings.tesseract.as_deref())
+            .map(|exe| crate::ocr::Engine { exe, languages: self.settings.ocr_languages.clone() })
+    }
+
+    /// "Beschädigten Text mit Texterkennung verbessern": only with Tesseract.
+    pub(super) fn ocr_option(&self, ui: &mut Ui, on: &mut bool) {
+        let de = self.od_de();
+        let available = crate::ocr::find_tesseract(self.settings.tesseract.as_deref()).is_some();
+        let label = tr(de, "Beschädigten Text mit Texterkennung verbessern", "Improve damaged text with OCR");
+        let resp = ui.add_enabled(available, egui::Checkbox::new(on, label));
+        if !available {
+            resp.on_disabled_hover_text(tr(
+                de,
+                "Dafür wird das kostenlose Programm Tesseract benötigt (siehe „Text auf Seiten erkennen“).",
+                "This needs the free program Tesseract (see \"Recognize text\").",
+            ));
+            *on = false;
+        }
+    }
+
     /// Asks for the target file and writes it with `write`.
-    fn save_office(
+    pub(super) fn save_office(
         &mut self,
         ctx: &egui::Context,
         cmd: Cmd,
@@ -167,47 +311,31 @@ impl MrPdfApp {
         ui.checkbox(&mut s.detect_tables, tr(de, "Tabellen erkennen", "Detect tables"));
         egui::Grid::new("excel-opts").num_columns(2).show(ui, |ui| {
             ui.label(tr(de, "Arbeitsblatt erstellen:", "Create worksheet:"));
+            let per_page = tr(de, "Für jede Seite", "For each page");
+            let one = tr(de, "Eins für das Dokument", "One for the document");
             egui::ComboBox::from_id_salt("excel-sheet")
-                .selected_text(if s.sheet_per_page {
-                    tr(de, "Für jede Seite", "For each page")
-                } else {
-                    tr(de, "Eins für das Dokument", "One for the document")
-                })
+                .selected_text(if s.sheet_per_page { per_page } else { one })
                 .width(180.0)
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(
-                        &mut s.sheet_per_page,
-                        true,
-                        tr(de, "Für jede Seite", "For each page"),
-                    );
-                    ui.selectable_value(
-                        &mut s.sheet_per_page,
-                        false,
-                        tr(de, "Eins für das Dokument", "One for the document"),
-                    );
+                    ui.selectable_value(&mut s.sheet_per_page, true, per_page);
+                    ui.selectable_value(&mut s.sheet_per_page, false, one);
                 });
             ui.end_row();
             ui.label(tr(de, "Neue Zeile in der Tabelle nutzen pro:", "Use a new table row per:"));
+            let (para, line) = (tr(de, "Absatz", "Paragraph"), tr(de, "Zeile", "Line"));
             egui::ComboBox::from_id_salt("excel-row")
-                .selected_text(if s.row_per_paragraph {
-                    tr(de, "Absatz", "Paragraph")
-                } else {
-                    tr(de, "Zeile", "Line")
-                })
+                .selected_text(if s.row_per_paragraph { para } else { line })
                 .width(180.0)
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut s.row_per_paragraph, true, tr(de, "Absatz", "Paragraph"));
-                    ui.selectable_value(&mut s.row_per_paragraph, false, tr(de, "Zeile", "Line"));
+                    ui.selectable_value(&mut s.row_per_paragraph, true, para);
+                    ui.selectable_value(&mut s.row_per_paragraph, false, line);
                 });
             ui.end_row();
         });
-        not_offered(
-            ui,
-            de,
-            tr(de, "Beschädigten Text mit Texterkennung verbessern", "Improve damaged text with OCR"),
-        );
+        self.ocr_option(ui, &mut s.ocr);
+        s.protect.ui(ui, de);
         let pages = s.range.resolve(n, cur);
-        let (ok, cancel, _) = footer(ui, de, pages.is_some(), false, "OK");
+        let (ok, cancel, _) = footer(ui, de, pages.is_some() && s.protect.ready(), false, "OK");
         if cancel {
             return (Outcome::Close, None);
         }
@@ -217,12 +345,14 @@ impl MrPdfApp {
             detect_tables: s.detect_tables,
             sheet_per_page: s.sheet_per_page,
             row_per_paragraph: s.row_per_paragraph,
+            ocr: if s.ocr { self.ocr_engine() } else { None },
         };
+        let password = s.protect.password();
         (
             Outcome::Close,
             Some(Box::new(move |app, ctx| {
                 app.save_office(ctx, Cmd::ExportExcel, "xlsx", "Excel", |doc, path| {
-                    crate::office::export_excel(doc, path, &pages, &o)
+                    crate::office::export_excel_protected(doc, path, &pages, &o, password.as_deref())
                 });
             })),
         )
@@ -248,15 +378,6 @@ impl MrPdfApp {
                 "Convert the whole page content into one picture",
             ),
         );
-        ui.label(
-            RichText::new(tr(
-                de,
-                "Bilder, Grafiken und Farbverläufe kommen als Bild auf die Folie, der Text bleibt bearbeitbar. Ist die Option oben aktiv, wird die ganze Seite ein Bild.",
-                "Pictures, graphics and gradients become a picture on the slide, the text stays editable. With the option above the whole page becomes a picture.",
-            ))
-            .small()
-            .weak(),
-        );
         ui.horizontal(|ui| {
             ui.label(tr(de, "Auflösung:", "Resolution:"));
             egui::ComboBox::from_id_salt("ppt-dpi").selected_text(format!("{} dpi", s.dpi)).show_ui(
@@ -272,52 +393,59 @@ impl MrPdfApp {
             ui.add_enabled_ui(!s.whole_page_image, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(tr(de, "Modus:", "Mode:"));
-                    let mut mode = 0;
+                    let editable = tr(de, "Bearbeitbarkeit von Text erhalten", "Keep text editable");
+                    let curves = tr(de, "In Kurven umwandeln", "Convert to curves");
                     egui::ComboBox::from_id_salt("ppt-mode")
-                        .selected_text(tr(de, "Bearbeitbarkeit von Text erhalten", "Keep text editable"))
+                        .selected_text(if s.curves { curves } else { editable })
                         .width(240.0)
                         .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut mode, 0, tr(de, "Bearbeitbarkeit von Text erhalten", "Keep text editable"));
-                            let _ = ui
-                                .add_enabled(false, egui::Button::new(tr(de, "In Kurven umwandeln", "Convert to curves")).frame(false))
-                                .on_disabled_hover_text(tr(de, "Text in Kurven umwandeln kann MrPDF nicht.", "MrPDF cannot convert text into curves."));
+                            ui.selectable_value(&mut s.curves, false, editable);
+                            ui.selectable_value(&mut s.curves, true, curves);
                         });
                 });
                 ui.label(
-                    RichText::new(tr(
-                        de,
-                        "Die Textfelder verwenden Arial in der Größe des Originals; die genaue Schrift wird nicht eingebettet.",
-                        "The text boxes use Arial at the original size; the exact font is not embedded.",
-                    ))
+                    RichText::new(if s.curves {
+                        tr(
+                            de,
+                            "Der Text wird zu Formen mit den Umrissen der Originalschrift (nicht mehr bearbeitbar, sieht aber überall gleich aus).",
+                            "The text becomes shapes with the outlines of the original font (no longer editable, but looks the same everywhere).",
+                        )
+                    } else {
+                        tr(
+                            de,
+                            "Die Textfelder verwenden die Originalschrift, Größe, Farbe, fett und kursiv. Ist die Schrift auf dem Rechner nicht installiert, ersetzt PowerPoint sie.",
+                            "The text boxes use the original font, size, colour, bold and italic. If the font is not installed, PowerPoint replaces it.",
+                        )
+                    })
                     .small()
                     .weak(),
                 );
             });
-            not_offered(
-                ui,
-                de,
-                tr(de, "Beschädigten Text mit Texterkennung verbessern", "Improve damaged text with OCR"),
-            );
+            self.ocr_option(ui, &mut s.ocr);
         });
         ui.checkbox(&mut s.comments, tr(de, "Kommentare einschließen", "Include comments"));
         ui.checkbox(&mut s.links, tr(de, "Verweise einschließen", "Include links"));
+        s.protect.ui(ui, de);
         let pages = s.range.resolve(n, cur);
-        let (ok, cancel, _) = footer(ui, de, pages.is_some(), false, "OK");
+        let (ok, cancel, _) = footer(ui, de, pages.is_some() && s.protect.ready(), false, "OK");
         if cancel {
             return (Outcome::Close, None);
         }
         let (true, Some(pages)) = (ok, pages) else { return (Outcome::Keep, None) };
         let o = PowerPointOptions {
+            ocr: if s.ocr { self.ocr_engine() } else { None },
             whole_page_image: s.whole_page_image,
             dpi: s.dpi as f32,
             comments: s.comments,
             links: s.links,
+            curves: s.curves,
         };
+        let password = s.protect.password();
         (
             Outcome::Close,
             Some(Box::new(move |app, ctx| {
                 app.save_office(ctx, Cmd::ExportPowerPoint, "pptx", "PowerPoint", |doc, path| {
-                    crate::office::export_powerpoint(doc, path, &pages, &o)
+                    crate::office::export_powerpoint_protected(doc, path, &pages, &o, password.as_deref())
                 });
             })),
         )

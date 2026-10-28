@@ -16,6 +16,35 @@ pub struct CharInfo {
 #[derive(Debug, Clone, Default)]
 pub struct PageText {
     pub chars: Vec<CharInfo>,
+    /// Font and colour per character; empty unless asked for
+    /// (`Document::page_text_styled`).
+    pub styles: Vec<CharStyle>,
+    pub fonts: Vec<FontInfo>,
+}
+
+/// Font (index into `PageText::fonts`), fill colour, size and baseline
+/// origin (PDF space) of a character.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct CharStyle {
+    pub font: u16,
+    pub color: [u8; 3],
+    pub size: f32,
+    pub origin: [f32; 2],
+}
+
+impl CharStyle {
+    /// Same font and colour (size and place may differ).
+    pub fn same_look(&self, other: &CharStyle) -> bool {
+        self.font == other.font && self.color == other.color
+    }
+}
+
+/// A font as named in the PDF.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct FontInfo {
+    pub name: String,
+    pub bold: bool,
+    pub italic: bool,
 }
 
 /// An inclusive range of character indices.
@@ -256,7 +285,7 @@ mod tests {
         chars.push(CharInfo { ch: '\r', rect: RectF::default(), generated: true });
         chars.push(CharInfo { ch: '\n', rect: RectF::default(), generated: true });
         chars.extend(line("Second", 10.0, 80.0));
-        PageText { chars }
+        PageText { chars, ..PageText::default() }
     }
 
     #[test]
@@ -276,7 +305,10 @@ mod tests {
 
     #[test]
     fn urls_are_found() {
-        let t = PageText { chars: line("Siehe https://example.org/a. und www.test.de, danke", 0.0, 0.0) };
+        let t = PageText {
+            chars: line("Siehe https://example.org/a. und www.test.de, danke", 0.0, 0.0),
+            ..PageText::default()
+        };
         let urls: Vec<String> = t.find_urls().into_iter().map(|(_, u)| u).collect();
         assert_eq!(urls, vec!["https://example.org/a", "https://www.test.de"]);
     }

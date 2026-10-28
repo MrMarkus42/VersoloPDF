@@ -83,6 +83,7 @@ mod tests {
                     generated: false,
                 })
                 .collect(),
+            ..PageText::default()
         }
     }
 

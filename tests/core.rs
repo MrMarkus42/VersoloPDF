@@ -419,6 +419,7 @@ fn office_exports() {
         detect_tables: true,
         sheet_per_page: true,
         row_per_paragraph: false,
+        ocr: None,
     };
     mrpdf::office::export_excel(&doc, &xlsx, &[0, 1], &o).unwrap();
     let bytes = std::fs::read(&xlsx).unwrap();
@@ -430,8 +431,24 @@ fn office_exports() {
 
     // PowerPoint: text boxes over a picture of the page without its text.
     let pptx = dir.path().join("a.pptx");
-    let o = PowerPointOptions { whole_page_image: false, dpi: 72.0, comments: true, links: true };
+    let o = PowerPointOptions {
+        ocr: None,
+        whole_page_image: false,
+        dpi: 72.0,
+        comments: true,
+        links: true,
+        curves: false,
+    };
     mrpdf::office::export_powerpoint(&mut doc, &pptx, &[0, 1], &o).unwrap();
+    // Original font of the heading (Helvetica -> Arial) and colour.
+    assert!(String::from_utf8_lossy(&std::fs::read(&pptx).unwrap()).contains("typeface=\"Arial\""));
+    // "In Kurven umwandeln": shapes instead of text boxes.
+    let curves = dir.path().join("k.pptx");
+    let o = PowerPointOptions { curves: true, ..o };
+    mrpdf::office::export_powerpoint_protected(&mut doc, &curves, &[0], &o, Some("geheim")).unwrap();
+    let k = String::from_utf8_lossy(&std::fs::read(&curves).unwrap()).into_owned();
+    assert!(k.contains("<a:custGeom>") && !k.contains("<a:t>Page 1 Hello World</a:t>"), "curves");
+    assert!(k.contains("<p:modifyVerifier"));
     let bytes = std::fs::read(&pptx).unwrap();
     let s = String::from_utf8_lossy(&bytes);
     assert!(s.contains("ppt/slides/slide2.xml") && s.contains("<a:t>Page 1 Hello World</a:t>"));
@@ -454,6 +471,98 @@ fn office_exports() {
     let (a, b, c) =
         (s.find("Bericht 2026").unwrap(), s.find("<w:drawing>").unwrap(), s.find("Unter dem Bild").unwrap());
     assert!(a < b && b < c, "picture between the lines");
+}
+
+/// A page with a small two-column table ("Posten" / "Betrag").
+fn table_pdf() -> Vec<u8> {
+    use pdfium_render::prelude::*;
+    let pdfium = mrpdf::engine::pdfium().unwrap();
+    let mut doc = pdfium.create_new_pdf().unwrap();
+    let font = doc.fonts_mut().helvetica();
+    let mut page = doc.pages_mut().create_page_at_end(PdfPagePaperSize::a4()).unwrap();
+    for (i, (a, b)) in [("Posten", "Betrag"), ("Miete", "850,00"), ("Strom", "72,40")].iter().enumerate() {
+        let y = PdfPoints::new(700.0 - i as f32 * 20.0);
+        page.objects_mut()
+            .create_text_object(PdfPoints::new(72.0), y, *a, font, PdfPoints::new(11.0))
+            .unwrap();
+        page.objects_mut()
+            .create_text_object(PdfPoints::new(300.0), y, *b, font, PdfPoints::new(11.0))
+            .unwrap();
+    }
+    doc.save_to_bytes().unwrap()
+}
+
+#[test]
+fn word_layout_tables_and_protection() {
+    use mrpdf::office::WordOptions;
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let mut doc = Document::from_bytes(table_pdf(), "t.pdf", None).unwrap();
+    let flow = WordOptions { keep_layout: false, tables: true, images: true, dpi: 72.0, ocr: None };
+    let path = dir.path().join("flow.docx");
+    mrpdf::office::export_word(&mut doc, &path, &[0], &flow, Some("geheim")).unwrap();
+    let s = String::from_utf8_lossy(&std::fs::read(&path).unwrap()).into_owned();
+    assert!(s.contains("<w:tbl>") && s.contains(">Miete<") && s.contains(">850,00<"), "table");
+    assert!(s.contains("<w:writeProtection") && s.contains("w:algorithmName=\"SHA-512\""), "protection");
+
+    let layout = WordOptions { keep_layout: true, ..flow };
+    let path = dir.path().join("layout.docx");
+    mrpdf::office::export_word(&mut doc, &path, &[0], &layout, None).unwrap();
+    let s = String::from_utf8_lossy(&std::fs::read(&path).unwrap()).into_owned();
+    assert!(s.contains("<w:framePr") && s.contains("w:hAnchor=\"page\"") && s.contains("behindDoc=\"1\""));
+    assert!(s.contains("<w:pgSz w:w=\"11906\" w:h=\"16838\"/>"), "page size of the PDF page");
+    assert!(s.contains("w:ascii=\"Arial\""), "original font (Helvetica)");
+}
+
+#[test]
+fn recolor_and_replace_fonts() {
+    let _guard = common::lock();
+    let mut doc = open(1);
+    doc.recolor_pages([20, 20, 60], [255, 255, 200]).unwrap();
+    let img = doc.render_page(0, 595, 842).unwrap();
+    let paper = common::average(&img, 400, 400, 500, 500);
+    assert!(paper[0] < 40.0 && paper[2] > 40.0, "dark blue paper: {paper:?}");
+    let heading = common::average(&img, 72, 125, 250, 142);
+    assert!(heading[0] > paper[0] + 30.0, "light text: {heading:?}");
+    assert!(doc.can_undo().is_some());
+
+    let mut doc = open(1);
+    let fonts = doc.fonts().unwrap();
+    let helv = fonts.iter().find(|f| f.name.contains("Helvetica")).expect("Helvetica").name.clone();
+    assert_eq!(doc.replace_fonts(&[(helv, "Courier".into())]).unwrap(), 1);
+    assert!(doc.fonts().unwrap().iter().any(|f| f.name == "Courier"));
+    assert!(doc.page_text(0).unwrap().all_text().contains("Hello World"), "text stays readable");
+    assert_eq!(doc.replace_fonts(&[("Courier".into(), "NotAFont".into())]).unwrap(), 0);
+}
+
+/// OCR with a stand-in for Tesseract that prints fixed words.
+#[cfg(unix)]
+#[test]
+fn ocr_adds_invisible_text() {
+    use std::os::unix::fs::PermissionsExt;
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let exe = dir.path().join("tesseract");
+    std::fs::write(
+        &exe,
+        "#!/bin/sh\nprintf 'level\\tpage_num\\tblock_num\\tpar_num\\tline_num\\tword_num\\tleft\\ttop\\twidth\\theight\\tconf\\ttext\\n5\\t1\\t1\\t1\\t1\\t1\\t300\\t1500\\t400\\t60\\t95\\tGescannt\\n5\\t1\\t1\\t1\\t1\\t2\\t750\\t1500\\t300\\t60\\t93\\tWort\\n'\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let engine = mrpdf::ocr::Engine { exe, languages: "deu".into() };
+    let mut doc = Document::from_bytes(picture_pdf(), "scan.pdf", None).unwrap();
+    // The page has text, so it is skipped unless asked.
+    assert_eq!(doc.recognize_text(&[0], &engine, 300.0, true).unwrap(), 0);
+    assert_eq!(doc.recognize_text(&[0], &engine, 300.0, false).unwrap(), 2);
+    let text = doc.page_text(0).unwrap().all_text();
+    assert!(text.contains("Gescannt") && text.contains("Wort"), "{text}");
+    // Invisible: the place of the words stays white.
+    let img = doc.render_page(0, 595, 842).unwrap();
+    assert!(common::average(&img, 75, 362, 165, 372)[0] > 250.0);
+    // The export uses recognised text for pages without text.
+    let blank = Document::new_blank("leer.pdf").unwrap();
+    let words = blank.ocr_page_text(0, &engine).unwrap();
+    assert!(words.all_text().contains("Gescannt"));
 }
 
 #[test]

@@ -20,6 +20,77 @@ pub struct Segment {
     pub rect: RectF,
     /// Average character height (about the font size).
     pub size: f32,
+    /// Font and colour of its first character (styled page text only).
+    pub look: Option<Look>,
+    /// Indices of its first and last character in the page text.
+    pub chars: (usize, usize),
+}
+
+/// How a text looks: font family as installed on computers, style, colour.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Look {
+    pub family: String,
+    pub bold: bool,
+    pub italic: bool,
+    pub color: [u8; 3],
+}
+
+/// Turns a PDF font name ("ABCDEF+TimesNewRomanPS-BoldItalicMT") into the
+/// family name programs know ("Times New Roman") and its style.
+pub fn font_family(pdf_name: &str) -> (String, bool, bool) {
+    let name = match pdf_name.split_once('+') {
+        Some((prefix, rest)) if prefix.len() == 6 && prefix.chars().all(|c| c.is_ascii_uppercase()) => rest,
+        _ => pdf_name,
+    };
+    let (base, style) = match name.split_once([',', '-']) {
+        Some((b, s)) => (b, s.to_ascii_lowercase()),
+        None => (name, String::new()),
+    };
+    let lower = name.to_ascii_lowercase();
+    let bold = style.contains("bold")
+        || lower.contains("bold")
+        || style.contains("black")
+        || style.contains("heavy");
+    let italic = style.contains("italic") || style.contains("oblique") || lower.contains("italic");
+    let mut base = base.to_string();
+    for suffix in ["PSMT", "MT", "PS"] {
+        if base.len() > suffix.len() + 2 && base.ends_with(suffix) {
+            base.truncate(base.len() - suffix.len());
+            break;
+        }
+    }
+    let known = match base.to_ascii_lowercase().as_str() {
+        "helvetica" | "arial" | "arialnarrow" => Some("Arial"),
+        "times" | "timesnewroman" | "timesroman" => Some("Times New Roman"),
+        "courier" | "couriernew" => Some("Courier New"),
+        "symbol" => Some("Symbol"),
+        "zapfdingbats" => Some("Wingdings"),
+        _ => None,
+    };
+    let family = match known {
+        Some(k) => k.to_string(),
+        None => {
+            // "SegoeUI" -> "Segoe UI", "OpenSans" -> "Open Sans".
+            let mut out = String::new();
+            let mut prev_lower = false;
+            for c in base.chars() {
+                if c.is_ascii_uppercase() && prev_lower {
+                    out.push(' ');
+                }
+                prev_lower = c.is_ascii_lowercase();
+                out.push(c);
+            }
+            if out.trim().is_empty() { "Arial".into() } else { out }
+        }
+    };
+    (family, bold, italic)
+}
+
+fn look_of(page: &PageText, index: usize) -> Option<Look> {
+    let style = page.styles.get(index)?;
+    let font = page.fonts.get(usize::from(style.font))?;
+    let (family, bold, italic) = font_family(&font.name);
+    Some(Look { family, bold: bold || font.bold, italic: italic || font.italic, color: style.color })
 }
 
 /// The text of a page as lines (top to bottom) of segments (left to right).
@@ -29,6 +100,8 @@ pub fn segments(page: &PageText) -> Vec<Vec<Segment>> {
         rect: RectF,
         heights: f32,
         count: f32,
+        first: usize,
+        last: usize,
     }
     let mut lines: Vec<Vec<Segment>> = Vec::new();
     let mut line: Vec<Segment> = Vec::new();
@@ -37,7 +110,13 @@ pub fn segments(page: &PageText) -> Vec<Vec<Segment>> {
         if let Some(o) = cur.take() {
             let text = o.text.split_whitespace().collect::<Vec<_>>().join(" ");
             if !text.is_empty() {
-                line.push(Segment { text, rect: o.rect, size: o.heights / o.count.max(1.0) });
+                line.push(Segment {
+                    text,
+                    rect: o.rect,
+                    size: o.heights / o.count.max(1.0),
+                    look: look_of(page, o.first),
+                    chars: (o.first, o.last),
+                });
             }
         }
     };
@@ -47,7 +126,7 @@ pub fn segments(page: &PageText) -> Vec<Vec<Segment>> {
             lines.push(std::mem::take(line));
         }
     };
-    for c in &page.chars {
+    for (index, c) in page.chars.iter().enumerate() {
         if c.ch == '\n' || c.ch == '\r' {
             end_line(&mut cur, &mut line, &mut lines);
             continue;
@@ -68,7 +147,15 @@ pub fn segments(page: &PageText) -> Vec<Vec<Segment>> {
             let gap = r.x0 - o.rect.x1;
             if !same_line {
                 end_line(&mut cur, &mut line, &mut lines);
-            } else if gap > h * 1.2 || gap < -h * 2.0 {
+            } else if gap > h * 1.2
+                || gap < -h * 2.0
+                || (!c.ch.is_whitespace()
+                    && match (page.styles.get(index), page.styles.get(o.first)) {
+                        (Some(a), Some(b)) => !a.same_look(b),
+                        _ => false,
+                    })
+            {
+                // A gap, or another font or colour (styled text only).
                 close(&mut cur, &mut line);
             } else {
                 if c.ch.is_whitespace() {
@@ -80,6 +167,7 @@ pub fn segments(page: &PageText) -> Vec<Vec<Segment>> {
                     o.text.push(c.ch);
                     o.heights += h;
                     o.count += 1.0;
+                    o.last = index;
                 }
                 o.rect = RectF::new(
                     o.rect.x0.min(r.x0),
@@ -93,7 +181,8 @@ pub fn segments(page: &PageText) -> Vec<Vec<Segment>> {
         if c.ch.is_whitespace() {
             continue;
         }
-        cur = Some(Open { text: c.ch.to_string(), rect: r, heights: h, count: 1.0 });
+        cur =
+            Some(Open { text: c.ch.to_string(), rect: r, heights: h, count: 1.0, first: index, last: index });
     }
     end_line(&mut cur, &mut line, &mut lines);
     // Lines in reading order may jump; sort top to bottom and join lines on
@@ -254,6 +343,71 @@ pub fn table(lines: &[Vec<Segment>], detect: bool, paragraphs: bool) -> Vec<Vec<
     out
 }
 
+// ---------------------------------------------------------------------------
+// "Vor Änderung mit Kennwort schützen"
+
+/// Rounds of the password hash (as Office uses).
+pub const SPIN_COUNT: u32 = 100_000;
+
+pub(crate) fn base64(data: &[u8]) -> String {
+    const ABC: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(ABC[((n >> (18 - 6 * i)) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+/// Office "password to modify" hash: SHA-512 over salt and the UTF-16LE
+/// password, then `spin` rounds over hash and round number. Returns
+/// (hash, salt) as base64.
+pub fn modify_hash(password: &str, salt: &[u8], spin: u32) -> (String, String) {
+    use sha2::{Digest, Sha512};
+    let mut h = Sha512::new();
+    h.update(salt);
+    for unit in password.encode_utf16() {
+        h.update(unit.to_le_bytes());
+    }
+    let mut hash = h.finalize().to_vec();
+    for i in 0..spin {
+        let mut h = Sha512::new();
+        h.update(&hash);
+        h.update(i.to_le_bytes());
+        hash = h.finalize().to_vec();
+    }
+    (base64(&hash), base64(salt))
+}
+
+/// (hash, salt) with a random salt.
+fn protect(password: &str) -> (String, String) {
+    let mut salt = [0u8; 16];
+    if getrandom::fill(&mut salt).is_err() {
+        // Without random numbers the time still makes the salt unique.
+        let t = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        salt = t.to_le_bytes();
+    }
+    modify_hash(password, &salt, SPIN_COUNT)
+}
+
+/// `<w:writeProtection …/>` for word/settings.xml.
+pub(crate) fn word_write_protection(password: &str) -> String {
+    let (hash, salt) = protect(password);
+    format!(
+        "<w:writeProtection w:recommended=\"0\" w:algorithmName=\"SHA-512\" w:hashValue=\"{hash}\" w:saltValue=\"{salt}\" w:spinCount=\"{SPIN_COUNT}\"/>"
+    )
+}
+
 fn column_name(mut n: usize) -> String {
     let mut s = Vec::new();
     loop {
@@ -288,8 +442,9 @@ fn sheet_names(names: &[String]) -> Vec<String> {
     out
 }
 
-/// An Excel workbook (.xlsx) with the given sheets.
-pub fn xlsx(title: &str, sheets: &[(String, Vec<Vec<Option<Cell>>>)]) -> Vec<u8> {
+/// An Excel workbook (.xlsx) with the given sheets; with `password` it can
+/// only be changed with the password ("Schreibschutz-Kennwort").
+pub fn xlsx(title: &str, sheets: &[(String, Vec<Vec<Option<Cell>>>)], password: Option<&str>) -> Vec<u8> {
     let names = sheet_names(&sheets.iter().map(|s| s.0.clone()).collect::<Vec<_>>());
     let mut zip = ZipWriter::default();
     let mut types = String::from(
@@ -351,8 +506,14 @@ pub fn xlsx(title: &str, sheets: &[(String, Vec<Vec<Option<Cell>>>)]) -> Vec<u8>
     }
     types.push_str("</Types>");
     wb_rels.push_str("</Relationships>");
+    let sharing = password.filter(|p| !p.is_empty()).map_or(String::new(), |p| {
+        let (hash, salt) = protect(p);
+        format!(
+            "<fileSharing userName=\"MrPDF\" algorithmName=\"SHA-512\" hashValue=\"{hash}\" saltValue=\"{salt}\" spinCount=\"{SPIN_COUNT}\"/>"
+        )
+    });
     let workbook = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><sheets>{wb_sheets}</sheets></workbook>"
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">{sharing}<sheets>{wb_sheets}</sheets></workbook>"
     );
     let styles = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<styleSheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><fonts count=\"1\"><font><sz val=\"11\"/><name val=\"Calibri\"/></font></fonts><fills count=\"2\"><fill><patternFill patternType=\"none\"/></fill><fill><patternFill patternType=\"gray125\"/></fill></fills><borders count=\"1\"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/></cellStyleXfs><cellXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\"/></cellXfs><cellStyles count=\"1\"><cellStyle name=\"Normal\" xfId=\"0\" builtinId=\"0\"/></cellStyles></styleSheet>";
     zip.add("[Content_Types].xml", types.as_bytes());
@@ -374,7 +535,7 @@ fn core(title: &str) -> String {
 }
 
 /// Options of "Einstellungen für Excel-Umwandlung".
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ExcelOptions {
     pub numbers: NumberFormat,
     /// "Tabellen erkennen".
@@ -383,10 +544,46 @@ pub struct ExcelOptions {
     pub sheet_per_page: bool,
     /// "Neue Zeile in der Tabelle nutzen pro: Absatz" (false: Zeile).
     pub row_per_paragraph: bool,
+    /// "Beschädigten Text mit Texterkennung verbessern".
+    pub ocr: Option<crate::ocr::Engine>,
+}
+
+/// The page text; pages without usable text are recognised with OCR if
+/// an engine is given.
+fn text_for_export(
+    doc: &Document,
+    page: usize,
+    styled: bool,
+    ocr: Option<&crate::ocr::Engine>,
+) -> Result<PageText> {
+    let text = if styled { doc.page_text_styled(page)? } else { doc.page_text(page)? };
+    let usable = text.chars.iter().filter(|c| c.ch.is_alphanumeric() && !c.generated).count();
+    match ocr {
+        Some(engine) if usable < 10 => doc.ocr_page_text(page, engine),
+        _ => Ok(text),
+    }
+}
+
+/// Writes `pages` of `doc` as Excel workbook; `password` protects it from
+/// changes.
+pub fn export_excel_protected(
+    doc: &Document,
+    dest: &Path,
+    pages: &[usize],
+    o: &ExcelOptions,
+    password: Option<&str>,
+) -> Result<()> {
+    write_atomic(dest, &xlsx(doc.display_name(), &excel_sheets(doc, pages, o)?, password))
 }
 
 /// Writes `pages` of `doc` as Excel workbook.
 pub fn export_excel(doc: &Document, dest: &Path, pages: &[usize], o: &ExcelOptions) -> Result<()> {
+    export_excel_protected(doc, dest, pages, o, None)
+}
+
+type Sheets = Vec<(String, Vec<Vec<Option<Cell>>>)>;
+
+fn excel_sheets(doc: &Document, pages: &[usize], o: &ExcelOptions) -> Result<Sheets> {
     let mut sheets: Vec<(String, Vec<Vec<Option<Cell>>>)> = Vec::new();
     let cell = |s: String| -> Option<Cell> {
         if s.is_empty() {
@@ -396,7 +593,7 @@ pub fn export_excel(doc: &Document, dest: &Path, pages: &[usize], o: &ExcelOptio
         }
     };
     for &page in pages {
-        let lines = segments(&doc.page_text(page)?);
+        let lines = segments(&text_for_export(doc, page, false, o.ocr.as_ref())?);
         let rows: Vec<Vec<Option<Cell>>> = table(&lines, o.detect_tables, o.row_per_paragraph)
             .into_iter()
             .map(|r| r.into_iter().map(cell).collect())
@@ -412,7 +609,187 @@ pub fn export_excel(doc: &Document, dest: &Path, pages: &[usize], o: &ExcelOptio
     if sheets.is_empty() {
         return Err(Error::Invalid("no pages".into()));
     }
-    write_atomic(dest, &xlsx(doc.display_name(), &sheets))
+    Ok(sheets)
+}
+
+// ---------------------------------------------------------------------------
+// Word
+
+/// Options of "Einstellungen für Word-Umwandlung".
+#[derive(Debug, Clone, PartialEq)]
+pub struct WordOptions {
+    /// "Seitenlayout erhalten": every PDF page becomes a Word page of the
+    /// same size with its graphics as picture and the text in positioned
+    /// frames; otherwise the text flows ("Textfluss erhalten").
+    pub keep_layout: bool,
+    /// "Tabellen erkennen" (text flow).
+    pub tables: bool,
+    /// "Bilder übernehmen" (text flow).
+    pub images: bool,
+    /// Resolution of the page pictures in layout mode.
+    pub dpi: f32,
+    pub ocr: Option<crate::ocr::Engine>,
+}
+
+/// Lines with two or more segments in a row become tables.
+fn flow_blocks(
+    lines: Vec<Vec<Segment>>,
+    tables: bool,
+    heading: impl Fn(&str) -> bool,
+) -> Vec<(f32, crate::convert::DocBlock)> {
+    use crate::convert::DocBlock;
+    let top = |l: &[Segment]| l.iter().map(|s| s.rect.y1).fold(f32::MIN, f32::max);
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < lines.len() {
+        let run_end = if tables {
+            let mut j = i;
+            while j < lines.len() && lines[j].len() >= 2 {
+                j += 1;
+            }
+            j
+        } else {
+            i
+        };
+        if run_end - i >= 2 {
+            let rows = table(&lines[i..run_end], true, false);
+            out.push((top(&lines[i]), DocBlock::Table(rows)));
+            i = run_end;
+            continue;
+        }
+        let t = lines[i].iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join(" ");
+        let h = heading(&t);
+        out.push((top(&lines[i]), DocBlock::Text(t, h)));
+        i += 1;
+    }
+    out
+}
+
+/// Writes `pages` of `doc` as Word document.
+pub fn export_word(
+    doc: &mut Document,
+    dest: &Path,
+    pages: &[usize],
+    o: &WordOptions,
+    password: Option<&str>,
+) -> Result<()> {
+    if o.keep_layout {
+        return export_word_layout(doc, dest, pages, o, password);
+    }
+    export_word_flow(doc, dest, pages, o, password)
+}
+
+/// "Textfluss erhalten".
+pub fn export_word_flow(
+    doc: &Document,
+    dest: &Path,
+    pages: &[usize],
+    o: &WordOptions,
+    password: Option<&str>,
+) -> Result<()> {
+    let headings: Vec<(usize, String)> =
+        doc.heading_bookmarks()?.into_iter().map(|b| (b.page, b.title)).collect();
+    let mut out = Vec::new();
+    for &page in pages {
+        let lines = segments(&text_for_export(doc, page, false, o.ocr.as_ref())?);
+        let mut blocks = flow_blocks(lines, o.tables, |t| headings.iter().any(|(p, h)| *p == page && h == t));
+        if o.images {
+            for (rect, png) in doc.page_images(page)? {
+                blocks.push((rect.y1, crate::convert::DocBlock::Image(png, rect.width(), rect.height())));
+            }
+        }
+        blocks.sort_by(|a, b| b.0.total_cmp(&a.0));
+        out.push(blocks.into_iter().map(|(_, b)| b).collect());
+    }
+    write_atomic(dest, &crate::convert::docx_protected(doc.display_name(), &out, password))
+}
+
+fn twips(pt: f32) -> i64 {
+    (pt * 20.0).round() as i64
+}
+
+/// "Seitenlayout erhalten".
+fn export_word_layout(
+    doc: &mut Document,
+    dest: &Path,
+    pages: &[usize],
+    o: &WordOptions,
+    password: Option<&str>,
+) -> Result<()> {
+    let mut body = String::new();
+    let mut images: Vec<Vec<u8>> = Vec::new();
+    for (k, &page) in pages.iter().enumerate() {
+        let geo = *doc.geometry(page).ok_or(Error::PageOutOfRange(page))?;
+        let (w, h) = geo.view_size();
+        let scale = (o.dpi / 72.0).clamp(0.5, 600.0 / 72.0);
+        let px = |v: f32| ((v * scale).round() as u32).clamp(1, crate::document::MAX_BITMAP_EDGE);
+        let img = doc.render_background(page, px(w), px(h), true, true)?;
+        let mut png = Vec::new();
+        image::RgbaImage::from_raw(img.width, img.height, img.rgba)
+            .ok_or_else(|| Error::Invalid("image".into()))?
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .map_err(|e| Error::Invalid(e.to_string()))?;
+        images.push(png);
+        let n = images.len();
+        let (cx, cy) = (emu(w), emu(h));
+        body.push_str(&format!(
+            "<w:p><w:pPr><w:spacing w:before=\"0\" w:after=\"0\" w:line=\"20\" w:lineRule=\"exact\"/></w:pPr><w:r><w:drawing><wp:anchor distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\" simplePos=\"0\" relativeHeight=\"0\" behindDoc=\"1\" locked=\"1\" layoutInCell=\"1\" allowOverlap=\"1\"><wp:simplePos x=\"0\" y=\"0\"/><wp:positionH relativeFrom=\"page\"><wp:posOffset>0</wp:posOffset></wp:positionH><wp:positionV relativeFrom=\"page\"><wp:posOffset>0</wp:posOffset></wp:positionV><wp:extent cx=\"{cx}\" cy=\"{cy}\"/><wp:effectExtent l=\"0\" t=\"0\" r=\"0\" b=\"0\"/><wp:wrapNone/><wp:docPr id=\"{n}\" name=\"Seite {n}\"/><wp:cNvGraphicFramePr/>{}</wp:anchor></w:drawing></w:r></w:p>",
+            crate::convert::docx_picture(n, cx, cy)
+        ));
+        let text = text_for_export(doc, page, true, o.ocr.as_ref())?;
+        let recognised = text.styles.is_empty() && !text.chars.is_empty() && o.ocr.is_some();
+        for line in segments(&text) {
+            for s in line {
+                let v = geo.pdf_rect_to_view(&s.rect);
+                let size = text.styles.get(s.chars.0).map_or(s.size.max(1.0) * 0.85, |st| st.size.max(1.0));
+                let mut rpr = String::new();
+                if let Some(l) = &s.look {
+                    let f = xml_escape(&l.family);
+                    rpr.push_str(&format!("<w:rFonts w:ascii=\"{f}\" w:hAnsi=\"{f}\" w:cs=\"{f}\"/>"));
+                    if l.bold {
+                        rpr.push_str("<w:b/>");
+                    }
+                    if l.italic {
+                        rpr.push_str("<w:i/>");
+                    }
+                    rpr.push_str(&format!(
+                        "<w:color w:val=\"{:02X}{:02X}{:02X}\"/>",
+                        l.color[0], l.color[1], l.color[2]
+                    ));
+                }
+                if recognised {
+                    rpr.push_str("<w:vanish/>");
+                }
+                let half_points = ((size * 2.0).round() as i64).clamp(2, 3276);
+                rpr.push_str(&format!("<w:sz w:val=\"{half_points}\"/>"));
+                let fh = (v.height().max(size * 1.2)) * 1.1;
+                body.push_str(&format!(
+                    "<w:p><w:pPr><w:framePr w:w=\"{}\" w:h=\"{}\" w:hRule=\"exact\" w:x=\"{}\" w:y=\"{}\" w:hAnchor=\"page\" w:vAnchor=\"page\" w:wrap=\"none\"/><w:spacing w:before=\"0\" w:after=\"0\" w:line=\"{}\" w:lineRule=\"exact\"/></w:pPr><w:r><w:rPr>{rpr}</w:rPr><w:t xml:space=\"preserve\">{}</w:t></w:r></w:p>",
+                    twips(v.width() * 1.15 + size),
+                    twips(fh),
+                    twips(v.x0),
+                    twips(v.y0 - size * 0.2),
+                    twips(fh),
+                    xml_escape(&s.text)
+                ));
+            }
+        }
+        let sect = format!(
+            "<w:sectPr><w:pgSz w:w=\"{}\" w:h=\"{}\"/><w:pgMar w:top=\"0\" w:right=\"0\" w:bottom=\"0\" w:left=\"0\" w:header=\"0\" w:footer=\"0\" w:gutter=\"0\"/></w:sectPr>",
+            twips(w),
+            twips(h)
+        );
+        if k + 1 < pages.len() {
+            body.push_str(&format!("<w:p><w:pPr>{sect}</w:pPr></w:p>"));
+        } else {
+            body.push_str(&sect);
+        }
+    }
+    if pages.is_empty() {
+        return Err(Error::Invalid("no pages".into()));
+    }
+    let refs: Vec<&[u8]> = images.iter().map(Vec::as_slice).collect();
+    write_atomic(dest, &crate::convert::docx_package(doc.display_name(), &body, &refs, password))
 }
 
 // ---------------------------------------------------------------------------
@@ -427,6 +804,22 @@ pub struct SlideText {
     pub h: f32,
     pub text: String,
     pub size: f32,
+    /// Original font and colour (Arial black without).
+    pub look: Option<Look>,
+    /// "In Kurven umwandeln": the glyph outlines (slide points) shown as a
+    /// shape instead of the editable text.
+    pub outline: Option<Vec<PathOp>>,
+    /// Text recognised on a scan: transparent over the picture.
+    pub invisible: bool,
+}
+
+/// A step of an outline path.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PathOp {
+    Move(f32, f32),
+    Line(f32, f32),
+    Cubic(f32, f32, f32, f32, f32, f32),
+    Close,
 }
 
 /// One slide: page size in points, background picture (PNG) and text.
@@ -452,8 +845,51 @@ const NS: &str = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/mai
 
 const EMPTY_TREE: &str = "<p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id=\"1\" name=\"\"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/></p:spTree></p:cSld>";
 
-/// A PowerPoint presentation (.pptx) with one slide per entry.
-pub fn pptx(title: &str, slides: &[Slide]) -> Vec<u8> {
+/// A filled shape from outline paths (slide points), drawn at the place of
+/// the text.
+fn outline_shape(id: usize, ops: &[PathOp], scale: f32, ox: f32, oy: f32, fill: &str) -> String {
+    let mut xs = Vec::new();
+    let mut ys = Vec::new();
+    for op in ops {
+        match *op {
+            PathOp::Move(x, y) | PathOp::Line(x, y) => {
+                xs.push(x);
+                ys.push(y);
+            }
+            PathOp::Cubic(a, b, c, d, x, y) => {
+                xs.extend([a, c, x]);
+                ys.extend([b, d, y]);
+            }
+            PathOp::Close => {}
+        }
+    }
+    let (x0, x1) = xs.iter().fold((f32::MAX, f32::MIN), |(a, b), v| (a.min(*v), b.max(*v)));
+    let (y0, y1) = ys.iter().fold((f32::MAX, f32::MIN), |(a, b), v| (a.min(*v), b.max(*v)));
+    let (w, h) = ((x1 - x0).max(0.1), (y1 - y0).max(0.1));
+    let pt =
+        |x: f32, y: f32| format!("<a:pt x=\"{}\" y=\"{}\"/>", emu((x - x0) * scale), emu((y - y0) * scale));
+    let mut path = String::new();
+    for op in ops {
+        match *op {
+            PathOp::Move(x, y) => path.push_str(&format!("<a:moveTo>{}</a:moveTo>", pt(x, y))),
+            PathOp::Line(x, y) => path.push_str(&format!("<a:lnTo>{}</a:lnTo>", pt(x, y))),
+            PathOp::Cubic(a, b, c, d, x, y) => {
+                path.push_str(&format!("<a:cubicBezTo>{}{}{}</a:cubicBezTo>", pt(a, b), pt(c, d), pt(x, y)))
+            }
+            PathOp::Close => path.push_str("<a:close/>"),
+        }
+    }
+    let (cx, cy) = (emu(w * scale).max(1), emu(h * scale).max(1));
+    format!(
+        "<p:sp><p:nvSpPr><p:cNvPr id=\"{id}\" name=\"Kurven {id}\"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x=\"{}\" y=\"{}\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm><a:custGeom><a:avLst/><a:gdLst/><a:ahLst/><a:cxnLst/><a:rect l=\"0\" t=\"0\" r=\"r\" b=\"b\"/><a:pathLst><a:path w=\"{cx}\" h=\"{cy}\">{path}</a:path></a:pathLst></a:custGeom>{fill}<a:ln><a:noFill/></a:ln></p:spPr></p:sp>",
+        emu(ox + x0 * scale),
+        emu(oy + y0 * scale)
+    )
+}
+
+/// A PowerPoint presentation (.pptx) with one slide per entry; with
+/// `password` it can only be changed with the password.
+pub fn pptx(title: &str, slides: &[Slide], password: Option<&str>) -> Vec<u8> {
     let (sw, sh) = slides.first().map_or((960.0, 540.0), |s| (s.width.max(72.0), s.height.max(72.0)));
     let mut zip = ZipWriter::default();
     let mut types = String::from(
@@ -495,9 +931,31 @@ pub fn pptx(title: &str, slides: &[Slide]) -> Vec<u8> {
             id += 1;
         }
         for t in &slide.texts {
+            let color = t.look.as_ref().map_or([0, 0, 0], |l| l.color);
+            let alpha = if t.invisible { "<a:alpha val=\"0\"/>" } else { "" };
+            let fill = format!(
+                "<a:solidFill><a:srgbClr val=\"{:02X}{:02X}{:02X}\">{alpha}</a:srgbClr></a:solidFill>",
+                color[0], color[1], color[2]
+            );
+            if let Some(ops) = t.outline.as_ref().filter(|o| !o.is_empty()) {
+                shapes.push_str(&outline_shape(id, ops, scale, ox, oy, &fill));
+                id += 1;
+                continue;
+            }
             let size = ((t.size * scale * 100.0).round() as i64).clamp(100, 400_000);
+            let (family, style) = match &t.look {
+                Some(l) => (
+                    xml_escape(&l.family),
+                    format!(
+                        "{}{}",
+                        if l.bold { " b=\"1\"" } else { "" },
+                        if l.italic { " i=\"1\"" } else { "" }
+                    ),
+                ),
+                None => ("Arial".to_string(), String::new()),
+            };
             shapes.push_str(&format!(
-                "<p:sp><p:nvSpPr><p:cNvPr id=\"{id}\" name=\"Text {id}\"/><p:cNvSpPr txBox=\"1\"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x=\"{}\" y=\"{}\"/><a:ext cx=\"{}\" cy=\"{}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom><a:noFill/></p:spPr><p:txBody><a:bodyPr wrap=\"none\" lIns=\"0\" tIns=\"0\" rIns=\"0\" bIns=\"0\" rtlCol=\"0\"><a:noAutofit/></a:bodyPr><a:lstStyle/><a:p><a:r><a:rPr lang=\"de-DE\" sz=\"{size}\" dirty=\"0\"><a:latin typeface=\"Arial\"/></a:rPr><a:t>{}</a:t></a:r></a:p></p:txBody></p:sp>",
+                "<p:sp><p:nvSpPr><p:cNvPr id=\"{id}\" name=\"Text {id}\"/><p:cNvSpPr txBox=\"1\"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x=\"{}\" y=\"{}\"/><a:ext cx=\"{}\" cy=\"{}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom><a:noFill/></p:spPr><p:txBody><a:bodyPr wrap=\"none\" lIns=\"0\" tIns=\"0\" rIns=\"0\" bIns=\"0\" rtlCol=\"0\"><a:noAutofit/></a:bodyPr><a:lstStyle/><a:p><a:r><a:rPr lang=\"de-DE\" sz=\"{size}\"{style} dirty=\"0\">{fill}<a:latin typeface=\"{family}\"/><a:cs typeface=\"{family}\"/></a:rPr><a:t>{}</a:t></a:r></a:p></p:txBody></p:sp>",
                 emu(ox + t.x * scale),
                 emu(oy + t.y * scale),
                 emu((t.w * scale).max(1.0)),
@@ -529,8 +987,14 @@ pub fn pptx(title: &str, slides: &[Slide]) -> Vec<u8> {
     }
     types.push_str("</Types>");
     pres_rels.push_str("</Relationships>");
+    let verifier = password.filter(|p| !p.is_empty()).map_or(String::new(), |p| {
+        let (hash, salt) = protect(p);
+        format!(
+            "<p:modifyVerifier algorithmName=\"SHA-512\" hashValue=\"{hash}\" saltValue=\"{salt}\" spinValue=\"{SPIN_COUNT}\"/>"
+        )
+    });
     let presentation = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<p:presentation {NS}><p:sldMasterIdLst><p:sldMasterId id=\"2147483648\" r:id=\"rIdMaster\"/></p:sldMasterIdLst><p:sldIdLst>{sld_ids}</p:sldIdLst><p:sldSz cx=\"{}\" cy=\"{}\"/><p:notesSz cx=\"6858000\" cy=\"9144000\"/></p:presentation>",
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<p:presentation {NS}><p:sldMasterIdLst><p:sldMasterId id=\"2147483648\" r:id=\"rIdMaster\"/></p:sldMasterIdLst><p:sldIdLst>{sld_ids}</p:sldIdLst><p:sldSz cx=\"{}\" cy=\"{}\"/><p:notesSz cx=\"6858000\" cy=\"9144000\"/>{verifier}</p:presentation>",
         emu(sw).max(914_400),
         emu(sh).max(914_400)
     );
@@ -556,8 +1020,11 @@ pub fn pptx(title: &str, slides: &[Slide]) -> Vec<u8> {
 }
 
 /// Options of "Einstellungen für PowerPoint-Umwandlung".
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PowerPointOptions {
+    /// "Beschädigten Text mit Texterkennung verbessern": recognised text is
+    /// put invisibly over the picture of the scanned page.
+    pub ocr: Option<crate::ocr::Engine>,
     /// "Gesamten Seiteninhalt in ein Bild umwandeln" (no editable text).
     pub whole_page_image: bool,
     /// Resolution of the pictures in dpi.
@@ -566,6 +1033,8 @@ pub struct PowerPointOptions {
     pub comments: bool,
     /// "Verweise einschließen".
     pub links: bool,
+    /// "In Kurven umwandeln": the text as outlines instead of text boxes.
+    pub curves: bool,
 }
 
 /// Writes `pages` of `doc` as PowerPoint presentation: each page becomes a
@@ -576,6 +1045,17 @@ pub fn export_powerpoint(
     dest: &Path,
     pages: &[usize],
     o: &PowerPointOptions,
+) -> Result<()> {
+    export_powerpoint_protected(doc, dest, pages, o, None)
+}
+
+/// As [`export_powerpoint`]; `password` protects the file from changes.
+pub fn export_powerpoint_protected(
+    doc: &mut Document,
+    dest: &Path,
+    pages: &[usize],
+    o: &PowerPointOptions,
+    password: Option<&str>,
 ) -> Result<()> {
     let mut slides = Vec::new();
     for &page in pages {
@@ -591,10 +1071,35 @@ pub fn export_powerpoint(
             .map_err(|e| Error::Invalid(e.to_string()))?;
         let mut slide = Slide { width: w, height: h, background: Some(png), ..Slide::default() };
         if !o.whole_page_image {
-            for line in segments(&doc.page_text(page)?) {
+            let text = text_for_export(doc, page, true, o.ocr.as_ref())?;
+            // Recognised text (no styles) lies invisibly over the scan.
+            let recognised = text.styles.is_empty() && !text.chars.is_empty() && o.ocr.is_some();
+            let fonts = if o.curves && !recognised {
+                Some(crate::outlines::Fonts::new(doc.font_programs(page)?))
+            } else {
+                None
+            };
+            for line in segments(&text) {
                 for s in line {
                     let v = geo.pdf_rect_to_view(&s.rect);
-                    let size = s.size.max(1.0) * 0.85;
+                    // The real font size where known, else from the glyph height.
+                    let size =
+                        text.styles.get(s.chars.0).map_or(s.size.max(1.0) * 0.85, |st| st.size.max(1.0));
+                    let outline = fonts.as_ref().map(|fonts| {
+                        let mut ops = Vec::new();
+                        for i in s.chars.0..=s.chars.1 {
+                            let (Some(c), Some(st)) = (text.chars.get(i), text.styles.get(i)) else {
+                                continue;
+                            };
+                            if c.ch.is_whitespace() || c.generated {
+                                continue;
+                            }
+                            let name = text.fonts.get(usize::from(st.font)).map_or("", |f| f.name.as_str());
+                            let p = geo.pdf_to_view(crate::geometry::PointF::new(st.origin[0], st.origin[1]));
+                            fonts.glyph(name, c.ch, st.size.max(1.0), p.x, p.y, &mut ops);
+                        }
+                        ops
+                    });
                     slide.texts.push(SlideText {
                         x: v.x0,
                         y: v.y0 - size * 0.15,
@@ -602,6 +1107,9 @@ pub fn export_powerpoint(
                         h: v.height().max(size * 1.2),
                         text: s.text,
                         size,
+                        look: s.look,
+                        outline,
+                        invisible: recognised,
                     });
                 }
             }
@@ -623,7 +1131,7 @@ pub fn export_powerpoint(
     if slides.is_empty() {
         return Err(Error::Invalid("no pages".into()));
     }
-    write_atomic(dest, &pptx(doc.display_name(), &slides))
+    write_atomic(dest, &pptx(doc.display_name(), &slides, password))
 }
 
 #[cfg(test)]
@@ -648,7 +1156,13 @@ mod tests {
     }
 
     fn seg(text: &str, x: f32, y: f32) -> Segment {
-        Segment { text: text.into(), rect: RectF::new(x, y, x + 30.0, y + 10.0), size: 10.0 }
+        Segment {
+            text: text.into(),
+            rect: RectF::new(x, y, x + 30.0, y + 10.0),
+            size: 10.0,
+            look: None,
+            chars: (0, 0),
+        }
     }
 
     #[test]
@@ -673,21 +1187,65 @@ mod tests {
     #[test]
     fn office_files_are_zips_with_their_parts() {
         let rows = vec![vec![Some(Cell::Text("a<b".into())), Some(Cell::Number(1.5))]];
-        let x = xlsx("T", &[("Seite 1".into(), rows)]);
+        let x = xlsx("T", &[("Seite 1".into(), rows)], Some("geheim"));
         let s = String::from_utf8_lossy(&x);
         assert_eq!(&x[..4], b"PK\x03\x04");
         assert!(s.contains("xl/worksheets/sheet1.xml") && s.contains("a&lt;b") && s.contains("<v>1.5</v>"));
+        assert!(s.contains("<fileSharing userName=\"MrPDF\" algorithmName=\"SHA-512\""));
+        let look = Look { family: "Times New Roman".into(), bold: true, italic: false, color: [200, 0, 0] };
+        let text = |outline| SlideText {
+            x: 10.0,
+            y: 10.0,
+            w: 50.0,
+            h: 12.0,
+            text: "Hallo".into(),
+            size: 10.0,
+            look: Some(look.clone()),
+            outline,
+            invisible: false,
+        };
         let slide = Slide {
             width: 595.0,
             height: 842.0,
             background: Some(vec![1, 2, 3]),
-            texts: vec![SlideText { x: 10.0, y: 10.0, w: 50.0, h: 12.0, text: "Hallo".into(), size: 10.0 }],
+            texts: vec![
+                text(None),
+                text(Some(vec![
+                    PathOp::Move(10.0, 10.0),
+                    PathOp::Line(20.0, 10.0),
+                    PathOp::Line(15.0, 20.0),
+                    PathOp::Close,
+                ])),
+            ],
             links: vec![(0.0, 0.0, 10.0, 10.0, "https://example.org/?a=1&b=2".into())],
         };
-        let p = pptx("T", &[slide.clone(), slide]);
+        let p = pptx("T", &[slide.clone(), slide], Some("geheim"));
         let s = String::from_utf8_lossy(&p);
         assert!(s.contains("ppt/slides/slide2.xml") && s.contains("<a:t>Hallo</a:t>"));
         assert!(s.contains("a=1&amp;b=2") && s.contains("ppt/media/image1.png"));
         assert!(s.contains("<p:sldSz cx=\"7556500\" cy=\"10693400\"/>"));
+        assert!(s.contains("b=\"1\"") && s.contains("typeface=\"Times New Roman\"") && s.contains("C80000"));
+        assert!(s.contains("<a:custGeom>") && s.contains("<a:close/>"));
+        assert!(s.contains("<p:modifyVerifier algorithmName=\"SHA-512\""));
+    }
+
+    #[test]
+    fn password_hash_and_font_names() {
+        // Known answer: SHA-512 of salt + UTF-16LE password, no extra rounds.
+        let (hash, salt) = modify_hash("a", &[0u8; 16], 0);
+        assert_eq!(salt, "AAAAAAAAAAAAAAAAAAAAAA==");
+        assert_eq!(hash.len(), 88);
+        let (again, _) = modify_hash("a", &[0u8; 16], 0);
+        assert_eq!(hash, again);
+        assert_ne!(modify_hash("b", &[0u8; 16], 0).0, hash);
+        assert_eq!(base64(b"Man"), "TWFu");
+        assert_eq!(base64(b"Ma"), "TWE=");
+        assert_eq!(
+            font_family("ABCDEF+TimesNewRomanPS-BoldItalicMT"),
+            ("Times New Roman".into(), true, true)
+        );
+        assert_eq!(font_family("Helvetica-Bold"), ("Arial".into(), true, false));
+        assert_eq!(font_family("SegoeUI"), ("Segoe UI".into(), false, false));
+        assert_eq!(font_family("Calibri"), ("Calibri".into(), false, false));
     }
 }

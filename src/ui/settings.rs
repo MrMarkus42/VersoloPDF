@@ -169,6 +169,10 @@ pub struct Settings {
     pub highlight_off: Vec<FieldGroup>,
     /// "Nur erforderliche Felder".
     pub highlight_required_only: bool,
+    /// Texterkennung: path of the Tesseract program (None: search it) and
+    /// the languages ("deu+eng").
+    pub tesseract: Option<PathBuf>,
+    pub ocr_languages: String,
 }
 
 /// Kinds of form fields in "Felder hervorheben ▾".
@@ -346,6 +350,8 @@ impl Default for Settings {
             // Buttons and combo boxes are not highlighted.
             highlight_off: vec![FieldGroup::Buttons, FieldGroup::ComboBoxes],
             highlight_required_only: false,
+            tesseract: None,
+            ocr_languages: "deu+eng".into(),
         }
     }
 }
