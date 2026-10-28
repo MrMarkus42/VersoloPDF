@@ -195,14 +195,14 @@ fn items(page: Page) -> &'static [Item] {
                     item(
                         "In Microsoft-Excel-Tabelle",
                         "To Microsoft Excel sheet",
-                        Icon::Export,
-                        Not(Unavailable::Office),
+                        Icon::Thumbnails,
+                        Run(Cmd::ExportExcel),
                     ),
                     item(
                         "In Microsoft-PowerPoint-Präsentation",
                         "To Microsoft PowerPoint presentation",
-                        Icon::Export,
-                        Not(Unavailable::Office),
+                        Icon::Fullscreen,
+                        Run(Cmd::ExportPowerPoint),
                     ),
                     item("In Text", "To text", Icon::TextFile, Run(Cmd::ExportText)),
                 ]

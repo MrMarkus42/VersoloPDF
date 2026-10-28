@@ -29,6 +29,7 @@ pub mod import;
 pub mod marks;
 pub mod media;
 pub mod model;
+pub mod office;
 pub mod optimize;
 pub mod outline;
 pub mod pages;

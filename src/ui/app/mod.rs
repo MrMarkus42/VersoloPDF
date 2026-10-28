@@ -14,6 +14,7 @@ mod formdata;
 mod labels_dialog;
 mod layout_dialogs;
 mod marks_dialogs;
+mod office_dialogs;
 mod optimize_dialog;
 mod outline_tools;
 mod page_dialogs;
@@ -165,7 +166,13 @@ pub enum Dialog {
     /// "Einstellungen für Word-Umwandlung".
     ExportWord {
         range: crate::ui::pickers::PageRange,
+        /// "Bilder übernehmen".
+        images: bool,
     },
+    /// "Einstellungen für Excel-Umwandlung".
+    ExportExcel(Box<office_dialogs::ExcelState>),
+    /// "Einstellungen für PowerPoint-Umwandlung".
+    ExportPowerPoint(Box<office_dialogs::PowerPointState>),
     /// "Einstellungen" (Strg+K).
     Settings(Box<settings_dialog::SettingsPage>),
     /// "Drucken" / "Alle drucken".

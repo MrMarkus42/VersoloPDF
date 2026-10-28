@@ -465,7 +465,7 @@ pub fn text_export(pages: &[String]) -> String {
     out
 }
 
-fn xml_escape(s: &str) -> String {
+pub(crate) fn xml_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         match c {
@@ -481,31 +481,66 @@ fn xml_escape(s: &str) -> String {
     out
 }
 
-/// A minimal Word document: one paragraph per text line, a page break
-/// between PDF pages. `lines` holds (text, is_heading) per page.
-pub fn docx(title: &str, pages: &[Vec<(String, bool)>]) -> Vec<u8> {
+/// Content of a Word document page.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DocBlock {
+    /// A paragraph; true for a heading.
+    Text(String, bool),
+    /// A PNG picture and its size in points.
+    Image(Vec<u8>, f32, f32),
+}
+
+/// Widest picture: the text width of an A4 page with 2 cm margins.
+const DOCX_TEXT_WIDTH: f32 = 481.0;
+
+/// A minimal Word document: one paragraph per text line, pictures in
+/// between, a page break between PDF pages.
+pub fn docx(title: &str, pages: &[Vec<DocBlock>]) -> Vec<u8> {
     let mut body = String::new();
+    let mut images: Vec<&[u8]> = Vec::new();
     for (i, page) in pages.iter().enumerate() {
         if i > 0 {
             body.push_str("<w:p><w:r><w:br w:type=\"page\"/></w:r></w:p>");
         }
-        for (line, heading) in page {
-            body.push_str("<w:p>");
-            if *heading {
-                body.push_str("<w:pPr><w:pStyle w:val=\"Heading1\"/></w:pPr>");
+        for block in page {
+            match block {
+                DocBlock::Text(line, heading) => {
+                    body.push_str("<w:p>");
+                    if *heading {
+                        body.push_str("<w:pPr><w:pStyle w:val=\"Heading1\"/></w:pPr>");
+                    }
+                    body.push_str("<w:r><w:t xml:space=\"preserve\">");
+                    body.push_str(&xml_escape(line));
+                    body.push_str("</w:t></w:r></w:p>");
+                }
+                DocBlock::Image(png, w, h) => {
+                    images.push(png);
+                    let n = images.len();
+                    let scale = (DOCX_TEXT_WIDTH / w.max(1.0)).min(1.0);
+                    let cx = (w * scale * 12_700.0).round().max(12_700.0) as i64;
+                    let cy = (h * scale * 12_700.0).round().max(12_700.0) as i64;
+                    body.push_str(&format!(
+                        "<w:p><w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\"><wp:extent cx=\"{cx}\" cy=\"{cy}\"/><wp:docPr id=\"{n}\" name=\"Bild {n}\"/><a:graphic xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:pic xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:nvPicPr><pic:cNvPr id=\"{n}\" name=\"Bild {n}\"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed=\"rIdImg{n}\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>"
+                    ));
+                }
             }
-            body.push_str("<w:r><w:t xml:space=\"preserve\">");
-            body.push_str(&xml_escape(line));
-            body.push_str("</w:t></w:r></w:p>");
         }
     }
     let document = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body>{body}<w:sectPr><w:pgSz w:w=\"11906\" w:h=\"16838\"/><w:pgMar w:top=\"1134\" w:right=\"1134\" w:bottom=\"1134\" w:left=\"1134\" w:header=\"709\" w:footer=\"709\" w:gutter=\"0\"/></w:sectPr></w:body></w:document>"
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\"><w:body>{body}<w:sectPr><w:pgSz w:w=\"11906\" w:h=\"16838\"/><w:pgMar w:top=\"1134\" w:right=\"1134\" w:bottom=\"1134\" w:left=\"1134\" w:header=\"709\" w:footer=\"709\" w:gutter=\"0\"/></w:sectPr></w:body></w:document>"
     );
     let styles = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<w:styles xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii=\"Calibri\" w:hAnsi=\"Calibri\" w:cs=\"Calibri\"/><w:sz w:val=\"22\"/></w:rPr></w:rPrDefault></w:docDefaults><w:style w:type=\"paragraph\" w:default=\"1\" w:styleId=\"Normal\"><w:name w:val=\"Normal\"/></w:style><w:style w:type=\"paragraph\" w:styleId=\"Heading1\"><w:name w:val=\"heading 1\"/><w:basedOn w:val=\"Normal\"/><w:next w:val=\"Normal\"/><w:pPr><w:spacing w:before=\"240\" w:after=\"120\"/><w:outlineLvl w:val=\"0\"/></w:pPr><w:rPr><w:b/><w:sz w:val=\"32\"/></w:rPr></w:style></w:styles>";
-    let content_types = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/><Override PartName=\"/word/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml\"/><Override PartName=\"/docProps/core.xml\" ContentType=\"application/vnd.openxmlformats-package.core-properties+xml\"/></Types>";
+    let content_types = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Default Extension=\"png\" ContentType=\"image/png\"/><Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/><Override PartName=\"/word/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml\"/><Override PartName=\"/docProps/core.xml\" ContentType=\"application/vnd.openxmlformats-package.core-properties+xml\"/></Types>";
     let rels = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"word/document.xml\"/><Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties\" Target=\"docProps/core.xml\"/></Relationships>";
-    let doc_rels = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/></Relationships>";
+    let mut doc_rels = String::from(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>",
+    );
+    for n in 1..=images.len() {
+        doc_rels.push_str(&format!(
+            "<Relationship Id=\"rIdImg{n}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/image\" Target=\"media/image{n}.png\"/>"
+        ));
+    }
+    doc_rels.push_str("</Relationships>");
     let core = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<cp:coreProperties xmlns:cp=\"http://schemas.openxmlformats.org/package/2006/metadata/core-properties\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:title>{}</dc:title><dc:creator>MrPDF</dc:creator></cp:coreProperties>",
         xml_escape(title)
@@ -517,6 +552,9 @@ pub fn docx(title: &str, pages: &[Vec<(String, bool)>]) -> Vec<u8> {
     zip.add("word/_rels/document.xml.rels", doc_rels.as_bytes());
     zip.add("word/styles.xml", styles.as_bytes());
     zip.add("word/document.xml", document.as_bytes());
+    for (i, png) in images.iter().enumerate() {
+        zip.add(&format!("word/media/image{}.png", i + 1), png);
+    }
     zip.finish()
 }
 
@@ -539,14 +577,14 @@ pub fn crc32(data: &[u8]) -> u32 {
 
 /// A ZIP archive with uncompressed ("stored") entries.
 #[derive(Default)]
-struct ZipWriter {
+pub(crate) struct ZipWriter {
     data: Vec<u8>,
     central: Vec<u8>,
     count: u16,
 }
 
 impl ZipWriter {
-    fn add(&mut self, name: &str, content: &[u8]) {
+    pub(crate) fn add(&mut self, name: &str, content: &[u8]) {
         let crc = crc32(content);
         let offset = self.data.len() as u32;
         let size = content.len() as u32;
@@ -580,7 +618,7 @@ impl ZipWriter {
         self.count += 1;
     }
 
-    fn finish(mut self) -> Vec<u8> {
+    pub(crate) fn finish(mut self) -> Vec<u8> {
         let offset = self.data.len() as u32;
         let size = self.central.len() as u32;
         self.data.extend_from_slice(&self.central);
@@ -611,8 +649,8 @@ mod tests {
         let bytes = docx(
             "T",
             &[
-                vec![("Überschrift".into(), true), ("a < b & c".into(), false)],
-                vec![("Seite 2".into(), false)],
+                vec![DocBlock::Text("Überschrift".into(), true), DocBlock::Text("a < b & c".into(), false)],
+                vec![DocBlock::Text("Seite 2".into(), false)],
             ],
         );
         assert_eq!(&bytes[..4], b"PK\x03\x04");

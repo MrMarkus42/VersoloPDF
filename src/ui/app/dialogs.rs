@@ -351,8 +351,18 @@ impl MrPdfApp {
                         outcome = o;
                         action = a;
                     }
-                    Dialog::ExportWord { range } => {
-                        let (o, a) = self.export_word_dialog(ui, range);
+                    Dialog::ExportWord { range, images } => {
+                        let (o, a) = self.export_word_dialog(ui, range, images);
+                        outcome = o;
+                        action = a;
+                    }
+                    Dialog::ExportExcel(state) => {
+                        let (o, a) = self.excel_dialog(ui, state);
+                        outcome = o;
+                        action = a;
+                    }
+                    Dialog::ExportPowerPoint(state) => {
+                        let (o, a) = self.powerpoint_dialog(ui, state);
                         outcome = o;
                         action = a;
                     }

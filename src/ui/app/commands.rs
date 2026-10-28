@@ -44,6 +44,8 @@ pub enum Unavailable {
     Pane,
     Highlighting,
     Layers,
+    ScanCleanup,
+    Recolor,
 }
 
 impl Unavailable {
@@ -110,6 +112,14 @@ impl Unavailable {
             Unavailable::Layers => (
                 "Ebenen (optionale Inhalte) werden noch nicht unterstützt.",
                 "Layers (optional content) are not supported yet.",
+            ),
+            Unavailable::ScanCleanup => (
+                "Das Aufbereiten gescannter Seiten (begradigen, säubern) ist noch nicht enthalten.",
+                "Cleaning up scanned pages (deskew, despeckle) is not included yet.",
+            ),
+            Unavailable::Recolor => (
+                "Seiten dauerhaft neu einzufärben ist noch nicht enthalten. Zum Lesen gibt es „Dokumentfarben ersetzen“ unter Ansicht.",
+                "Recolouring pages permanently is not included yet. For reading use \"Replace document colours\" in View.",
             ),
         };
         if lang == Language::German { de } else { en }
@@ -246,6 +256,8 @@ pub enum Cmd {
     ExportImages,
     ExportText,
     ExportWord,
+    ExportExcel,
+    ExportPowerPoint,
     Grayscale,
     // Review / accessibility
     WordCount,
@@ -473,6 +485,8 @@ pub const SEARCHABLE: &[Cmd] = &[
     Cmd::ExportImages,
     Cmd::ExportText,
     Cmd::ExportWord,
+    Cmd::ExportExcel,
+    Cmd::ExportPowerPoint,
     Cmd::Grayscale,
     Cmd::WordCount,
     Cmd::CompareDocuments,
@@ -681,6 +695,8 @@ impl Cmd {
             ExportImages => ("In Bilder", "To images"),
             ExportText => ("In Text", "To text"),
             ExportWord => ("In MS Word", "To MS Word"),
+            ExportExcel => ("In MS Excel", "To MS Excel"),
+            ExportPowerPoint => ("In MS PowerPoint", "To MS PowerPoint"),
             Grayscale => ("Farben umwandeln", "Convert colours"),
             WordCount => ("Wörter zählen", "Count words"),
             CompareDocuments => ("Dokumente vergleichen", "Compare documents"),
@@ -830,6 +846,8 @@ impl Cmd {
             ExportImages => Icon::Image,
             ExportText => Icon::TextFile,
             ExportWord => Icon::WordFile,
+            ExportExcel => Icon::Thumbnails,
+            ExportPowerPoint => Icon::Fullscreen,
             Grayscale => Icon::Theme,
             WordCount => Icon::Count,
             CompareDocuments => Icon::Compare,

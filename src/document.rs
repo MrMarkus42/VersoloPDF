@@ -569,6 +569,33 @@ impl Document {
         Ok(RenderedImage { width: w, height: h, rgba })
     }
 
+    /// Renders a page into `width` × `height` pixels for an export. With
+    /// `without_text` the text objects are left out (they become editable
+    /// text elsewhere); the document itself is not changed.
+    pub fn render_background(
+        &mut self,
+        index: usize,
+        width: u32,
+        height: u32,
+        without_text: bool,
+        annotations: bool,
+    ) -> Result<RenderedImage> {
+        let opts = RenderOptions { annotations, ..RenderOptions::default() };
+        if !without_text {
+            return self.render_tile(index, width, height, 0, 0, width, height, opts);
+        }
+        self.sync_bytes()?;
+        let copy = Self::load(self.bytes.clone(), self.password.as_deref())?;
+        let mut page = copy.pages().get(page_index(index)?)?;
+        let objects = page.objects_mut();
+        for i in (0..objects.len()).rev() {
+            if objects.get(i).is_ok_and(|o| o.object_type() == PdfPageObjectType::Text) {
+                let _ = objects.remove_object_at_index(i);
+            }
+        }
+        self.render_page_into(&page, width, height, 0, 0, width, height, opts)
+    }
+
     // -----------------------------------------------------------------
     // Content inspection
 
@@ -1877,25 +1904,64 @@ impl Document {
         self.export_word_pages(dest, &(0..self.page_count()).collect::<Vec<_>>())
     }
 
-    /// Writes the text of `selection` as a Word document.
+    /// Writes the text of `selection` as a Word document, with the pictures
+    /// of the pages where they stand.
     pub fn export_word_pages(&self, dest: &Path, selection: &[usize]) -> Result<()> {
+        self.export_word_with(dest, selection, true)
+    }
+
+    /// Word export; `images`: also transfer the pictures of the pages.
+    pub fn export_word_with(&self, dest: &Path, selection: &[usize], images: bool) -> Result<()> {
+        use crate::convert::DocBlock;
         let headings: Vec<(usize, String)> =
             self.heading_bookmarks()?.into_iter().map(|b| (b.page, b.title)).collect();
         let mut pages = Vec::new();
         for &page in selection {
             self.check_page(page)?;
-            let lines = self
-                .page_text(page)?
-                .lines()
+            // (top edge, block) sorted from the top of the page.
+            let mut blocks: Vec<(f32, DocBlock)> = crate::office::segments(&self.page_text(page)?)
                 .into_iter()
-                .map(|(t, _)| {
+                .map(|line| {
+                    let top = line.iter().map(|s| s.rect.y1).fold(f32::MIN, f32::max);
+                    let t = line.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join(" ");
                     let heading = headings.iter().any(|(p, h)| *p == page && *h == t);
-                    (t, heading)
+                    (top, DocBlock::Text(t, heading))
                 })
                 .collect();
-            pages.push(lines);
+            if images {
+                for (rect, png) in self.page_images(page)? {
+                    blocks.push((rect.y1, DocBlock::Image(png, rect.width(), rect.height())));
+                }
+            }
+            blocks.sort_by(|a, b| b.0.total_cmp(&a.0));
+            pages.push(blocks.into_iter().map(|(_, b)| b).collect());
         }
         write_atomic(dest, &crate::convert::docx(&self.display_name, &pages))
+    }
+
+    /// The pictures on a page as PNG with their place (PDF space); tiny
+    /// pictures are skipped.
+    pub fn page_images(&self, index: usize) -> Result<Vec<(RectF, Vec<u8>)>> {
+        let page = self.page(index)?;
+        let mut out = Vec::new();
+        for object in page.objects().iter().take(10_000) {
+            let Some(image) = object.as_image_object() else { continue };
+            let Ok(quad) = object.bounds() else { continue };
+            let rect = to_rectf(&quad.to_rect());
+            if rect.width() < 12.0 || rect.height() < 12.0 {
+                continue;
+            }
+            let Ok(raw) = image.get_raw_image() else { continue };
+            let raw = if raw.width().max(raw.height()) > 3000 { raw.thumbnail(3000, 3000) } else { raw };
+            let mut png = Vec::new();
+            if raw.to_rgba8().write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).is_ok() {
+                out.push((rect, png));
+            }
+            if out.len() >= 200 {
+                break;
+            }
+        }
+        Ok(out)
     }
 
     pub fn to_grayscale(&mut self) -> Result<()> {

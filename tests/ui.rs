@@ -574,6 +574,35 @@ fn form_tab_features() {
 }
 
 #[test]
+fn convert_tab_dialogs() {
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let file = sample_file(&dir, 2);
+    let mut h = harness(vec![file], false);
+    h.run_steps(10);
+    tab(&mut h, "Umwandeln");
+    save(&mut h, "umw-01-ribbon");
+    h.get_by_label("In MS Excel").click();
+    h.run_steps(3);
+    assert!(h.query_by_label("Tabellen erkennen").is_some());
+    save(&mut h, "umw-02-excel");
+    h.get_all_by_label("Abbrechen").last().unwrap().click();
+    h.run_steps(2);
+    h.get_by_label("In MS PowerPoint").click();
+    h.run_steps(3);
+    assert!(h.query_by_label("Verweise einschließen").is_some());
+    save(&mut h, "umw-03-powerpoint");
+    h.get_all_by_label("Abbrechen").last().unwrap().click();
+    h.run_steps(2);
+    h.get_by_label("In MS Word").click();
+    h.run_steps(3);
+    assert!(h.query_by_label("Bilder übernehmen").is_some());
+    save(&mut h, "umw-04-word");
+    h.get_all_by_label("Abbrechen").last().unwrap().click();
+    h.run_steps(2);
+}
+
+#[test]
 fn delete_key_removes_selected_annotation() {
     let _guard = common::lock();
     let dir = tempfile::tempdir().unwrap();

@@ -57,7 +57,11 @@ impl MrPdfApp {
                     preset_name: String::new(),
                 })));
             }
-            Cmd::ExportWord => self.dialog = Some(Dialog::ExportWord { range: PageRange::all() }),
+            Cmd::ExportWord => {
+                self.dialog = Some(Dialog::ExportWord { range: PageRange::all(), images: true })
+            }
+            Cmd::ExportExcel => self.open_excel_export(),
+            Cmd::ExportPowerPoint => self.open_powerpoint_export(),
             _ => return false,
         }
         true
@@ -293,6 +297,7 @@ impl MrPdfApp {
         &mut self,
         ui: &mut Ui,
         range: &mut PageRange,
+        images: &mut bool,
     ) -> (Outcome, Option<Action>) {
         let de = self.ex_de();
         let (n, cur) = self.active_tab().map_or((0, 0), |t| (t.doc.page_count(), t.current_page));
@@ -316,12 +321,13 @@ impl MrPdfApp {
                     ));
                 ui.radio_value(&mut flow, true, tr(de, "Textfluss erhalten", "Keep text flow"));
             });
+            ui.checkbox(images, tr(de, "Bilder übernehmen", "Transfer pictures"));
         });
         ui.label(
             RichText::new(tr(
                 de,
-                "Überschriften werden an der Schriftgröße erkannt. Bilder, Tabellen und Kommentare werden nicht übernommen.",
-                "Headings are recognised by their font size. Images, tables and comments are not transferred.",
+                "Überschriften werden an der Schriftgröße erkannt, Bilder an ihrer Stelle im Text eingefügt. Tabellen und Kommentare werden nicht übernommen.",
+                "Headings are recognised by their font size, pictures are placed where they stand. Tables and comments are not transferred.",
             ))
             .small()
             .weak(),
@@ -332,6 +338,7 @@ impl MrPdfApp {
             return (Outcome::Close, None);
         }
         let (true, Some(pages)) = (ok, pages) else { return (Outcome::Keep, None) };
+        let images = *images;
         (
             Outcome::Close,
             Some(Box::new(move |app, ctx| {
@@ -347,7 +354,7 @@ impl MrPdfApp {
                     return;
                 };
                 let tab = &app.tabs[app.active];
-                match tab.doc.export_word_pages(&path, &pages) {
+                match tab.doc.export_word_with(&path, &pages, images) {
                     Ok(()) => {
                         let msg = if app.ex_de() { "Exportiert: " } else { "Exported: " };
                         app.set_status(ctx, format!("{msg}{}", path.display()));

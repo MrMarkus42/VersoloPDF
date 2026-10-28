@@ -1108,25 +1108,30 @@ impl MrPdfApp {
         self.tools_group(ui, ctx);
         group(ui, if de { "Erstellen" } else { "Create" }, |ui| {
             self.big(ui, ctx, UA(Unavailable::Scanner, "Scannen", "Scan", Icon::Camera));
-            self.big(ui, ctx, Cmd::FromFiles);
-            self.big(ui, ctx, Cmd::MergeFiles);
+            self.big_menu(
+                ui,
+                ctx,
+                Icon::InsertFile,
+                ("Aus Dateien", "From files"),
+                &[Entry::C(Cmd::FromFiles), Entry::C(Cmd::MergeFiles)],
+            );
             self.big(ui, ctx, Cmd::New);
         });
         group(ui, if de { "Ändern" } else { "Change" }, |ui| {
             self.big(ui, ctx, Cmd::ContentsToImages);
-        });
-        group(ui, if de { "Exportieren" } else { "Export" }, |ui| {
-            self.big(ui, ctx, Cmd::ExportImages);
-            self.big(ui, ctx, Cmd::ExportWord);
-            self.big(ui, ctx, Cmd::ExportText);
-            self.smalls(
+            self.big(ui, ctx, Cmd::SaveOptimized);
+            self.big(
                 ui,
                 ctx,
-                &[
-                    UA(Unavailable::Office, "In MS Excel", "To MS Excel", Icon::Export),
-                    UA(Unavailable::Office, "In MS PowerPoint", "To MS PowerPoint", Icon::Export),
-                ],
+                UA(Unavailable::TextEditing, "Schriften ersetzen", "Replace fonts", Icon::TextBox),
             );
+        });
+        group(ui, if de { "Exportieren" } else { "Export" }, |ui| {
+            for cmd in
+                [Cmd::ExportImages, Cmd::ExportWord, Cmd::ExportExcel, Cmd::ExportPowerPoint, Cmd::ExportText]
+            {
+                self.big(ui, ctx, cmd);
+            }
         });
         group(ui, if de { "Texterkennung" } else { "Text recognition" }, |ui| {
             self.big(
@@ -1135,8 +1140,18 @@ impl MrPdfApp {
                 UA(Unavailable::Ocr, "Text auf Seiten erkennen", "Recognize text", Icon::Search),
             );
         });
+        group(ui, if de { "Seiten erweitern" } else { "Enhance pages" }, |ui| {
+            for (de_label, en) in [
+                ("Gescannte Seiten optimieren", "Optimize scanned pages"),
+                ("Seiten begradigen", "Deskew pages"),
+                ("Gescannte Seiten korrigieren", "Correct scanned pages"),
+            ] {
+                self.big(ui, ctx, UA(Unavailable::ScanCleanup, de_label, en, Icon::Image));
+            }
+        });
         group(ui, if de { "Farben umwandeln" } else { "Convert colours" }, |ui| {
             self.big(ui, ctx, Cmd::Grayscale);
+            self.big(ui, ctx, UA(Unavailable::Recolor, "Seiten neu einfärben", "Recolor pages", Icon::Theme));
         });
     }
 

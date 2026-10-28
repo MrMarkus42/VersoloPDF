@@ -363,6 +363,99 @@ fn form_tab_core() {
     assert!(blank.detect_fields(0).unwrap().is_empty(), "no second field on the same place");
 }
 
+/// One page with a heading and a red picture below it.
+fn picture_pdf() -> Vec<u8> {
+    use pdfium_render::prelude::*;
+    let pdfium = mrpdf::engine::pdfium().unwrap();
+    let mut doc = pdfium.create_new_pdf().unwrap();
+    let font = doc.fonts_mut().helvetica();
+    let mut page = doc.pages_mut().create_page_at_end(PdfPagePaperSize::a4()).unwrap();
+    page.objects_mut()
+        .create_text_object(
+            PdfPoints::new(72.0),
+            PdfPoints::new(750.0),
+            "Bericht 2026",
+            font,
+            PdfPoints::new(20.0),
+        )
+        .unwrap();
+    let red = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+        40,
+        30,
+        image::Rgba([220, 20, 20, 255]),
+    ));
+    page.objects_mut()
+        .create_image_object(
+            PdfPoints::new(72.0),
+            PdfPoints::new(500.0),
+            &red,
+            Some(PdfPoints::new(200.0)),
+            Some(PdfPoints::new(150.0)),
+        )
+        .unwrap();
+    page.objects_mut()
+        .create_text_object(
+            PdfPoints::new(72.0),
+            PdfPoints::new(450.0),
+            "Unter dem Bild",
+            font,
+            PdfPoints::new(12.0),
+        )
+        .unwrap();
+    doc.save_to_bytes().unwrap()
+}
+
+#[test]
+fn office_exports() {
+    use mrpdf::office::{ExcelOptions, NumberFormat, PowerPointOptions};
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let mut doc = open(2);
+
+    // Excel: one sheet per page with the text.
+    let xlsx = dir.path().join("a.xlsx");
+    let o = ExcelOptions {
+        numbers: NumberFormat::GERMAN,
+        detect_tables: true,
+        sheet_per_page: true,
+        row_per_paragraph: false,
+    };
+    mrpdf::office::export_excel(&doc, &xlsx, &[0, 1], &o).unwrap();
+    let bytes = std::fs::read(&xlsx).unwrap();
+    let s = String::from_utf8_lossy(&bytes);
+    assert!(
+        s.contains("Page 2 Hello World") && s.contains("Seite 2") && s.contains("sheet2.xml"),
+        "xlsx content"
+    );
+
+    // PowerPoint: text boxes over a picture of the page without its text.
+    let pptx = dir.path().join("a.pptx");
+    let o = PowerPointOptions { whole_page_image: false, dpi: 72.0, comments: true, links: true };
+    mrpdf::office::export_powerpoint(&mut doc, &pptx, &[0, 1], &o).unwrap();
+    let bytes = std::fs::read(&pptx).unwrap();
+    let s = String::from_utf8_lossy(&bytes);
+    assert!(s.contains("ppt/slides/slide2.xml") && s.contains("<a:t>Page 1 Hello World</a:t>"));
+    assert!(s.contains("ppt/media/image1.png"));
+    let with = doc.render_background(0, 595, 842, false, true).unwrap();
+    let without = doc.render_background(0, 595, 842, true, true).unwrap();
+    // The heading at y 700..717 is image rows ~125..142.
+    assert!(common::average(&with, 72, 125, 250, 142)[0] < 230.0, "text is drawn normally");
+    assert!(common::average(&without, 72, 125, 250, 142)[0] > 250.0, "text left out for the slide picture");
+    assert!(doc.page_text(0).unwrap().all_text().contains("Hello"), "document unchanged");
+
+    // Word: the picture is placed between the two lines.
+    let pic = Document::from_bytes(picture_pdf(), "bild.pdf", None).unwrap();
+    assert_eq!(pic.page_images(0).unwrap().len(), 1);
+    let docx = dir.path().join("a.docx");
+    pic.export_word_with(&docx, &[0], true).unwrap();
+    let bytes = std::fs::read(&docx).unwrap();
+    let s = String::from_utf8_lossy(&bytes);
+    assert!(s.contains("word/media/image1.png") && s.contains("r:embed=\"rIdImg1\""));
+    let (a, b, c) =
+        (s.find("Bericht 2026").unwrap(), s.find("<w:drawing>").unwrap(), s.find("Unter dem Bild").unwrap());
+    assert!(a < b && b < c, "picture between the lines");
+}
+
 #[test]
 fn page_operations() {
     let _guard = common::lock();
