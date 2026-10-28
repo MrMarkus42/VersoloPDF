@@ -1570,18 +1570,19 @@ fn merge_layers(doc: &mut Document) {
     };
     let hidden = hidden_layers(doc, &props);
     let mut complete = true;
-    let rewrite = |doc: &Document, plain: &[u8], resources: &Dictionary, complete: &mut bool| -> Option<Vec<u8>> {
-        if plain.windows(3).any(|w| w == b"BI ") {
-            *complete = false;
-            return None;
-        }
-        let Ok(content) = Content::decode(plain) else {
-            *complete = false;
-            return None;
+    let rewrite =
+        |doc: &Document, plain: &[u8], resources: &Dictionary, complete: &mut bool| -> Option<Vec<u8>> {
+            if plain.windows(3).any(|w| w == b"BI ") {
+                *complete = false;
+                return None;
+            }
+            let Ok(content) = Content::decode(plain) else {
+                *complete = false;
+                return None;
+            };
+            let ops = filter_layers(doc, content.operations, resources, &hidden)?;
+            Content { operations: ops }.encode().ok()
         };
-        let ops = filter_layers(doc, content.operations, resources, &hidden)?;
-        Content { operations: ops }.encode().ok()
-    };
     // Pages: the contents (possibly split into several streams) as one stream.
     for page in doc.get_pages().into_values() {
         let resources = page_resources(doc, page).unwrap_or_default();
@@ -1602,7 +1603,8 @@ fn merge_layers(doc: &mut Document) {
         .collect();
     for id in forms {
         let Ok(Object::Stream(s)) = doc.get_object(id) else { continue };
-        let resources = s.dict.get(b"Resources").ok().and_then(|r| dict_of(doc, r)).cloned().unwrap_or_default();
+        let resources =
+            s.dict.get(b"Resources").ok().and_then(|r| dict_of(doc, r)).cloned().unwrap_or_default();
         let Ok(plain) = s.decompressed_content_with_limit(MAX_STREAM) else { continue };
         if let Some(new) = rewrite(doc, &plain, &resources, &mut complete)
             && let Ok(Object::Stream(s)) = doc.get_object_mut(id)
@@ -1638,12 +1640,8 @@ fn merge_layers(doc: &mut Document) {
     }
     // No layers any more: drop /OC entries and the layers in /Properties.
     let layer_type = |d: &Dictionary| matches!(name_of(d, b"Type").as_deref(), Some(b"OCG" | b"OCMD"));
-    let layers: HashSet<ObjectId> = doc
-        .objects
-        .iter()
-        .filter(|(_, o)| o.as_dict().is_ok_and(layer_type))
-        .map(|(id, _)| *id)
-        .collect();
+    let layers: HashSet<ObjectId> =
+        doc.objects.iter().filter(|(_, o)| o.as_dict().is_ok_and(layer_type)).map(|(id, _)| *id).collect();
     let strip = |resources: &mut Dictionary| {
         if let Ok(Object::Dictionary(props)) = resources.get_mut(b"Properties") {
             let names: Vec<Vec<u8>> = props
@@ -1767,7 +1765,8 @@ pub fn park_annotations(bytes: &[u8], embed: EmbedAnnots) -> Result<Vec<u8>> {
             else {
                 continue;
             };
-            let subtype_of = |obj: &Object| dict_of(&doc, obj).and_then(|d| name_of(d, b"Subtype")).unwrap_or_default();
+            let subtype_of =
+                |obj: &Object| dict_of(&doc, obj).and_then(|d| name_of(d, b"Subtype")).unwrap_or_default();
             let kept_parent = |obj: &Object| {
                 dict_of(&doc, obj)
                     .and_then(|d| d.get(b"Parent").ok())
@@ -2114,7 +2113,8 @@ mod tests {
         let a = doc.add_object(dictionary! {"Type" => "OCG", "Name" => Object::string_literal("Sichtbar")});
         let b = doc.add_object(dictionary! {"Type" => "OCG", "Name" => Object::string_literal("Versteckt")});
         // Visible only if both layers are on: hidden.
-        let both = doc.add_object(dictionary! {"Type" => "OCMD", "OCGs" => vec![a.into(), b.into()], "P" => "AllOn"});
+        let both = doc
+            .add_object(dictionary! {"Type" => "OCMD", "OCGs" => vec![a.into(), b.into()], "P" => "AllOn"});
         let form = doc.add_object(Stream::new(
             dictionary! {"Type" => "XObject", "Subtype" => "Form", "BBox" => vec![0.into(), 0.into(), 10.into(), 10.into()], "OC" => b},
             b"(InForm) Tj".to_vec(),
@@ -2126,8 +2126,11 @@ mod tests {
                 .to_vec(),
         ));
         let rect = vec![0.into(), 0.into(), 10.into(), 10.into()];
-        let hidden_note = doc.add_object(dictionary! {"Type" => "Annot", "Subtype" => "Square", "Rect" => rect.clone(), "OC" => b});
-        let note = doc.add_object(dictionary! {"Type" => "Annot", "Subtype" => "Square", "Rect" => rect, "OC" => a});
+        let hidden_note = doc.add_object(
+            dictionary! {"Type" => "Annot", "Subtype" => "Square", "Rect" => rect.clone(), "OC" => b},
+        );
+        let note =
+            doc.add_object(dictionary! {"Type" => "Annot", "Subtype" => "Square", "Rect" => rect, "OC" => a});
         let page = doc.add_object(dictionary! {"Type" => "Page", "Parent" => pages_id,
             "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()], "Contents" => content,
             "Annots" => vec![hidden_note.into(), note.into()],
@@ -2157,7 +2160,11 @@ mod tests {
         assert!(catalog.get(b"OCProperties").is_err());
         let annots = doc.get_dictionary(page).unwrap().get(b"Annots").unwrap().as_array().unwrap();
         assert_eq!(annots.len(), 1);
-        assert!(!doc.objects.values().any(|o| o.as_dict().is_ok_and(|d| name_of(d, b"Type").as_deref() == Some(b"OCG"))));
+        assert!(
+            !doc.objects
+                .values()
+                .any(|o| o.as_dict().is_ok_and(|d| name_of(d, b"Type").as_deref() == Some(b"OCG")))
+        );
 
         // Without the option the layers stay.
         let (out, _) = optimize(&bytes, None, &layer_options(false)).unwrap();

@@ -170,7 +170,8 @@ pub fn encode(pages: &[image::RgbImage], o: &ImageExportOptions) -> Result<Vec<u
 /// Writes a binary PBM (P4), PGM (P5) or PPM (P6) file.
 fn write_pnm(img: &image::RgbImage, format: ImageFormat) -> Vec<u8> {
     let (w, h) = img.dimensions();
-    let luma = |p: &image::Rgb<u8>| ((p[0] as u32 * 299 + p[1] as u32 * 587 + p[2] as u32 * 114) / 1000) as u8;
+    let luma =
+        |p: &image::Rgb<u8>| ((p[0] as u32 * 299 + p[1] as u32 * 587 + p[2] as u32 * 114) / 1000) as u8;
     let mut out = Vec::new();
     match format {
         ImageFormat::Pbm => {
@@ -387,7 +388,9 @@ mod tests {
     #[test]
     fn every_format_reads_back() {
         // Left half black, right half light grey; 11 px wide to test PBM padding.
-        let img = image::RgbImage::from_fn(11, 3, |x, _| if x < 5 { image::Rgb([0, 0, 0]) } else { image::Rgb([200, 200, 200]) });
+        let img = image::RgbImage::from_fn(11, 3, |x, _| {
+            if x < 5 { image::Rgb([0, 0, 0]) } else { image::Rgb([200, 200, 200]) }
+        });
         for format in ImageFormat::ALL {
             let data = encode(
                 std::slice::from_ref(&img),

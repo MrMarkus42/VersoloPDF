@@ -336,8 +336,9 @@ pub struct MrPdfApp {
 
 impl MrPdfApp {
     pub fn new(cc: &eframe::CreationContext<'_>, files: Vec<PathBuf>) -> Self {
-        let settings: Settings =
+        let mut settings: Settings =
             cc.storage.and_then(|s| eframe::get_value(s, SETTINGS_KEY)).unwrap_or_default();
+        settings.plain_paths();
         Self::with_settings(&cc.egui_ctx, settings, files)
     }
 

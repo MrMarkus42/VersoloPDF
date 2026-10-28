@@ -355,6 +355,37 @@ impl Settings {
         self.styles.retain(|(t, _)| *t != tool);
     }
 
+    /// Paths stored by earlier versions with the Windows `\\?\` prefix are
+    /// written plainly (duplicates that result are dropped).
+    pub fn plain_paths(&mut self) {
+        use crate::files::strip_verbatim;
+        fn list(paths: &mut Vec<PathBuf>) {
+            let mut seen = Vec::new();
+            for p in std::mem::take(paths) {
+                let p = strip_verbatim(p);
+                if !seen.contains(&p) {
+                    seen.push(p);
+                }
+            }
+            *paths = seen;
+        }
+        list(&mut self.recent_files);
+        list(&mut self.pinned_files);
+        list(&mut self.last_session.files);
+        for s in &mut self.sessions {
+            list(&mut s.files);
+        }
+        let mut pages: Vec<(PathBuf, usize)> = Vec::new();
+        for (p, page) in std::mem::take(&mut self.last_pages) {
+            let p = strip_verbatim(p);
+            if !pages.iter().any(|(q, _)| *q == p) {
+                pages.push((p, page));
+            }
+        }
+        self.last_pages = pages;
+        self.last_save_folder = self.last_save_folder.take().map(strip_verbatim);
+    }
+
     pub fn add_recent(&mut self, path: &Path) {
         self.recent_files.retain(|p| p != path);
         self.recent_files.insert(0, path.to_path_buf());
@@ -480,6 +511,22 @@ mod tests {
         assert_eq!(s.recent_files.len(), MAX_RECENT);
         assert_eq!(s.recent_files[0], Path::new("/tmp/5.pdf"));
         assert_eq!(s.recent_files.iter().filter(|p| p.ends_with("5.pdf")).count(), 1);
+    }
+
+    #[test]
+    fn verbatim_paths_of_older_versions_are_cleaned() {
+        let mut s = Settings {
+            recent_files: vec![
+                PathBuf::from(r"\\?\C:\a.pdf"),
+                PathBuf::from(r"C:\a.pdf"),
+                PathBuf::from("/b.pdf"),
+            ],
+            last_pages: vec![(PathBuf::from(r"\\?\C:\a.pdf"), 3), (PathBuf::from(r"C:\a.pdf"), 1)],
+            ..Settings::default()
+        };
+        s.plain_paths();
+        assert_eq!(s.recent_files, [PathBuf::from(r"C:\a.pdf"), PathBuf::from("/b.pdf")]);
+        assert_eq!(s.last_pages, [(PathBuf::from(r"C:\a.pdf"), 3)]);
     }
 
     #[test]

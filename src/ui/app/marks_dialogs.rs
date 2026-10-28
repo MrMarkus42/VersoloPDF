@@ -22,7 +22,8 @@ use crate::ui::widgets::{from_color32, icon_button, small_button, to_color32};
 
 /// Image files and PDFs accepted as watermark/background.
 const IMAGE_EXT: [&str; 15] = [
-    "png", "jpg", "jpeg", "gif", "bmp", "tif", "tiff", "webp", "pbm", "pgm", "ppm", "pnm", "tga", "ico", "pdf",
+    "png", "jpg", "jpeg", "gif", "bmp", "tif", "tiff", "webp", "pbm", "pgm", "ppm", "pnm", "tga", "ico",
+    "pdf",
 ];
 const MM: f32 = 72.0 / 25.4;
 

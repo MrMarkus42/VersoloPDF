@@ -97,10 +97,12 @@ impl MrPdfApp {
             self.import_file(ctx, path);
             return;
         }
-        let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
-        if let Some(i) = self.tabs.iter().position(|t| {
-            t.doc.path().is_some_and(|p| p.canonicalize().ok().as_deref() == Some(canonical.as_path()))
-        }) {
+        let canonical = crate::files::canonical_path(&path);
+        if let Some(i) = self
+            .tabs
+            .iter()
+            .position(|t| t.doc.path().is_some_and(|p| crate::files::canonical_path(p) == canonical))
+        {
             self.active = i;
             return;
         }

@@ -28,6 +28,26 @@ pub fn clean_file_name(name: &str) -> Result<String> {
     Ok(name)
 }
 
+/// The absolute, resolved form of `path` as users know it: on Windows
+/// without the `\\?\` prefix that `canonicalize` adds. Falls back to `path`.
+pub fn canonical_path(path: &Path) -> PathBuf {
+    let Ok(full) = path.canonicalize() else { return path.to_path_buf() };
+    strip_verbatim(full)
+}
+
+/// Removes the Windows `\\?\` prefix where the path has a plain spelling.
+pub fn strip_verbatim(full: PathBuf) -> PathBuf {
+    let Some(text) = full.to_str() else { return full };
+    if let Some(unc) = text.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{unc}"));
+    }
+    match text.strip_prefix(r"\\?\") {
+        // Only "X:\…"; other verbatim forms have no plain spelling.
+        Some(rest) if rest.len() < 260 && rest.as_bytes().get(1) == Some(&b':') => PathBuf::from(rest),
+        _ => full,
+    }
+}
+
 fn already_exists(path: &Path) -> Error {
     Error::io(path, std::io::Error::new(std::io::ErrorKind::AlreadyExists, "file already exists"))
 }
@@ -320,6 +340,29 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    #[test]
+    fn verbatim_prefix_is_removed() {
+        assert_eq!(strip_verbatim(PathBuf::from(r"\\?\C:\Daten\a.pdf")), PathBuf::from(r"C:\Daten\a.pdf"));
+        assert_eq!(
+            strip_verbatim(PathBuf::from(r"\\?\UNC\server\share\a.pdf")),
+            PathBuf::from(r"\\server\share\a.pdf")
+        );
+        assert_eq!(
+            strip_verbatim(PathBuf::from(r"\\?\Volume{x}\a.pdf")),
+            PathBuf::from(r"\\?\Volume{x}\a.pdf")
+        );
+        assert_eq!(strip_verbatim(PathBuf::from("/home/a.pdf")), PathBuf::from("/home/a.pdf"));
+        let dir = temp("canonical");
+        let file = dir.join("a.pdf");
+        std::fs::write(&file, b"x").unwrap();
+        let c = canonical_path(&file);
+        assert!(!c.to_string_lossy().starts_with(r"\\?\"), "{c:?}");
+        assert!(c.is_absolute() && c.exists());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The layout is only used outside Windows and macOS (path starts with /).
+    #[cfg(not(windows))]
     #[test]
     fn freedesktop_trash_layout() {
         let dir = temp("trash");
