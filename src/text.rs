@@ -47,6 +47,22 @@ pub struct FontInfo {
     pub italic: bool,
 }
 
+/// A text line with the look of its first character.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StyledLine {
+    pub text: String,
+    pub font: String,
+    pub bold: bool,
+    pub italic: bool,
+    /// Font size in points.
+    pub size: f32,
+    pub color: [u8; 3],
+    /// Area of the line (PDF space).
+    pub rect: RectF,
+    /// Index of its first visible character.
+    pub first: usize,
+}
+
 /// An inclusive range of character indices.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TextRange {
@@ -173,6 +189,52 @@ impl PageText {
             }
         }
         flush(&mut text, &mut heights);
+        out
+    }
+
+    /// The text lines with the font, size and colour of their first visible
+    /// character (needs `styles`, see `Document::page_text_styled`).
+    pub fn styled_lines(&self) -> Vec<StyledLine> {
+        let mut out = Vec::new();
+        let mut start = 0;
+        for i in 0..=self.chars.len() {
+            let end = self.chars.get(i).is_none_or(|c| c.ch == '\n' || c.ch == '\r');
+            if !end {
+                continue;
+            }
+            let range = start..i;
+            start = i + 1;
+            let text: String =
+                self.chars[range.clone()].iter().filter(|c| !c.ch.is_control()).map(|c| c.ch).collect();
+            let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+            let Some(first) =
+                range.clone().find(|&j| !self.chars[j].generated && !self.chars[j].ch.is_whitespace())
+            else {
+                continue;
+            };
+            if text.is_empty() {
+                continue;
+            }
+            let style = self.styles.get(first).copied().unwrap_or_default();
+            let font = self.fonts.get(style.font as usize).cloned().unwrap_or_default();
+            let mut rect = self.chars[first].rect;
+            for j in range {
+                let c = &self.chars[j];
+                if !c.generated && !c.rect.is_empty() {
+                    rect = rect.union(&c.rect);
+                }
+            }
+            out.push(StyledLine {
+                text,
+                font: font.name,
+                bold: font.bold,
+                italic: font.italic,
+                size: style.size,
+                color: style.color,
+                rect,
+                first,
+            });
+        }
         out
     }
 

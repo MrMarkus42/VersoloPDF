@@ -229,9 +229,10 @@ impl MrPdfApp {
         let Some(tab) = self.tabs.get_mut(self.active) else { return };
         let bookmarks = tab.bookmarks();
         let current_page = tab.current_page;
+        let selected = tab.selected_bookmark.clone();
         #[derive(Clone)]
         enum Action {
-            Go(usize),
+            Go(Vec<usize>, Option<usize>),
             AddChild(Vec<usize>),
             Rename(Vec<usize>, String),
             Delete(Vec<usize>),
@@ -256,17 +257,17 @@ impl MrPdfApp {
                 t: &Strings,
                 items: &[Bookmark],
                 path: &mut Vec<usize>,
+                selected: Option<&Vec<usize>>,
                 action: &mut Option<Action>,
             ) {
                 for (i, b) in items.iter().enumerate() {
                     path.push(i);
                     let title = if b.title.is_empty() { "–".to_string() } else { b.title.clone() };
+                    let is_sel = selected == Some(&*path);
                     let mut entry = |ui: &mut Ui| {
-                        let resp = ui.selectable_label(false, title.clone());
-                        if resp.clicked()
-                            && let Some(page) = b.page
-                        {
-                            *action = Some(Action::Go(page));
+                        let resp = ui.selectable_label(is_sel, title.clone());
+                        if resp.clicked() {
+                            *action = Some(Action::Go(path.clone(), b.page));
                         }
                         resp.context_menu(|ui| {
                             if ui.button(t.add_child_bookmark).clicked() {
@@ -287,17 +288,33 @@ impl MrPdfApp {
                         entry(ui);
                     } else {
                         let id = ui.make_persistent_id(("bm", path.clone()));
-                        egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
+                        // The parents of the selected bookmark open.
+                        let open_for_selection =
+                            selected.is_some_and(|s| s.len() > path.len() && s.starts_with(path));
+                        let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
+                            ui.ctx(),
+                            id,
+                            false,
+                        );
+                        if open_for_selection && !state.is_open() {
+                            state.set_open(true);
+                        }
+                        state
                             .show_header(ui, |ui| entry(ui))
-                            .body(|ui| tree(ui, t, &b.children, path, action));
+                            .body(|ui| tree(ui, t, &b.children, path, selected, action));
                     }
                     path.pop();
                 }
             }
-            tree(ui, t, &bookmarks, &mut Vec::new(), &mut action);
+            tree(ui, t, &bookmarks, &mut Vec::new(), selected.as_ref(), &mut action);
         });
         match action {
-            Some(Action::Go(page)) => tab.jump_to_page(page),
+            Some(Action::Go(path, page)) => {
+                tab.selected_bookmark = Some(path);
+                if let Some(page) = page {
+                    tab.jump_to_page(page);
+                }
+            }
             Some(Action::AddChild(parent)) => {
                 self.dialog = Some(super::Dialog::BookmarkTitle {
                     parent: Some(parent),

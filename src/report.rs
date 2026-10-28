@@ -34,7 +34,25 @@ pub struct Line {
     pub right: String,
     /// Extra space above the paragraph.
     pub space_before: f32,
+    /// Fill between the text and `right` ("Kapitel……1").
+    pub leader: Leader,
 }
+
+/// Fill between a contents entry and its page number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Leader {
+    /// "Kapitel   1".
+    #[default]
+    Space,
+    /// "Kapitel……1".
+    Dots,
+    /// "Kapitel____1".
+    Line,
+}
+
+/// Page margins in points: left, top, right, bottom.
+pub type Margins = [f32; 4];
+pub const DEFAULT_MARGINS: Margins = [MARGIN, MARGIN, MARGIN, MARGIN];
 
 impl Line {
     pub fn new(text: impl Into<String>) -> Self {
@@ -48,6 +66,7 @@ impl Line {
             link: None,
             right: String::new(),
             space_before: 0.0,
+            leader: Leader::Space,
         }
     }
 
@@ -135,26 +154,32 @@ fn wrap(text: &str, font: StdFont, size: f32, width: f32) -> Vec<Vec<u8>> {
 
 /// Lays out the lines on pages of `size`.
 pub fn layout(lines: &[Line], size: (f32, f32)) -> Vec<PageLayout> {
+    layout_with(lines, size, DEFAULT_MARGINS, 0.0)
+}
+
+/// Lays out the lines with the given margins and extra space between lines.
+pub fn layout_with(lines: &[Line], size: (f32, f32), margins: Margins, spacing: f32) -> Vec<PageLayout> {
     let (w, h) = size;
+    let [ml, mt, mr, mb] = margins.map(|m| m.clamp(0.0, w.min(h) / 3.0));
     let mut pages = vec![PageLayout::default()];
-    let mut y = h - MARGIN;
+    let mut y = h - mt;
     for line in lines {
         let font = if line.bold { StdFont::HelveticaBold } else { StdFont::Helvetica };
         let font_name = if line.bold { "HB" } else { "H" };
-        let lead = line.size * 1.3;
-        let x = MARGIN + line.indent + if line.swatch.is_some() { line.size + 4.0 } else { 0.0 };
+        let lead = line.size * 1.3 + spacing.max(0.0);
+        let x = ml + line.indent + if line.swatch.is_some() { line.size + 4.0 } else { 0.0 };
         let right = win_ansi(&line.right);
         let right_w = if right.is_empty() { 0.0 } else { font.text_width(&right, line.size) + 12.0 };
-        let avail = (w - MARGIN - x - right_w).max(40.0);
+        let avail = (w - mr - x - right_w).max(40.0);
         let wrapped = wrap(&line.text, font, line.size, avail);
         y -= line.space_before;
         for (i, text) in wrapped.iter().enumerate() {
-            if y - lead < MARGIN {
+            if y - lead < mb {
                 if pages.len() >= MAX_PAGES {
                     return pages;
                 }
                 pages.push(PageLayout::default());
-                y = h - MARGIN;
+                y = h - mt;
             }
             y -= lead;
             let page = pages.last_mut().expect("at least one page");
@@ -168,7 +193,7 @@ pub fn layout(lines: &[Line], size: (f32, f32)) -> Vec<PageLayout> {
                     num(sr),
                     num(sg),
                     num(sb),
-                    num(MARGIN + line.indent),
+                    num(ml + line.indent),
                     num(y),
                     num(line.size * 0.8),
                     num(line.size * 0.8)
@@ -185,7 +210,30 @@ pub fn layout(lines: &[Line], size: (f32, f32)) -> Vec<PageLayout> {
                 escape(text)
             ));
             if i == 0 && !right.is_empty() {
-                let rx = w - MARGIN - font.text_width(&right, line.size);
+                let rx = w - mr - font.text_width(&right, line.size);
+                let fill = match line.leader {
+                    Leader::Space => None,
+                    Leader::Dots => Some(b'.'),
+                    Leader::Line => Some(b'_'),
+                };
+                if let Some(ch) = fill {
+                    let from = x + font.text_width(text, line.size) + 3.0;
+                    let one = font.text_width(&[ch], line.size).max(0.5);
+                    let count = ((rx - 3.0 - from) / one).floor();
+                    if count >= 1.0 {
+                        let dots = vec![ch; count as usize];
+                        page.content.push_str(&format!(
+                            "BT /{font_name} {} Tf {} {} {} rg {} {} Td ({}) Tj ET\n",
+                            num(line.size),
+                            num(r),
+                            num(g),
+                            num(b),
+                            num(rx - 3.0 - count * one),
+                            num(y),
+                            escape(&dots)
+                        ));
+                    }
+                }
                 page.content.push_str(&format!(
                     "BT /{font_name} {} Tf {} {} {} rg {} {} Td ({}) Tj ET\n",
                     num(line.size),
@@ -198,7 +246,7 @@ pub fn layout(lines: &[Line], size: (f32, f32)) -> Vec<PageLayout> {
                 ));
             }
             if let Some(target) = line.link {
-                let rect = RectF::new(MARGIN + line.indent, y - line.size * 0.3, w - MARGIN, y + line.size);
+                let rect = RectF::new(ml + line.indent, y - line.size * 0.3, w - mr, y + line.size);
                 page.links.push((rect, target));
             }
         }
@@ -293,15 +341,50 @@ pub fn build_pdf(title: &str, lines: &[Line]) -> Result<Vec<u8>> {
 /// targets of the lines are page indices of the document *before*
 /// insertion. Returns the new bytes and the number of inserted pages.
 pub fn insert_front(bytes: &[u8], password: Option<&str>, lines: &[Line]) -> Result<(Vec<u8>, usize)> {
+    insert_at(bytes, password, lines, &Placement::default())
+}
+
+/// Where and how report pages are inserted.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Placement {
+    /// Index of the page the report goes in front of (past the end: last).
+    pub before: usize,
+    /// Page size; None: like the page at the insert position.
+    pub size: Option<(f32, f32)>,
+    pub margins: Margins,
+    /// Extra space between lines.
+    pub spacing: f32,
+}
+
+impl Default for Placement {
+    fn default() -> Self {
+        Self { before: 0, size: None, margins: DEFAULT_MARGINS, spacing: 0.0 }
+    }
+}
+
+/// Inserts report pages before page `at.before`. The `link` targets of the
+/// lines are page indices of the document *before* insertion. Returns the
+/// new bytes and the number of inserted pages.
+pub fn insert_at(
+    bytes: &[u8],
+    password: Option<&str>,
+    lines: &[Line],
+    at: &Placement,
+) -> Result<(Vec<u8>, usize)> {
     guarded(|| {
         let mut edit = Edit::open(bytes, password)?;
         let old_pages = edit.page_ids();
-        let first = *old_pages.first().ok_or_else(|| Error::Invalid("document has no pages".into()))?;
-        let size = {
-            let r = crate::pages::visible_box(&edit, first);
-            (r.width().max(200.0), r.height().max(200.0))
-        };
-        let layout = layout(lines, size);
+        let before = at.before.min(old_pages.len());
+        let near = *old_pages
+            .get(before)
+            .or(old_pages.last())
+            .ok_or_else(|| Error::Invalid("document has no pages".into()))?;
+        let size = at.size.unwrap_or_else(|| {
+            let r = crate::pages::visible_box(&edit, near);
+            (r.width(), r.height())
+        });
+        let size = (size.0.max(200.0), size.1.max(200.0));
+        let layout = layout_with(lines, size, at.margins, at.spacing);
         let catalog_id = edit.prev().trailer.get(b"Root")?.as_reference()?;
         let root_pages = edit.object(catalog_id)?.as_dict()?.get(b"Pages")?.as_reference()?;
         let mut new_ids = Vec::new();
@@ -325,8 +408,30 @@ pub fn insert_front(bytes: &[u8], password: Option<&str>, lines: &[Line]) -> Res
             Ok(Object::Array(k)) => k.clone(),
             _ => return Err(Error::Invalid("page tree without kids".into())),
         };
+        // Position among the root's kids: in front of the kid holding the
+        // page (pages in nested trees go in front of their subtree).
+        let mut pos = kids.len();
+        if let Some(target) = old_pages.get(before) {
+            let mut node = *target;
+            for _ in 0..64 {
+                if let Some(i) = kids.iter().position(|k| k.as_reference().ok() == Some(node)) {
+                    pos = i;
+                    break;
+                }
+                match edit
+                    .object(node)
+                    .ok()
+                    .and_then(|o| o.as_dict().ok())
+                    .and_then(|d| d.get(b"Parent").ok())
+                {
+                    Some(Object::Reference(p)) => node = *p,
+                    _ => break,
+                }
+            }
+        }
+        let root = edit.dict_mut(root_pages)?;
         for (i, id) in new_ids.iter().enumerate() {
-            kids.insert(i, Object::Reference(*id));
+            kids.insert(pos + i, Object::Reference(*id));
         }
         let count = root.get(b"Count").ok().and_then(|c| c.as_i64().ok()).unwrap_or(old_pages.len() as i64);
         root.set("Kids", Object::Array(kids));

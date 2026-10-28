@@ -1173,36 +1173,57 @@ impl MrPdfApp {
 
     fn ribbon_bookmarks(&mut self, ui: &mut Ui, ctx: &Context) {
         let de = self.settings.language == Language::German;
-        group(ui, if de { "Erstellen" } else { "Create" }, |ui| {
-            self.big(ui, ctx, Cmd::BookmarkAdd);
-            self.smalls(ui, ctx, &[Cmd::BookmarkFromSelection, Cmd::BookmarkEveryNth, Cmd::BookmarkFromToc]);
-            self.smalls(ui, ctx, &[Cmd::BookmarkFromHighlights, Cmd::BookmarkFromTextFile]);
-        });
-        group(ui, if de { "Ändern" } else { "Change" }, |ui| {
-            ui.vertical(|ui| {
-                self.small(ui, ctx, Cmd::BookmarkAddText);
-                self.menu(
-                    ui,
-                    ctx,
-                    Icon::TextBox,
-                    if de { "Groß-/Kleinschreibung" } else { "Case" },
-                    &[Cmd::BookmarkUpper, Cmd::BookmarkLower, Cmd::BookmarkTitleCase],
-                );
-                self.small(ui, ctx, Cmd::BookmarkZoom);
+        // Refreshes the cached bookmark list the enabled state depends on.
+        if let Some(tab) = self.tab() {
+            tab.bookmarks();
+        }
+        let groups: [(&str, &str, &[Cmd]); 3] = [
+            (
+                "Erstellen",
+                "Create",
+                &[
+                    Cmd::BookmarkFromSelection,
+                    Cmd::BookmarkEveryNth,
+                    Cmd::BookmarkFromToc,
+                    Cmd::BookmarkFromHighlights,
+                    Cmd::BookmarkFromTextFile,
+                ],
+            ),
+            (
+                "Ändern",
+                "Change",
+                &[
+                    Cmd::BookmarkAddText,
+                    Cmd::BookmarkCase,
+                    Cmd::BookmarkZoom,
+                    Cmd::BookmarkResolveNamed,
+                    Cmd::BookmarkReplace,
+                    Cmd::BookmarkRemoveActions,
+                    Cmd::BookmarkSort,
+                    Cmd::BookmarkCheck,
+                    Cmd::BookmarkDedupe,
+                ],
+            ),
+            (
+                "Umwandeln",
+                "Convert",
+                &[
+                    Cmd::BookmarkToc,
+                    Cmd::BookmarkLinks,
+                    Cmd::BookmarkSortPages,
+                    Cmd::BookmarkToNamed,
+                    Cmd::BookmarkExportHtml,
+                    Cmd::BookmarkExportText,
+                ],
+            ),
+        ];
+        for (g, e, cmds) in groups {
+            group(ui, if de { g } else { e }, |ui| {
+                for &cmd in cmds {
+                    self.big(ui, ctx, cmd);
+                }
             });
-            self.smalls(
-                ui,
-                ctx,
-                &[Cmd::BookmarkResolveNamed, Cmd::BookmarkReplace, Cmd::BookmarkRemoveActions],
-            );
-            self.smalls(ui, ctx, &[Cmd::BookmarkSort, Cmd::BookmarkCheck, Cmd::BookmarkDedupe]);
-            self.smalls(ui, ctx, &[Cmd::BookmarkDeleteAll]);
-        });
-        group(ui, if de { "Umwandeln" } else { "Convert" }, |ui| {
-            self.big(ui, ctx, Cmd::BookmarkToc);
-            self.smalls(ui, ctx, &[Cmd::BookmarkLinks, Cmd::BookmarkSortPages, Cmd::BookmarkToNamed]);
-            self.smalls(ui, ctx, &[Cmd::BookmarkExportHtml, Cmd::BookmarkExportText]);
-        });
+        }
     }
 
     fn ribbon_help(&mut self, ui: &mut Ui, ctx: &Context) {

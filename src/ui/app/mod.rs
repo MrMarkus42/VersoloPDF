@@ -2,6 +2,8 @@
 
 mod actions;
 mod backstage;
+mod bookmark_big_dialogs;
+pub mod bookmark_dialogs;
 mod calculator_ui;
 pub mod commands;
 pub mod comment_cmds;
@@ -18,7 +20,6 @@ mod layout_dialogs;
 mod marks_dialogs;
 mod office_dialogs;
 mod optimize_dialog;
-mod outline_more;
 mod outline_tools;
 mod page_dialogs;
 mod portfolio_view;
@@ -224,42 +225,8 @@ pub enum Dialog {
         match_case: bool,
         whole_word: bool,
     },
-    BookmarkEveryNth {
-        every: u32,
-        prefix: String,
-    },
-    BookmarkReplace {
-        find: String,
-        replace: String,
-        match_case: bool,
-    },
-    BookmarkSort {
-        by_page: bool,
-    },
-    /// "Aus Inhaltsverzeichnis": pages of the contents and page offset.
-    BookmarkFromToc {
-        pages: String,
-        auto: bool,
-        offset: i32,
-    },
-    /// "Text hinzufügen".
-    BookmarkAddText {
-        prefix: String,
-        suffix: String,
-    },
-    /// "Vergrößerung ändern".
-    BookmarkZoom {
-        zoom: crate::outline_edit::Zoom,
-        percent: f32,
-    },
-    /// "Verweise aus Lesezeichen": pages to search.
-    BookmarkLinks {
-        pages: String,
-    },
-    /// "Überprüfen": broken bookmarks.
-    BookmarkCheck {
-        problems: Vec<(String, crate::outline_edit::Problem)>,
-    },
+    /// The dialogs of the ribbon tab "Lesezeichen".
+    Bookmark(Box<bookmark_dialogs::BookmarkDialog>),
     About,
     /// "Von URL öffnen".
     OpenUrl {

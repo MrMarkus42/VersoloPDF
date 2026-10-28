@@ -35,6 +35,7 @@ pub mod office;
 pub mod optimize;
 pub mod outline;
 pub mod outline_edit;
+pub mod outline_format;
 pub mod outlines;
 pub mod pages;
 pub mod pdf_edit;

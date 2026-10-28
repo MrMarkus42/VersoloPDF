@@ -968,44 +968,73 @@ fn search_and_redact() {
 
 #[test]
 fn bookmark_tools_ui() {
+    use mrpdf::ui::app::Dialog;
+    use mrpdf::ui::app::bookmark_dialogs::BookmarkDialog;
     let _guard = common::lock();
     let dir = tempfile::tempdir().unwrap();
     let file = sample_file(&dir, 3);
     let mut h = harness(vec![file], false);
     h.run_steps(10);
+    let ok = |h: &mut Harness<'_, MrPdfApp>| {
+        h.get_all_by_label("OK").last().unwrap().click();
+        h.run_steps(6);
+    };
     tab(&mut h, "Lesezeichen");
-    quick(&mut h, "Aus Seitentext");
-    assert_eq!(h.state().active_tab().unwrap().doc.bookmarks().len(), 3);
-    quick(&mut h, "Inhaltsverzeichnis erstellen");
-    h.run_steps(6);
-    let tab = h.state().active_tab().unwrap();
-    assert_eq!(tab.doc.page_count(), 4);
-    save(&mut h, "27-table-of-contents");
     save(&mut h, "les-01-ribbon");
+
+    // "Aus Seitentext": the headings are suggested as a rule.
+    quick(&mut h, "Aus Seitentext");
+    save(&mut h, "les-02-from-text");
+    h.get_by_label("Hinzufügen…").click();
+    h.run_steps(3);
+    save(&mut h, "les-03-rule");
+    h.get_by_label("Formatierung").click();
+    h.run_steps(3);
+    save(&mut h, "les-04-rule-format");
+    h.get_all_by_label("Abbrechen").last().unwrap().click();
+    h.run_steps(3);
+    ok(&mut h);
+    assert_eq!(h.state().active_tab().unwrap().doc.bookmarks().len(), 3);
+
+    // "Inhaltsverzeichnis erstellen".
+    quick(&mut h, "Inhaltsverzeichnis erstellen");
+    save(&mut h, "les-05-toc-dialog");
+    h.get_all_by_label("Erstellen").last().unwrap().click();
+    h.run_steps(6);
+    assert_eq!(h.state().active_tab().unwrap().doc.page_count(), 4);
+    save(&mut h, "27-table-of-contents");
 
     // "Überprüfen": all bookmarks are fine.
     quick(&mut h, "Überprüfen");
+    h.get_all_by_label("Überprüfen").last().unwrap().click();
+    h.run_steps(3);
     match h.state().dialog() {
-        Some(mrpdf::ui::app::Dialog::BookmarkCheck { problems }) => assert!(problems.is_empty()),
+        Some(Dialog::Bookmark(d)) => match d.as_ref() {
+            BookmarkDialog::Check(s) => assert_eq!(s.findings.as_ref().map(Vec::len), Some(0)),
+            other => panic!("unexpected dialog {other:?}"),
+        },
         other => panic!("unexpected dialog {other:?}"),
     }
+    save(&mut h, "les-06-check");
     h.key_press(egui::Key::Escape);
     h.run_steps(3);
 
-    // "Vergrößerung ändern" > "Seitenbreite".
+    // "Vergrößerung ändern".
     quick(&mut h, "Vergrößerung ändern");
-    h.get_by_label("Seitenbreite").click();
-    h.run_steps(2);
-    save(&mut h, "les-02-zoom");
-    h.get_by_label("OK").click();
-    h.run_steps(4);
+    save(&mut h, "les-07-zoom");
+    ok(&mut h);
     assert!(h.state().dialog().is_none());
+
+    // "Aktionen entfernen" lists the action types.
+    quick(&mut h, "Aktionen entfernen");
+    assert!(h.query_by_label("Web-Seite öffnen").is_some());
+    save(&mut h, "les-08-remove-actions");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
 
     // "Aus Inhaltsverzeichnis": the contents page made above.
     quick(&mut h, "Aus Inhaltsverzeichnis");
-    save(&mut h, "les-03-from-toc");
-    h.get_by_label("OK").click();
-    h.run_steps(4);
+    ok(&mut h);
     let tab = h.state().active_tab().unwrap();
     assert_eq!(tab.doc.bookmarks().len(), 6, "three more from the contents page");
     assert_eq!(tab.doc.bookmarks()[3].page, Some(1));

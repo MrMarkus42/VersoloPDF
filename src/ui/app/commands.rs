@@ -275,6 +275,7 @@ pub enum Cmd {
     BookmarkLinks,
     BookmarkSortPages,
     BookmarkToNamed,
+    BookmarkCase,
     // Help
     Manual,
     Support,
@@ -517,6 +518,7 @@ pub const SEARCHABLE: &[Cmd] = &[
     Cmd::BookmarkLinks,
     Cmd::BookmarkSortPages,
     Cmd::BookmarkToNamed,
+    Cmd::BookmarkCase,
     Cmd::Manual,
     Cmd::Support,
     Cmd::ReportProblem,
@@ -741,6 +743,7 @@ impl Cmd {
             BookmarkCheck => ("Überprüfen", "Check"),
             BookmarkLinks => ("Verweise aus Lesezeichen", "Links from bookmarks"),
             BookmarkSortPages => ("Seiten sortieren", "Sort pages"),
+            BookmarkCase => ("Groß-/Kleinschreibung", "Change case"),
             BookmarkToNamed => ("In Sprungmarken umwandeln", "Convert to named destinations"),
             Manual => ("Handbuch", "Manual"),
             Support => ("Support", "Support"),
@@ -905,6 +908,7 @@ impl Cmd {
             BookmarkCheck => Icon::Search,
             BookmarkLinks => Icon::Link,
             BookmarkSortPages => Icon::Sort,
+            BookmarkCase => Icon::TextBox,
             Manual => Icon::Help,
             Support => Icon::Help,
             ReportProblem => Icon::Bug,
@@ -1105,6 +1109,26 @@ impl MrPdfApp {
             }
             EmailAll => self.tabs.iter().any(|t| t.doc.path().is_some()),
             LayoutCover => true,
+            // "Ändern" and "Umwandeln" of the bookmark tab need bookmarks.
+            BookmarkAddText
+            | BookmarkCase
+            | BookmarkUpper
+            | BookmarkLower
+            | BookmarkTitleCase
+            | BookmarkZoom
+            | BookmarkResolveNamed
+            | BookmarkReplace
+            | BookmarkRemoveActions
+            | BookmarkSort
+            | BookmarkCheck
+            | BookmarkDedupe
+            | BookmarkDeleteAll
+            | BookmarkToc
+            | BookmarkLinks
+            | BookmarkSortPages
+            | BookmarkToNamed
+            | BookmarkExportHtml
+            | BookmarkExportText => tab.is_some_and(|t| t.has_bookmarks()),
             View(v) => self.view_enabled(v),
             Comment(c) => self.comment_enabled(c),
             Form(f) => self.form_enabled(f),

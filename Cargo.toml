@@ -41,6 +41,8 @@ image = { version = "=0.25.10", default-features = false, features = ["png", "jp
 log = "0.4"
 env_logger = { version = "0.11", default-features = false, features = ["auto-color", "humantime"] }
 thiserror = "2"
+# Version already in Cargo.lock; search patterns in bookmark titles.
+regex = "=1.13.1"
 serde = { version = "1", features = ["derive"] }
 
 [target.'cfg(windows)'.dependencies]

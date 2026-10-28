@@ -509,6 +509,11 @@ pub fn append(bytes: &[u8], password: Option<&str>, items: &[NewBookmark]) -> Re
 /// Parses a bookmark list: one bookmark per line as `title<TAB>page` or
 /// `title;page`; leading tabs (or pairs of spaces) give the nesting level.
 pub fn parse_bookmark_list(text: &str, page_count: usize) -> Vec<NewBookmark> {
+    parse_bookmark_list_with(text, page_count, None)
+}
+
+/// Like [`parse_bookmark_list`] with an own field separator ("Feldtrenner").
+pub fn parse_bookmark_list_with(text: &str, page_count: usize, separator: Option<&str>) -> Vec<NewBookmark> {
     let mut out = Vec::new();
     for line in text.lines().take(MAX_ITEMS) {
         if line.trim().is_empty() {
@@ -528,7 +533,11 @@ pub fn parse_bookmark_list(text: &str, page_count: usize) -> Vec<NewBookmark> {
             }
         }
         let rest = rest.trim();
-        let (title, page) = match rest.rsplit_once(['\t', ';']) {
+        let split = match separator.filter(|s| !s.is_empty()) {
+            Some(sep) => rest.rsplit_once(sep),
+            None => rest.rsplit_once(['\t', ';']),
+        };
+        let (title, page) = match split {
             Some((t, p)) if p.trim().parse::<usize>().is_ok() => {
                 (t.trim(), p.trim().parse::<usize>().unwrap_or(1))
             }

@@ -1255,12 +1255,27 @@ fn bookmark_tools() {
     assert!(doc.bookmarks().is_empty());
 }
 
+/// Sets an action on the first top-level bookmark (raw edit).
+fn with_first_bookmark_action(doc: &mut Document, action: lopdf::Dictionary) -> Document {
+    let mut raw = lopdf::Document::load_mem(&doc.to_bytes().unwrap()).unwrap();
+    let catalog = raw.trailer.get(b"Root").unwrap().as_reference().unwrap();
+    let outlines = raw.get_dictionary(catalog).unwrap().get(b"Outlines").unwrap().as_reference().unwrap();
+    let first = raw.get_dictionary(outlines).unwrap().get(b"First").unwrap().as_reference().unwrap();
+    let item = raw.get_dictionary_mut(first).unwrap();
+    item.remove(b"Dest");
+    item.set("A", lopdf::Object::Dictionary(action));
+    let mut bytes = Vec::new();
+    raw.save_to(&mut bytes).unwrap();
+    Document::from_bytes(bytes, "action.pdf", None).unwrap()
+}
+
 #[test]
 fn bookmark_destinations_and_order() {
     use mrpdf::outline::NewBookmark;
-    use mrpdf::outline_edit::{Problem, Zoom};
+    use mrpdf::outline_edit::{Problem, Scope, Zoom, ZoomTargets};
     let _guard = common::lock();
     let mut doc = open(4);
+    let all = Scope::all();
     let nb = |title: &str, page: usize, level: usize| NewBookmark { title: title.into(), page, level };
     doc.append_bookmarks(&[nb("Kapitel A", 2, 0), nb("Kapitel B", 1, 0), nb("Teil", 3, 1)]).unwrap();
     let pages = |doc: &Document| {
@@ -1269,15 +1284,18 @@ fn bookmark_destinations_and_order() {
     };
     assert_eq!(pages(&doc), (Some(2), Some(1), Some(3)));
 
-    // Named destinations and back; the targets stay the same.
-    assert_eq!(doc.bookmarks_to_named().unwrap(), 3);
+    // Named destinations (name from the mask) and back.
+    assert_eq!(doc.bookmarks_to_named(&all, "S%[Page]-%[Title]").unwrap(), 3);
     assert_eq!(pages(&doc), (Some(2), Some(1), Some(3)));
-    assert!(doc.check_bookmarks().unwrap().is_empty());
-    assert_eq!(doc.bookmarks_resolve_named().unwrap(), 3);
-    assert_eq!(doc.bookmarks_resolve_named().unwrap(), 0, "nothing named left");
-    assert_eq!(doc.bookmarks_set_zoom(Zoom::Percent(150.0)).unwrap(), 3);
-    assert_eq!(doc.bookmarks_set_zoom(Zoom::Percent(150.0)).unwrap(), 0, "already set");
-    assert_eq!(doc.bookmarks_remove_actions().unwrap(), 0);
+    assert!(doc.check_bookmarks(&Problem::ALL).unwrap().is_empty());
+    // Only the selected bookmark (B) without its child.
+    let only_b = Scope { selected: Some(vec![1]), ..Default::default() };
+    assert_eq!(doc.bookmarks_resolve_named(&only_b, false).unwrap(), 1);
+    assert_eq!(doc.bookmarks_resolve_named(&all, true).unwrap(), 2);
+    assert_eq!(doc.bookmarks_resolve_named(&all, false).unwrap(), 0, "nothing named left");
+    let targets = ZoomTargets { named: true, gotor: false, gotoe: false };
+    assert_eq!(doc.bookmarks_set_zoom(&all, Zoom::Percent(150.0), targets).unwrap(), 3);
+    assert_eq!(doc.bookmarks_set_zoom(&all, Zoom::Percent(150.0), targets).unwrap(), 0, "already set");
     assert_eq!(pages(&doc), (Some(2), Some(1), Some(3)));
 
     // Pages follow the bookmarks: A (page 3), B (page 2), Teil (page 4).
@@ -1296,22 +1314,139 @@ fn bookmark_destinations_and_order() {
         "{toc:?}"
     );
     // Links from bookmark titles on the contents page (3 exist already).
-    assert_eq!(doc.links_from_bookmarks(&[0]).unwrap(), 3);
+    assert_eq!(doc.links_from_bookmarks(&[0]).unwrap(), 0, "existing links are kept free");
+    let opts = mrpdf::document::LinkOptions {
+        pages: vec![0],
+        ignore_case: true,
+        over_existing: true,
+        look: mrpdf::pdf_edit::LinkLook { width: 1.0, ..Default::default() },
+        ..Default::default()
+    };
+    assert_eq!(doc.links_from_bookmarks_with(&opts).unwrap(), 3);
     assert_eq!(doc.links(0).unwrap().len(), 6);
 
     // Named destinations whose names are gone are reported and removed.
-    doc.bookmarks_to_named().unwrap();
+    doc.bookmarks_to_named(&all, "%[Title]").unwrap();
     let mut raw = lopdf::Document::load_mem(&doc.to_bytes().unwrap()).unwrap();
     let catalog = raw.trailer.get(b"Root").unwrap().as_reference().unwrap();
     raw.get_dictionary_mut(catalog).unwrap().remove(b"Dests");
     let mut bytes = Vec::new();
     raw.save_to(&mut bytes).unwrap();
     let mut broken = Document::from_bytes(bytes, "broken.pdf", None).unwrap();
-    let problems = broken.check_bookmarks().unwrap();
-    assert_eq!(problems.len(), 3);
-    assert!(problems.iter().all(|(_, p)| *p == Problem::UnknownName));
-    assert_eq!(broken.remove_broken_bookmarks().unwrap(), 3);
-    assert!(broken.bookmarks().is_empty());
+    let findings = broken.check_bookmarks(&Problem::ALL).unwrap();
+    assert_eq!(findings.len(), 3);
+    assert!(findings.iter().all(|f| f.problem == Problem::InvalidGoTo));
+    assert!(broken.check_bookmarks(&[Problem::EmptyTitle]).unwrap().is_empty());
+    let paths: Vec<Vec<usize>> = findings.iter().map(|f| f.path.clone()).collect();
+    assert_eq!(broken.delete_bookmark_paths(&paths[..1]).unwrap(), 1);
+    assert_eq!(broken.bookmarks().len(), 1, "B stays");
+}
+
+#[test]
+fn bookmark_titles_actions_and_merging() {
+    use mrpdf::outline::NewBookmark;
+    use mrpdf::outline_edit::{ActionKind, Appearance, MergeOptions, Placement, Problem, Scope};
+    use mrpdf::outline_format::{CaseMode, change_case};
+    let _guard = common::lock();
+    let mut doc = open(3);
+    let all = Scope::all();
+    let nb = |title: &str, page: usize, level: usize| NewBookmark { title: title.into(), page, level };
+    doc.append_bookmarks(&[
+        nb("kapitel eins", 0, 0),
+        nb("unterpunkt", 0, 1),
+        nb("Kapitel  Eins", 1, 0),
+        nb("zweiter", 1, 1),
+        nb("anhang", 2, 0),
+    ])
+    .unwrap();
+    let titles = |doc: &Document| doc.bookmarks().iter().map(|b| b.title.clone()).collect::<Vec<_>>();
+
+    // Placeholders and levels: only level 2 gets the prefix.
+    let level2 = Scope { level: Some(2), ..Default::default() };
+    assert_eq!(
+        doc.bookmarks_map_titles(&level2, |t, i| format!("{}.{} {t}", i.path_index[0], i.path_index[1]))
+            .unwrap(),
+        2
+    );
+    assert_eq!(doc.bookmarks()[0].children[0].title, "1.1 unterpunkt");
+    // "Kapitel  Eins" is already right.
+    assert_eq!(doc.bookmarks_map_titles(&all, |t, _| change_case(t, CaseMode::EachWord, &[])).unwrap(), 4);
+
+    // Duplicates (case and spaces ignored) become one with both children.
+    let opts =
+        MergeOptions { ignore_case: true, ignore_spaces: true, title_from_last: true, ..Default::default() };
+    assert_eq!(doc.merge_duplicate_bookmarks(&all, opts).unwrap(), 1);
+    assert_eq!(titles(&doc), ["Kapitel  Eins", "Anhang"]);
+    assert_eq!(doc.bookmarks()[0].children.len(), 2);
+    assert_eq!(doc.bookmarks()[0].page, Some(0), "target of the first");
+
+    // Sorting descending by title, then the children of the first only.
+    doc.sort_bookmarks_in(&all, false, true, true).unwrap();
+    assert_eq!(titles(&doc), ["Kapitel  Eins", "Anhang"]);
+    doc.sort_bookmarks_in(&all, false, false, true).unwrap();
+    assert_eq!(titles(&doc), ["Anhang", "Kapitel  Eins"]);
+
+    // Actions: a web link is reported only when broken and removed by kind.
+    let mut uri = lopdf::Dictionary::new();
+    uri.set("S", lopdf::Object::Name(b"URI".to_vec()));
+    uri.set("URI", lopdf::Object::string_literal(""));
+    let mut doc = with_first_bookmark_action(&mut doc, uri);
+    let found = doc.check_bookmarks(&Problem::ALL).unwrap();
+    assert_eq!(found.iter().map(|f| f.problem).collect::<Vec<_>>(), [Problem::InvalidLaunchUri]);
+    assert_eq!(doc.bookmarks_remove_actions(&all, &[ActionKind::JavaScript], false, true).unwrap(), 0);
+    assert_eq!(doc.bookmarks_remove_actions(&all, &[ActionKind::Uri], true, true).unwrap(), 1);
+    assert_eq!(titles(&doc), ["Kapitel  Eins"], "the web bookmark is gone");
+
+    // Styled new bookmarks in front of the existing ones.
+    let look = Appearance { color: mrpdf::model::Rgba::rgb(200, 0, 0), bold: true, ..Default::default() };
+    doc.add_bookmarks_styled(&[(nb("Vorwort", 0, 0), look)], Placement::Before).unwrap();
+    assert_eq!(titles(&doc), ["Vorwort", "Kapitel  Eins"]);
+    let raw = lopdf::Document::load_mem(&doc.to_bytes().unwrap()).unwrap();
+    let styled = raw
+        .objects
+        .values()
+        .filter_map(|o| o.as_dict().ok())
+        .any(|d| d.get(b"F").ok().and_then(|f| f.as_i64().ok()) == Some(2) && d.get(b"C").is_ok());
+    assert!(styled, "colour and bold are written");
+}
+
+#[test]
+fn bookmarks_from_text_rules_and_contents_options() {
+    use mrpdf::document::{TextBookmarkOptions, TocOptions};
+    use mrpdf::outline_edit::{Appearance, Placement};
+    use mrpdf::outline_format::{CaseMode, TitleFormat};
+    let _guard = common::lock();
+    let mut doc = open(3);
+    // The 24 pt headings are suggested as the only rule.
+    let rules = doc.suggested_text_rules().unwrap();
+    assert_eq!(rules.len(), 1, "{rules:?}");
+    let fmt = TitleFormat { case: CaseMode::Upper, prefix: Some("%[Seq]: ".into()), ..Default::default() };
+    let opts = TextBookmarkOptions {
+        rules: vec![(rules[0].clone(), Appearance::default(), fmt)],
+        pages: vec![0, 2],
+        placement: Placement::Replace,
+        stop_words: None,
+        skip_repeated: true,
+    };
+    assert_eq!(doc.add_text_bookmarks(&opts).unwrap(), 2);
+    let titles: Vec<String> = doc.bookmarks().iter().map(|b| b.title.clone()).collect();
+    assert_eq!(titles, ["1: PAGE 1 HELLO WORLD", "2: PAGE 3 HELLO WORLD"]);
+    let stop = TextBookmarkOptions { stop_words: Some(vec!["hello".into()]), ..opts.clone() };
+    assert!(doc.text_bookmarks(&stop).unwrap().is_empty());
+
+    // Contents at the end, without title, numbered entries.
+    let toc = TocOptions {
+        title: None,
+        before: None,
+        numbering: Some(mrpdf::outline_format::NumberStyle::RomanUpper),
+        ..Default::default()
+    };
+    assert_eq!(doc.insert_toc_with(&toc).unwrap(), 1);
+    assert_eq!(doc.page_count(), 4);
+    let text = doc.page_text(3).unwrap().all_text();
+    assert!(text.contains("I 1: PAGE 1") && text.contains("II 2: PAGE 3"), "{text}");
+    assert!(text.contains("...."), "dot leaders: {text}");
+    assert!(doc.page_text(0).unwrap().all_text().contains("Page 1"), "the first page stays first");
 }
 
 #[test]

@@ -515,15 +515,8 @@ impl MrPdfApp {
                         outcome = o;
                         action = a;
                     }
-                    other @ (Dialog::BookmarkEveryNth { .. }
-                    | Dialog::BookmarkReplace { .. }
-                    | Dialog::BookmarkSort { .. }
-                    | Dialog::BookmarkFromToc { .. }
-                    | Dialog::BookmarkAddText { .. }
-                    | Dialog::BookmarkZoom { .. }
-                    | Dialog::BookmarkLinks { .. }
-                    | Dialog::BookmarkCheck { .. }) => {
-                        let (o, a) = self.outline_dialog(ui, other);
+                    Dialog::Bookmark(state) => {
+                        let (o, a) = self.bookmark_dialog(ui, state);
                         outcome = o;
                         action = a;
                     }

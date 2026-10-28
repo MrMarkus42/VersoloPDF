@@ -985,12 +985,64 @@ pub enum LinkSpec {
     Page(usize),
 }
 
-/// Adds link annotations to a page.
+/// Border of a link ("Rahmen").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LinkBorder {
+    #[default]
+    Solid,
+    Dashed,
+    Underline,
+    Inset,
+    Beveled,
+}
+
+/// What a link shows while clicked ("Hervorhebung").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LinkHighlight {
+    #[default]
+    None,
+    Invert,
+    Outline,
+    Push,
+}
+
+/// Look of new links. A width of 0 draws no border.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LinkLook {
+    pub color: crate::model::Rgba,
+    pub border: LinkBorder,
+    pub width: f32,
+    pub highlight: LinkHighlight,
+}
+
+impl Default for LinkLook {
+    fn default() -> Self {
+        Self {
+            color: crate::model::Rgba::BLACK,
+            border: LinkBorder::Solid,
+            width: 0.0,
+            highlight: LinkHighlight::Invert,
+        }
+    }
+}
+
+/// Adds link annotations to a page (no border).
 pub fn add_links(
     bytes: &[u8],
     password: Option<&str>,
     page: usize,
     links: &[(RectF, LinkSpec)],
+) -> Result<Vec<u8>> {
+    add_links_styled(bytes, password, page, links, &LinkLook::default())
+}
+
+/// Adds link annotations with the given look.
+pub fn add_links_styled(
+    bytes: &[u8],
+    password: Option<&str>,
+    page: usize,
+    links: &[(RectF, LinkSpec)],
+    look: &LinkLook,
 ) -> Result<Vec<u8>> {
     guarded(|| {
         let mut edit = Edit::open(bytes, password)?;
@@ -1001,7 +1053,30 @@ pub fn add_links(
             d.set("Subtype", Object::Name(b"Link".to_vec()));
             d.set("Rect", rect_array(rect));
             d.set("P", Object::Reference(page_id));
-            d.set("Border", Object::Array(vec![0.into(), 0.into(), 0.into()]));
+            if look.width > 0.0 {
+                let style = match look.border {
+                    LinkBorder::Solid => "S",
+                    LinkBorder::Dashed => "D",
+                    LinkBorder::Underline => "U",
+                    LinkBorder::Inset => "I",
+                    LinkBorder::Beveled => "B",
+                };
+                let mut bs = Dictionary::new();
+                bs.set("W", Object::Real(look.width));
+                bs.set("S", Object::Name(style.as_bytes().to_vec()));
+                d.set("BS", Object::Dictionary(bs));
+                let [r, g, b] = look.color.to_pdf();
+                d.set("C", Object::Array(vec![Object::Real(r), Object::Real(g), Object::Real(b)]));
+            } else {
+                d.set("Border", Object::Array(vec![0.into(), 0.into(), 0.into()]));
+            }
+            let h = match look.highlight {
+                LinkHighlight::None => "N",
+                LinkHighlight::Invert => "I",
+                LinkHighlight::Outline => "O",
+                LinkHighlight::Push => "P",
+            };
+            d.set("H", Object::Name(h.as_bytes().to_vec()));
             d.set("NM", text_string(&unique_name()));
             match spec {
                 LinkSpec::Uri(uri) => {

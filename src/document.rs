@@ -22,12 +22,14 @@ use crate::model::{
     LinkTarget, Metadata, Permissions, SearchOptions,
 };
 use crate::outline;
-use crate::outline_edit;
 use crate::pages;
 use crate::pdf_edit::{self, AnnotDetails, AnnotUpdate, NewAnnotation};
 use crate::security::{self, ProtectOptions, SecurityInfo};
 use crate::text::{CharInfo, PageText};
 use crate::xfdf;
+
+mod bookmarks;
+pub use bookmarks::{LinkOptions, TextBookmarkOptions, TocLevel, TocOptions, TocPageNumbers};
 
 /// Files larger than this are refused to protect against memory exhaustion.
 pub const MAX_FILE_SIZE: u64 = 1 << 31;
@@ -1632,160 +1634,6 @@ impl Document {
         }
         self.edit_bytes("add bookmarks", |b, pw| outline::append(b, pw, items))?;
         Ok(items.len())
-    }
-
-    /// Runs a bookmark edit that returns the number of changed items.
-    fn edit_outline(
-        &mut self,
-        label: &str,
-        f: impl FnOnce(&[u8], Option<&str>) -> Result<(Vec<u8>, usize)>,
-    ) -> Result<usize> {
-        self.require(self.permissions().modify)?;
-        let mut changed = 0;
-        self.edit_bytes(label, |b, pw| {
-            let (bytes, n) = f(b, pw)?;
-            changed = n;
-            Ok(bytes)
-        })?;
-        Ok(changed)
-    }
-
-    /// "Sprungmarken zu normalen Zielen".
-    pub fn bookmarks_resolve_named(&mut self) -> Result<usize> {
-        self.edit_outline("resolve named destinations", outline_edit::resolve_named)
-    }
-
-    /// "In Sprungmarken umwandeln".
-    pub fn bookmarks_to_named(&mut self) -> Result<usize> {
-        self.edit_outline("create named destinations", outline_edit::to_named)
-    }
-
-    /// "Vergrößerung ändern".
-    pub fn bookmarks_set_zoom(&mut self, zoom: outline_edit::Zoom) -> Result<usize> {
-        self.edit_outline("bookmark zoom", |b, pw| outline_edit::set_zoom(b, pw, zoom))
-    }
-
-    /// "Aktionen entfernen".
-    pub fn bookmarks_remove_actions(&mut self) -> Result<usize> {
-        self.edit_outline("remove bookmark actions", outline_edit::remove_actions)
-    }
-
-    /// "Überprüfen": broken bookmarks as (title, problem).
-    pub fn check_bookmarks(&mut self) -> Result<Vec<(String, outline_edit::Problem)>> {
-        self.sync_bytes()?;
-        outline_edit::check(&self.bytes, self.password.as_deref())
-    }
-
-    /// Removes the bookmarks `check_bookmarks` reports.
-    pub fn remove_broken_bookmarks(&mut self) -> Result<usize> {
-        self.edit_outline("remove broken bookmarks", outline_edit::remove_broken)
-    }
-
-    /// "Seiten sortieren": pages in the order of the bookmarks. Returns
-    /// whether the order changed.
-    pub fn sort_pages_by_bookmarks(&mut self) -> Result<bool> {
-        self.require(self.permissions().assemble)?;
-        self.sync_bytes()?;
-        let targets = outline_edit::pages_in_order(&self.bytes, self.password.as_deref())?;
-        let order = outline_edit::page_order_by_bookmarks(self.page_count(), &targets);
-        if order.iter().enumerate().all(|(i, &p)| i == p) {
-            return Ok(false);
-        }
-        self.edit_bytes("sort pages by bookmarks", |b, pw| pdf_edit::reorder_pages(b, pw, &order))?;
-        Ok(true)
-    }
-
-    /// "Aus Inhaltsverzeichnis": bookmarks from the entries ("Titel ....
-    /// 12") of the given pages. `offset` is added to the printed page
-    /// numbers; None finds it from where the first title appears.
-    pub fn toc_bookmarks(
-        &self,
-        toc_pages: &[usize],
-        offset: Option<i64>,
-    ) -> Result<Vec<outline::NewBookmark>> {
-        let mut entries = Vec::new();
-        for &page in toc_pages {
-            let lines: Vec<String> = self.page_text(page)?.lines().into_iter().map(|(l, _)| l).collect();
-            entries.extend(outline_edit::parse_toc_lines(&lines));
-        }
-        let n = self.page_count() as i64;
-        let offset = match offset {
-            Some(o) => o,
-            None => {
-                let after = toc_pages.iter().max().map_or(0, |p| p + 1);
-                let simple = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
-                let mut found = 0;
-                if let Some(e) = entries.first() {
-                    let title = simple(&e.title);
-                    for page in after..self.page_count() {
-                        if simple(&self.page_text(page)?.all_text()).contains(&title) {
-                            found = page as i64 - (e.number - 1);
-                            break;
-                        }
-                    }
-                }
-                found
-            }
-        };
-        Ok(entries
-            .into_iter()
-            .map(|e| outline::NewBookmark {
-                title: e.title,
-                page: (e.number - 1 + offset).clamp(0, (n - 1).max(0)) as usize,
-                level: e.level,
-            })
-            .collect())
-    }
-
-    /// "Verweise aus Lesezeichen": on the given pages, every bookmark title
-    /// found in the text becomes a link to the bookmark's page. Returns
-    /// the number of new links.
-    pub fn links_from_bookmarks(&mut self, pages: &[usize]) -> Result<usize> {
-        fn flat(items: &[Bookmark], out: &mut Vec<(String, usize)>) {
-            for b in items {
-                if let Some(p) = b.page
-                    && !b.title.trim().is_empty()
-                {
-                    out.push((b.title.trim().to_string(), p));
-                }
-                flat(&b.children, out);
-            }
-        }
-        self.require(self.permissions().modify)?;
-        let mut marks = Vec::new();
-        flat(&self.bookmarks(), &mut marks);
-        if marks.is_empty() {
-            return Err(Error::Invalid("the document has no bookmarks".into()));
-        }
-        let opts = SearchOptions { match_case: false, whole_word: false };
-        let mut per_page = Vec::new();
-        for &page in pages {
-            let text = self.page_text(page)?;
-            let mut links = Vec::new();
-            for (title, target) in &marks {
-                if *target == page {
-                    continue;
-                }
-                if let Some(hit) = crate::search::search_page(page, &text, title, opts).into_iter().next() {
-                    links.extend(hit.rects.into_iter().map(|r| (r, pdf_edit::LinkSpec::Page(*target))));
-                }
-            }
-            if !links.is_empty() {
-                per_page.push((page, links));
-            }
-        }
-        let count = per_page.iter().map(|(_, l)| l.len()).sum();
-        if count == 0 {
-            return Ok(0);
-        }
-        self.edit_bytes("links from bookmarks", |b, pw| {
-            let mut bytes = b.to_vec();
-            for (page, links) in &per_page {
-                bytes = pdf_edit::add_links(&bytes, pw, *page, links)?;
-            }
-            Ok(bytes)
-        })?;
-        Ok(count)
     }
 
     /// Suggests bookmarks from headings: lines set clearly larger than the

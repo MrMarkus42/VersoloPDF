@@ -16,6 +16,16 @@ use crate::text::{PageText, TextRange};
 use crate::ui::cache::TextureCache;
 use crate::ui::view::{Layout, PT_TO_SCREEN, PageLayout, ZoomMode};
 
+/// Whether `path` (child indices) names a bookmark of `items`.
+pub fn bookmark_exists(items: &[Bookmark], path: &[usize]) -> bool {
+    match path.split_first() {
+        None => false,
+        Some((i, rest)) => {
+            items.get(*i).is_some_and(|b| rest.is_empty() || bookmark_exists(&b.children, rest))
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AnnotRef {
     pub page: usize,
@@ -181,6 +191,8 @@ pub struct DocTab {
     bookmarks: Option<Cached<Vec<Bookmark>>>,
     pub selection: Option<TextSelection>,
     pub selected_annot: Option<AnnotRef>,
+    /// Bookmark selected in the bookmarks pane (child indices).
+    pub selected_bookmark: Option<Vec<usize>>,
     details: Option<(AnnotRef, u64, AnnotDetails)>,
     pub search: SearchState,
     pub interaction: Interaction,
@@ -255,6 +267,7 @@ impl DocTab {
             bookmarks: None,
             selection: None,
             selected_annot: None,
+            selected_bookmark: None,
             details: None,
             search: SearchState::default(),
             interaction: Interaction::None,
@@ -534,6 +547,15 @@ impl DocTab {
         Some(text.text_in(sel.range))
     }
 
+    /// Whether the document has bookmarks, from the cached list (true while
+    /// it was not read yet for this revision).
+    pub fn has_bookmarks(&self) -> bool {
+        match &self.bookmarks {
+            Some(c) if c.revision == self.doc.revision() => !c.value.is_empty(),
+            _ => true,
+        }
+    }
+
     /// Called after any document change.
     pub fn after_edit(&mut self) {
         if let Some(sel) = self.selected_annot
@@ -543,6 +565,11 @@ impl DocTab {
         }
         if self.current_page >= self.doc.page_count() {
             self.current_page = self.doc.page_count().saturating_sub(1);
+        }
+        if let Some(path) = self.selected_bookmark.clone()
+            && !bookmark_exists(&self.bookmarks(), &path)
+        {
+            self.selected_bookmark = None;
         }
         self.selection = None;
         if !self.search.query.is_empty() && self.search.revision != self.doc.revision() {
