@@ -157,6 +157,14 @@ pub struct Settings {
     /// Ribbon tab "Ansicht": document tabs grouped side by side (true) or
     /// on top of each other ("Tabs anordnen").
     pub tab_groups_vertical: bool,
+    /// "Auswahl beibehalten": tools whose stay-active behaviour differs
+    /// from [`Tool::is_sticky`].
+    pub keep_tool: Vec<(Tool, bool)>,
+    /// "Exklusiver Modus": while a comment tool is active, comments of its
+    /// type can be selected and moved; other comments are ignored.
+    pub exclusive_mode: bool,
+    /// Tax rate of the calculator in percent ("TAX+", "TAX−").
+    pub tax_rate: f64,
 }
 
 /// Folder offered by "Speichern unter".
@@ -278,6 +286,9 @@ impl Default for Settings {
             fs_auto_seconds: 0,
             fs_nav_bar: true,
             tab_groups_vertical: true,
+            keep_tool: Vec::new(),
+            exclusive_mode: false,
+            tax_rate: 19.0,
         }
     }
 }
@@ -317,6 +328,31 @@ impl Settings {
         } else {
             self.styles.push((tool, style));
         }
+    }
+
+    /// Whether `tool` stays active after creating an object.
+    pub fn keeps_tool(&self, tool: Tool) -> bool {
+        self.keep_tool
+            .iter()
+            .find(|(t, _)| *t == tool)
+            .map_or(Self::keeps_by_default(tool), |(_, keep)| *keep)
+    }
+
+    /// Drawing tools and tools that set several points stay active.
+    fn keeps_by_default(tool: Tool) -> bool {
+        tool.is_sticky() || tool.gesture() == crate::ui::tools::Gesture::Vertices
+    }
+
+    pub fn set_keeps_tool(&mut self, tool: Tool, keep: bool) {
+        self.keep_tool.retain(|(t, _)| *t != tool);
+        if keep != Self::keeps_by_default(tool) {
+            self.keep_tool.push((tool, keep));
+        }
+    }
+
+    /// "Formate für Anmerkungen > Zurücksetzen".
+    pub fn reset_style(&mut self, tool: Tool) {
+        self.styles.retain(|(t, _)| *t != tool);
     }
 
     pub fn add_recent(&mut self, path: &Path) {
@@ -367,6 +403,7 @@ impl Settings {
         self.read_volume = self.read_volume.min(100);
         self.read_rate = self.read_rate.clamp(-10, 10);
         self.fs_auto_seconds = self.fs_auto_seconds.min(3600);
+        self.tax_rate = if self.tax_rate.is_finite() { self.tax_rate.clamp(0.0, 100.0) } else { 19.0 };
         if let Some(a) = self.fs_default_transition.advance {
             self.fs_default_transition.advance = (a.is_finite() && a > 0.0).then_some(a.min(3600.0));
         }

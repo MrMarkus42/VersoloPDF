@@ -101,6 +101,14 @@ pub enum CanvasEvent {
         current: String,
     },
     MarkupSelection(Tool),
+    /// Ask for a media file and embed it in `rect` (media tools).
+    AddMedia {
+        page: usize,
+        rect: RectF,
+        tool: Tool,
+    },
+    /// Open the file of a media annotation with the system's program.
+    PlayMedia(AnnotRef),
     CopySelection,
     DeleteSelected,
     ShowProperties,
@@ -144,6 +152,8 @@ pub struct CanvasCtx<'a> {
     pub events: &'a mut Vec<CanvasEvent>,
     pub t: &'static Strings,
     pub view: ViewOptions,
+    /// "Exklusiver Modus" (see `Settings::exclusive_mode`).
+    pub exclusive: bool,
 }
 
 /// Placement of a page on screen for one frame.
@@ -783,6 +793,26 @@ fn draw_overlays(
             painter.rect_filled(Rect::from_center_size(c, vec2(6.0, 6.0)), 0.0, accent);
         }
     }
+    // Open pop-ups ("Alle Pop-ups öffnen"): author and text next to the comment.
+    let popups: Vec<usize> = tab.open_popups.iter().filter(|r| r.page == page).map(|r| r.index).collect();
+    for index in popups {
+        let Some(a) = tab.annotations(page).get(index).cloned() else { continue };
+        let anchor = pos.pdf_rect_to_screen(&a.rect);
+        let font = egui::FontId::proportional(12.0);
+        let text = if a.contents.trim().is_empty() { "…".to_string() } else { a.contents.clone() };
+        let galley = painter.layout(text, font.clone(), Color32::from_gray(20), 220.0);
+        let title = painter.layout_no_wrap(a.author.clone(), font, Color32::from_gray(40));
+        let size = vec2(galley.size().x.max(title.size().x).max(120.0) + 12.0, galley.size().y + 30.0);
+        let r = Rect::from_min_size(anchor.right_top() + vec2(8.0, 0.0), size);
+        painter.rect_filled(r, 3.0, Color32::from_rgb(255, 250, 200));
+        painter.rect_stroke(r, 3.0, Stroke::new(1.0, Color32::from_rgb(190, 170, 60)), StrokeKind::Inside);
+        painter.line_segment(
+            [anchor.right_top(), r.left_top()],
+            Stroke::new(1.0, Color32::from_rgb(190, 170, 60)),
+        );
+        painter.galley(r.min + vec2(6.0, 4.0), title, Color32::from_gray(40));
+        painter.galley(r.min + vec2(6.0, 22.0), galley, Color32::from_gray(20));
+    }
     // Eraser hits.
     if let Interaction::Erase { page: p, hits } = &interaction
         && *p == page
@@ -885,13 +915,25 @@ fn find_page(on_screen: &[PageOnScreen], p: Pos2) -> Option<PageOnScreen> {
     on_screen.iter().find(|s| s.rect.contains(p)).copied()
 }
 
-/// Topmost comment annotation at `pdf` on `page`.
+/// Topmost visible comment annotation at `pdf` on `page`.
 fn annotation_at(tab: &mut DocTab, page: usize, pdf: PointF, tolerance: f32) -> Option<usize> {
+    let filter = tab.doc.annot_filter().clone();
     tab.annotations(page)
         .iter()
         .rev()
-        .find(|a| a.kind.is_comment() && a.rect.inflate(tolerance).contains(pdf))
+        .find(|a| {
+            a.kind.is_comment()
+                && a.rect.inflate(tolerance).contains(pdf)
+                && !filter.hides(page, a.index, a.kind, &a.author, false)
+        })
         .map(|a| a.index)
+}
+
+/// "Exklusiver Modus": a comment of the active tool's type at `pdf`.
+fn own_kind_at(tab: &mut DocTab, cx: &CanvasCtx, page: usize, pdf: PointF, tol: f32) -> Option<usize> {
+    let kind = cx.tool.annot_kind().filter(|_| cx.exclusive)?;
+    let index = annotation_at(tab, page, pdf, tol)?;
+    tab.annotations(page).get(index).is_some_and(|a| a.kind == kind).then_some(index)
 }
 
 /// Topmost form field widget at `pdf` on `page`.
@@ -1116,6 +1158,13 @@ fn start_drag(
     let pdf = pos.pdf_at(start);
     let v = pos.view_at(start);
     let snapped = snap_point(tab, cx, v);
+    if let Some(i) = own_kind_at(tab, cx, pos.page, pdf, tol)
+        && tab.annotations(pos.page).get(i).is_some_and(|a| a.kind.is_movable())
+    {
+        let annot = AnnotRef { page: pos.page, index: i };
+        tab.selected_annot = Some(annot);
+        return Interaction::MoveAnnot { annot, delta: Vec2::ZERO };
+    }
     match cx.tool {
         Tool::Hand | Tool::SelectAnnot | Tool::SelectFields => {
             let hit = if cx.tool == Tool::SelectFields {
@@ -1256,6 +1305,15 @@ fn finish_drag(tab: &mut DocTab, cx: &mut CanvasCtx, interaction: Interaction, o
                 cx.events.push(CanvasEvent::Status(cx.t.no_text_here.into()));
                 return;
             }
+            if cx.tool == Tool::TextCorrection
+                && let (Some(a), Some(b)) = (anchor, end_char)
+            {
+                // The keys decide what happens with the selection.
+                tab.selected_annot = None;
+                tab.selection = Some(TextSelection { page, range: TextRange::new(a, b) });
+                cx.events.push(CanvasEvent::Status(cx.t.hint_correction.into()));
+                return;
+            }
             let Some(kind) = cx.tool.annot_kind() else { return };
             let mut annot = new_annot(cx, kind);
             annot.quads = quads;
@@ -1302,6 +1360,8 @@ fn default_size(tool: Tool) -> (f32, f32) {
         Tool::FieldList => (150.0, 60.0),
         Tool::FieldButton => (80.0, 22.0),
         Tool::FieldSignature => (180.0, 50.0),
+        Tool::Video | Tool::Model3d => (160.0, 90.0),
+        Tool::AudioClip => (120.0, 40.0),
         _ => (100.0, 60.0),
     }
 }
@@ -1363,6 +1423,9 @@ fn finish_shape(
             cx.events.push(CanvasEvent::RequestText { page, tool, template: Box::new(annot) });
         }
         t if t.is_field() => cx.events.push(CanvasEvent::CreateField { page, rect, tool: t }),
+        Tool::Video | Tool::AudioClip | Tool::Model3d => {
+            cx.events.push(CanvasEvent::AddMedia { page, rect, tool })
+        }
         Tool::Line | Tool::Arrow | Tool::MeasureDistance if big_enough => {
             let (p0, p1) = (geo.view_to_pdf(start), geo.view_to_pdf(current));
             let mut annot = new_annot(cx, AnnotKind::Line);
@@ -1426,8 +1489,20 @@ fn handle_click(tab: &mut DocTab, cx: &mut CanvasCtx, on_screen: &[PageOnScreen]
     let view = pos.view_at(p);
     let tol = 4.0 / tab.scale();
     let tool = cx.tool;
+    if let Some(index) = own_kind_at(tab, cx, pos.page, pdf, tol) {
+        tab.selected_annot = Some(AnnotRef { page: pos.page, index });
+        return;
+    }
     match tool {
         Tool::Hand => click_hand(tab, cx, &pos, pdf, tol),
+        Tool::ContentHighlight => match tab.doc.object_at(pos.page, pdf) {
+            Ok(Some(rect)) => {
+                let mut annot = new_annot(cx, AnnotKind::Highlight);
+                annot.quads = vec![rect];
+                cx.events.push(CanvasEvent::Create { page: pos.page, annot: Box::new(annot) });
+            }
+            _ => cx.events.push(CanvasEvent::Status(cx.t.no_content_here.into())),
+        },
         Tool::SelectAnnot => {
             tab.selected_annot =
                 annotation_at(tab, pos.page, pdf, tol).map(|index| AnnotRef { page: pos.page, index });
@@ -1460,6 +1535,10 @@ fn handle_click(tab: &mut DocTab, cx: &mut CanvasCtx, on_screen: &[PageOnScreen]
         Tool::FileAttach => {
             let rect = pos.view_rect_to_pdf(view, PointF::new(view.x + 16.0, view.y + 22.0));
             cx.events.push(CanvasEvent::AttachFile { page: pos.page, rect });
+        }
+        Tool::SoundNote => {
+            let rect = pos.view_rect_to_pdf(view, PointF::new(view.x + 20.0, view.y + 20.0));
+            cx.events.push(CanvasEvent::AddMedia { page: pos.page, rect, tool });
         }
         Tool::Stamp => {
             let label = win_ansi(&cx.stamp_label.to_uppercase());
@@ -1565,6 +1644,8 @@ fn handle_double_click(
                 tab.selected_annot = Some(annot);
                 if matches!(kind, Some(AnnotKind::FreeText | AnnotKind::Note | AnnotKind::Caret)) {
                     cx.events.push(CanvasEvent::EditText(annot));
+                } else if kind == Some(AnnotKind::Media) {
+                    cx.events.push(CanvasEvent::PlayMedia(annot));
                 } else {
                     cx.events.push(CanvasEvent::ShowProperties);
                 }

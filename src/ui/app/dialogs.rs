@@ -366,6 +366,9 @@ impl MrPdfApp {
                         outcome = o;
                         action = a;
                     }
+                    Dialog::CommentStyles(tool) => {
+                        outcome = self.comment_styles_dialog(ui, tool);
+                    }
                     Dialog::NewPortfolio(state) => {
                         let (o, a) = self.new_portfolio_dialog(ui, state);
                         outcome = o;

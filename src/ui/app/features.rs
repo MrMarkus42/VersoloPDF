@@ -166,6 +166,8 @@ impl MrPdfApp {
                 self.select_tool(Tool::Hand);
             }
             CanvasEvent::CreateField { page, rect, tool } => self.create_field(ctx, page, rect, tool),
+            CanvasEvent::AddMedia { page, rect, tool } => self.add_media_file(ctx, page, rect, tool),
+            CanvasEvent::PlayMedia(annot) => self.play_media(ctx, annot),
             _ => {}
         }
     }
@@ -278,7 +280,7 @@ impl MrPdfApp {
             _ => template.contents = text,
         }
         self.handle_canvas_event(ctx, CanvasEvent::Create { page, annot: template });
-        if !tool.is_sticky() {
+        if !self.settings.keeps_tool(self.tool) {
             self.tool = Tool::Hand;
         }
     }

@@ -413,6 +413,7 @@ pub fn kind_from_subtype(subtype: &str) -> AnnotKind {
         "Link" => AnnotKind::Link,
         "Widget" => AnnotKind::Widget,
         "Redact" => AnnotKind::Redact,
+        "Screen" | "3D" | "Sound" | "RichMedia" | "Movie" => AnnotKind::Media,
         _ => AnnotKind::Other,
     }
 }

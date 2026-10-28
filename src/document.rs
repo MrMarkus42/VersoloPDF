@@ -18,8 +18,8 @@ use crate::error::{Error, Result};
 use crate::forms::{self, FieldValue};
 use crate::geometry::{PageGeometry, PointF, RectF, Rotation};
 use crate::model::{
-    AnnotKind, AnnotStyle, AnnotationInfo, Bookmark, FieldKind, FormFieldInfo, LinkInfo, LinkTarget,
-    Metadata, Permissions, SearchOptions,
+    AnnotFilter, AnnotKind, AnnotStyle, AnnotationInfo, Bookmark, FieldKind, FormFieldInfo, LinkInfo,
+    LinkTarget, Metadata, Permissions, SearchOptions,
 };
 use crate::outline;
 use crate::pages;
@@ -55,6 +55,10 @@ pub struct RenderOptions {
     pub recolor: Option<([u8; 3], [u8; 3])>,
     /// No paper colour behind the content ("Transparenzgitter").
     pub transparent: bool,
+    /// Apply the document's comment filter (see
+    /// [`Document::set_annot_filter`]); the value is its serial number so
+    /// render caches notice changes. 0 = no filter.
+    pub filter: u32,
 }
 
 impl Default for RenderOptions {
@@ -66,6 +70,7 @@ impl Default for RenderOptions {
             printing: false,
             recolor: None,
             transparent: false,
+            filter: 0,
         }
     }
 }
@@ -168,6 +173,9 @@ pub struct Document {
     modified: bool,
     /// Security handler details of encrypted documents.
     security: Option<SecurityInfo>,
+    /// Display filter for comments and its serial number.
+    annot_filter: AnnotFilter,
+    filter_serial: u32,
 }
 
 fn map_load_error(err: PdfiumError, had_password: bool) -> Error {
@@ -234,6 +242,7 @@ fn annot_kind(t: PdfPageAnnotationType) -> AnnotKind {
         T::Link => AnnotKind::Link,
         T::Widget | T::XfaWidget => AnnotKind::Widget,
         T::Redacted => AnnotKind::Redact,
+        T::Screen | T::ThreeD | T::Sound | T::RichMedia | T::Movie => AnnotKind::Media,
         _ => AnnotKind::Other,
     }
 }
@@ -309,6 +318,8 @@ impl Document {
             revision: 0,
             modified: false,
             security: None,
+            annot_filter: AnnotFilter::default(),
+            filter_serial: 0,
         };
         doc.refresh_security();
         doc.refresh_geometry();
@@ -417,6 +428,23 @@ impl Document {
         self.modified
     }
 
+    /// Display filter for comments ("Anmerkungen > Anzeigen").
+    pub fn annot_filter(&self) -> &AnnotFilter {
+        &self.annot_filter
+    }
+
+    pub fn set_annot_filter(&mut self, filter: AnnotFilter) {
+        if filter != self.annot_filter {
+            self.annot_filter = filter;
+            self.filter_serial = self.filter_serial.wrapping_add(1).max(1);
+        }
+    }
+
+    /// Value for [`RenderOptions::filter`]: 0 if nothing is filtered.
+    pub fn filter_key(&self) -> u32 {
+        if self.annot_filter.is_empty() { 0 } else { self.filter_serial }
+    }
+
     pub fn is_encrypted(&self) -> bool {
         self.password.is_some()
             || self.security.is_some()
@@ -480,6 +508,41 @@ impl Document {
             return Err(Error::Invalid(format!("invalid render size {w}x{h}")));
         }
         let page = self.page(index)?;
+        // The comment filter sets the hidden flags in PDFium's copy only for
+        // this rendering and restores them afterwards.
+        let mut restore = Vec::new();
+        if opts.filter != 0 && opts.annotations && !opts.printing {
+            for (i, mut annot) in page.annotations().iter().enumerate() {
+                let flagged = annot.is_hidden();
+                let kind = annot_kind(annot.annotation_type());
+                let author = annot.creator().unwrap_or_default();
+                let hide = self.annot_filter.hides(index, i, kind, &author, flagged);
+                if hide != flagged && annot.set_is_hidden(hide).is_ok() {
+                    restore.push((i, flagged));
+                }
+            }
+        }
+        let rendered = self.render_page_into(&page, full_w, full_h, x, y, w, h, opts);
+        for (i, flagged) in restore {
+            if let Ok(mut annot) = page.annotations().get(i) {
+                let _ = annot.set_is_hidden(flagged);
+            }
+        }
+        rendered
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_page_into(
+        &self,
+        page: &PdfPage<'static>,
+        full_w: u32,
+        full_h: u32,
+        x: u32,
+        y: u32,
+        w: u32,
+        h: u32,
+        opts: RenderOptions,
+    ) -> Result<RenderedImage> {
         let to_px = |v: u32| Pixels::try_from(v).map_err(|_| Error::Invalid("render size".into()));
         let mut bitmap = PdfBitmap::empty(to_px(w)?, to_px(h)?, PdfBitmapFormat::BGRA)?;
         let config = PdfRenderConfig::new()
@@ -616,6 +679,27 @@ impl Document {
             });
         }
         Ok(out)
+    }
+
+    /// Bounds of the smallest page object (text run, image, graphic) at
+    /// `point` ("Inhalt hervorheben"). Objects covering most of the page,
+    /// such as backgrounds, are skipped.
+    pub fn object_at(&self, index: usize, point: crate::geometry::PointF) -> Result<Option<RectF>> {
+        let page = self.page(index)?;
+        let page_area = (page.width().value * page.height().value).max(1.0);
+        let mut best: Option<RectF> = None;
+        for object in page.objects().iter().take(100_000) {
+            let Ok(quad) = object.bounds() else { continue };
+            let r = to_rectf(&quad.to_rect());
+            let area = r.width() * r.height();
+            if !r.inflate(1.0).contains(point) || area > page_area * 0.8 {
+                continue;
+            }
+            if best.is_none_or(|b| area < b.width() * b.height()) {
+                best = Some(r);
+            }
+        }
+        Ok(best)
     }
 
     pub fn annotation_details(&mut self, page: usize, index: usize) -> Result<AnnotDetails> {
@@ -889,6 +973,43 @@ impl Document {
         self.require(self.permissions().annotate)?;
         let label = format!("add {}", annot.kind.pdf_subtype());
         self.edit_bytes(&label, |b, pw| pdf_edit::add_annotation(b, pw, page, annot))
+    }
+
+    /// "Video/Audio/3D hinzufügen": embeds a media file in `rect`.
+    pub fn add_media(
+        &mut self,
+        page: usize,
+        rect: RectF,
+        kind: crate::media::MediaKind,
+        name: &str,
+        data: &[u8],
+        author: &str,
+    ) -> Result<()> {
+        self.check_page(page)?;
+        self.require(self.permissions().annotate)?;
+        self.edit_bytes("add media", |b, pw| {
+            crate::media::add_media(b, pw, page, rect, kind, name, data, author)
+        })
+    }
+
+    /// "Audio" note from a WAV recording.
+    pub fn add_sound(
+        &mut self,
+        page: usize,
+        rect: RectF,
+        name: &str,
+        wav: &[u8],
+        author: &str,
+    ) -> Result<()> {
+        self.check_page(page)?;
+        self.require(self.permissions().annotate)?;
+        self.edit_bytes("add sound", |b, pw| crate::media::add_sound(b, pw, page, rect, name, wav, author))
+    }
+
+    /// The embedded file of a media annotation (for playing it).
+    pub fn media_file(&mut self, page: usize, index: usize) -> Result<Option<(String, Vec<u8>)>> {
+        self.sync_bytes()?;
+        crate::media::media_file(&self.bytes, self.password.as_deref(), page, index)
     }
 
     pub fn update_annotation(&mut self, page: usize, index: usize, update: &AnnotUpdate) -> Result<()> {

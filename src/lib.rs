@@ -11,6 +11,7 @@
 
 pub mod accessibility;
 pub mod appearance;
+pub mod calculator;
 pub mod compare;
 pub mod compose;
 pub mod convert;
@@ -25,6 +26,7 @@ pub mod forms;
 pub mod geometry;
 pub mod import;
 pub mod marks;
+pub mod media;
 pub mod model;
 pub mod optimize;
 pub mod outline;

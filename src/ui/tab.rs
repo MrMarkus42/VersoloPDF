@@ -226,6 +226,8 @@ pub struct DocTab {
     pub show_cover: bool,
     /// Portfolio: selected file.
     pub portfolio_sel: Option<usize>,
+    /// Comments whose pop-up is shown on the page.
+    pub open_popups: Vec<AnnotRef>,
 }
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
@@ -280,6 +282,15 @@ impl DocTab {
             portfolio: None,
             show_cover: false,
             portfolio_sel: None,
+            open_popups: Vec::new(),
+        }
+    }
+
+    /// Changes the comment display filter and redraws the pages.
+    pub fn set_annot_filter(&mut self, filter: crate::model::AnnotFilter) {
+        if &filter != self.doc.annot_filter() {
+            self.doc.set_annot_filter(filter);
+            self.textures.clear();
         }
     }
 
@@ -391,6 +402,7 @@ impl DocTab {
             annotations: self.show_annotations,
             recolor: self.recolor,
             transparent: self.transparent,
+            filter: self.doc.filter_key(),
             ..RenderOptions::default()
         }
     }

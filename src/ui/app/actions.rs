@@ -551,7 +551,7 @@ impl MrPdfApp {
                     tab.selected_annot = select.then_some(crate::ui::tab::AnnotRef { page, index });
                     Ok(())
                 });
-                if !self.tool.is_sticky() && self.tool.gesture() != crate::ui::tools::Gesture::Vertices {
+                if !self.settings.keeps_tool(self.tool) {
                     // Like most editors, return to the hand tool after placing a single object.
                     self.tool = Tool::Hand;
                 }

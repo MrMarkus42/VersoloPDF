@@ -30,7 +30,7 @@ pub(super) enum Entry {
 }
 
 impl MrPdfApp {
-    fn big(&mut self, ui: &mut Ui, ctx: &Context, cmd: Cmd) {
+    pub(super) fn big(&mut self, ui: &mut Ui, ctx: &Context, cmd: Cmd) {
         let label = cmd.label(self.settings.language);
         let resp = big_button(ui, cmd.icon(), label, self.cmd_selected(cmd), self.cmd_enabled(cmd))
             .on_hover_text(self.cmd_tooltip(cmd));
@@ -39,7 +39,7 @@ impl MrPdfApp {
         }
     }
 
-    fn small(&mut self, ui: &mut Ui, ctx: &Context, cmd: Cmd) {
+    pub(super) fn small(&mut self, ui: &mut Ui, ctx: &Context, cmd: Cmd) {
         let label = cmd.label(self.settings.language);
         let resp = small_button(ui, cmd.icon(), label, self.cmd_selected(cmd), self.cmd_enabled(cmd))
             .on_hover_text(self.cmd_tooltip(cmd));
@@ -48,7 +48,7 @@ impl MrPdfApp {
         }
     }
 
-    fn icon(&mut self, ui: &mut Ui, ctx: &Context, cmd: Cmd) {
+    pub(super) fn icon(&mut self, ui: &mut Ui, ctx: &Context, cmd: Cmd) {
         let resp = icon_button(
             ui,
             cmd.icon(),
@@ -61,7 +61,7 @@ impl MrPdfApp {
         }
     }
 
-    fn smalls(&mut self, ui: &mut Ui, ctx: &Context, cmds: &[Cmd]) {
+    pub(super) fn smalls(&mut self, ui: &mut Ui, ctx: &Context, cmds: &[Cmd]) {
         ui.vertical(|ui| {
             for &cmd in cmds {
                 self.small(ui, ctx, cmd);
@@ -96,7 +96,7 @@ impl MrPdfApp {
         self.popup_menu(ctx, &resp, entries);
     }
 
-    fn popup_menu(&mut self, ctx: &Context, resp: &egui::Response, entries: &[Entry]) {
+    pub(super) fn popup_menu(&mut self, ctx: &Context, resp: &egui::Response, entries: &[Entry]) {
         let mut chosen = None;
         egui::Popup::menu(resp).show(|ui| {
             ui.set_min_width(260.0);
@@ -133,7 +133,7 @@ impl MrPdfApp {
     }
 
     /// One command row of a drop-down; returns true if clicked.
-    fn menu_row(&self, ui: &mut Ui, cmd: Cmd) -> bool {
+    pub(super) fn menu_row(&self, ui: &mut Ui, cmd: Cmd) -> bool {
         let lang = self.settings.language;
         let (de, en) = cmd.menu_names();
         let label = if lang == Language::German { de } else { en };
@@ -143,7 +143,7 @@ impl MrPdfApp {
             .clicked()
     }
 
-    fn tools_group(&mut self, ui: &mut Ui, ctx: &Context) {
+    pub(super) fn tools_group(&mut self, ui: &mut Ui, ctx: &Context) {
         let t = self.t();
         group(ui, t.group_tools, |ui| {
             ui.vertical(|ui| {
@@ -196,7 +196,10 @@ impl MrPdfApp {
             .tab()
             .and_then(|tab| tab.selected_annotation())
             .is_some_and(|a| a.kind != crate::model::AnnotKind::Widget);
-        if !has_selection && self.ribbon == RibbonTab::Format {
+        // An active comment tool has a Format tab for its default style
+        // (it wins over the comment it has just created).
+        let tool_format = self.tool.annot_kind().is_some();
+        if !has_selection && !tool_format && self.ribbon == RibbonTab::Format {
             self.ribbon = RibbonTab::Home;
         }
         Panel::top("ribbon")
@@ -243,7 +246,7 @@ impl MrPdfApp {
                         (RibbonTab::Bookmarks, t.tab_bookmarks),
                         (RibbonTab::Help, t.tab_help),
                     ];
-                    if has_selection {
+                    if has_selection || tool_format {
                         tabs.push((RibbonTab::Format, t.format_tab));
                     }
                     self.tab_row(ui, &tabs);
@@ -258,7 +261,9 @@ impl MrPdfApp {
                 // known to fit (or not measured yet) is used.
                 let avail = ui.available_width();
                 let lang = self.settings.language;
-                let content_key = if self.ribbon == RibbonTab::Format {
+                let content_key = if self.ribbon == RibbonTab::Format && tool_format {
+                    100u8.wrapping_add(self.tool as u8)
+                } else if self.ribbon == RibbonTab::Format {
                     self.tab().and_then(|tab| tab.selected_annotation()).map_or(0, |a| a.kind as u8)
                 } else {
                     0
@@ -304,6 +309,7 @@ impl MrPdfApp {
                                     RibbonTab::Accessibility => self.ribbon_accessibility(ui, &ctx),
                                     RibbonTab::Bookmarks => self.ribbon_bookmarks(ui, &ctx),
                                     RibbonTab::Help => self.ribbon_help(ui, &ctx),
+                                    RibbonTab::Format if tool_format => self.ribbon_tool_format(ui, &ctx),
                                     RibbonTab::Format => self.ribbon_format(ui, &ctx),
                                 }
                             })
@@ -458,7 +464,7 @@ impl MrPdfApp {
         }
     }
 
-    fn stamp_picker(&mut self, ui: &mut Ui) {
+    pub(super) fn stamp_picker(&mut self, ui: &mut Ui) {
         let t = self.t();
         let current = self.settings.stamp;
         egui::ComboBox::from_id_salt("stamp-preset")
@@ -916,89 +922,6 @@ impl MrPdfApp {
                     self.settings.language = lang;
                 }
             }
-        });
-    }
-
-    fn ribbon_comment(&mut self, ui: &mut Ui, ctx: &Context) {
-        let de = self.settings.language == Language::German;
-        self.tools_group(ui, ctx);
-        group(ui, if de { "Bearbeiten" } else { "Edit" }, |ui| {
-            self.big(ui, ctx, Cmd::Tool(Tool::SelectAnnot));
-        });
-        group(ui, "Text", |ui| {
-            self.smalls(
-                ui,
-                ctx,
-                &[Cmd::Tool(Tool::Typewriter), Cmd::Tool(Tool::TextBox), Cmd::Tool(Tool::Callout)],
-            );
-        });
-        group(ui, if de { "Notizen" } else { "Notes" }, |ui| {
-            self.smalls(
-                ui,
-                ctx,
-                &[
-                    Cmd::Tool(Tool::Note),
-                    Cmd::Tool(Tool::FileAttach),
-                    UA(Unavailable::Media, "Audio", "Audio", Icon::Comments),
-                ],
-            );
-        });
-        group(ui, if de { "Textmarkierung" } else { "Text markup" }, |ui| {
-            self.smalls(
-                ui,
-                ctx,
-                &[Cmd::Tool(Tool::Highlight), Cmd::Tool(Tool::AreaHighlight), Cmd::Tool(Tool::Squiggly)],
-            );
-            self.smalls(ui, ctx, &[Cmd::Tool(Tool::Underline), Cmd::Tool(Tool::StrikeOut)]);
-            self.smalls(ui, ctx, &[Cmd::Tool(Tool::Replace), Cmd::Tool(Tool::Caret)]);
-        });
-        group(ui, if de { "Zeichnen" } else { "Drawing" }, |ui| {
-            ui.vertical(|ui| {
-                for row in [
-                    [Tool::Line, Tool::Ellipse, Tool::Polygon],
-                    [Tool::Arrow, Tool::Rectangle, Tool::Polyline],
-                    [Tool::Cloud, Tool::Pencil, Tool::Eraser],
-                ] {
-                    ui.horizontal(|ui| {
-                        for tool in row {
-                            self.icon(ui, ctx, Cmd::Tool(tool));
-                        }
-                    });
-                }
-            });
-            self.big(ui, ctx, Cmd::Tool(Tool::Stamp));
-            ui.vertical(|ui| {
-                ui.add_space(4.0);
-                self.stamp_picker(ui);
-                self.small(ui, ctx, Cmd::InsertImage);
-            });
-        });
-        group(ui, if de { "Messen" } else { "Measure" }, |ui| {
-            self.smalls(
-                ui,
-                ctx,
-                &[
-                    Cmd::Tool(Tool::MeasureDistance),
-                    Cmd::Tool(Tool::MeasurePerimeter),
-                    Cmd::Tool(Tool::MeasureArea),
-                ],
-            );
-        });
-        group(ui, if de { "Medien" } else { "Media" }, |ui| {
-            self.smalls(
-                ui,
-                ctx,
-                &[
-                    UA(Unavailable::Media, "Video hinzufügen", "Add video", Icon::Image),
-                    UA(Unavailable::Media, "Audio hinzufügen", "Add audio", Icon::Comments),
-                    UA(Unavailable::Media, "3D hinzufügen", "Add 3D", Icon::Background),
-                ],
-            );
-        });
-        group(ui, if de { "Anmerkungen verwalten" } else { "Manage comments" }, |ui| {
-            self.big(ui, ctx, Cmd::SummarizeComments);
-            self.smalls(ui, ctx, &[Cmd::ImportComments, Cmd::ExportComments, Cmd::ToggleAnnotations]);
-            self.smalls(ui, ctx, &[Cmd::CommentList, Cmd::Flatten, Cmd::DeleteComment]);
         });
     }
 

@@ -29,7 +29,7 @@ fn color_row(ui: &mut Ui, current: Rgba) -> Option<Rgba> {
     picked
 }
 
-fn style_editor(ui: &mut Ui, t: &Strings, tool: Tool, style: &mut AnnotStyle) -> bool {
+pub(super) fn style_editor(ui: &mut Ui, t: &Strings, tool: Tool, style: &mut AnnotStyle) -> bool {
     let mut changed = false;
     ui.label(t.color);
     if let Some(c) = color_row(ui, style.color) {

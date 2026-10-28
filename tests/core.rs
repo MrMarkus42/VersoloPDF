@@ -222,6 +222,59 @@ fn annotation_on_rotated_page_lands_where_drawn() {
 }
 
 #[test]
+fn comment_filter_and_content_objects() {
+    use mrpdf::document::RenderOptions;
+    use mrpdf::model::AnnotFilter;
+    let _guard = common::lock();
+    let mut doc = open(1);
+    for (x, author) in [(100.0, "Tester"), (300.0, "Other")] {
+        let mut sq = NewAnnotation::new(
+            AnnotKind::Square,
+            AnnotStyle {
+                color: Rgba::BLACK,
+                fill: Some(Rgba::BLACK),
+                author: author.into(),
+                ..AnnotStyle::default()
+            },
+        );
+        sq.rect = RectF::new(x, 100.0, x + 50.0, 150.0);
+        doc.add_annotation(0, &sq).unwrap();
+    }
+    let render = |doc: &Document, filter: u32| {
+        doc.render_tile(0, 595, 842, 0, 0, 595, 842, RenderOptions { filter, ..RenderOptions::default() })
+            .unwrap()
+    };
+    // PDF y 100..150 is image row 692..742.
+    let dark = |img: &mrpdf::document::RenderedImage, x: u32| {
+        common::average(img, x + 10, 702, x + 40, 732)[0] < 60.0
+    };
+    assert_eq!(doc.filter_key(), 0);
+    let img = render(&doc, 0);
+    assert!(dark(&img, 100) && dark(&img, 300));
+
+    doc.set_annot_filter(AnnotFilter { hidden_authors: vec!["Other".into()], ..AnnotFilter::default() });
+    let key = doc.filter_key();
+    assert_ne!(key, 0);
+    let img = render(&doc, key);
+    assert!(dark(&img, 100) && !dark(&img, 300), "only the other author's square is hidden");
+    // Without the key (printing, export) nothing is filtered, and the
+    // hidden flags of the document are restored after rendering.
+    let img = render(&doc, 0);
+    assert!(dark(&img, 100) && dark(&img, 300));
+    doc.set_annot_filter(AnnotFilter { hidden_kinds: vec![AnnotKind::Square], ..AnnotFilter::default() });
+    let img = render(&doc, doc.filter_key());
+    assert!(!dark(&img, 100) && !dark(&img, 300));
+    doc.set_annot_filter(AnnotFilter::default());
+    assert_eq!(doc.filter_key(), 0);
+    assert!(!doc.is_modified() || doc.can_undo().is_some(), "the filter is no document change");
+
+    // "Inhalt hervorheben": the heading's text object.
+    let r = doc.object_at(0, PointF::new(100.0, 708.0)).unwrap().expect("text object");
+    assert!(r.x0 < 80.0 && r.x1 > 200.0 && r.y0 > 690.0 && r.y1 < 730.0, "{r:?}");
+    assert!(doc.object_at(0, PointF::new(500.0, 300.0)).unwrap().is_none());
+}
+
+#[test]
 fn page_operations() {
     let _guard = common::lock();
     let mut doc = open(3);

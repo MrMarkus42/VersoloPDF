@@ -364,6 +364,139 @@ fn form_filling() {
 }
 
 #[test]
+fn comment_tab_features() {
+    use mrpdf::ui::tools::Tool;
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let file = sample_file(&dir, 1);
+    let mut h = harness(vec![file], false);
+    h.run_steps(10);
+    let at = |h: &Harness<'_, MrPdfApp>, x: f32, y: f32| {
+        h.state().active_tab().unwrap().screen_pos(0, mrpdf::geometry::PointF::new(x, y)).unwrap()
+    };
+    tab(&mut h, "Anmerkungen");
+    save(&mut h, "anm-01-ribbon");
+
+    // "Inhalt hervorheben": a click on the heading highlights the text object.
+    h.get_by_label("Inhalt hervorheben").click();
+    h.run_steps(2);
+    let p = at(&h, 120.0, 708.0);
+    click(&mut h, p);
+    assert_eq!(kinds(&mut h), vec![AnnotKind::Highlight]);
+
+    // The active tool has a Format tab with ready-made styles.
+    tab(&mut h, "Format");
+    save(&mut h, "anm-02-tool-format");
+    h.get_by_label("Blau").click();
+    h.run_steps(2);
+    assert_eq!(
+        h.state().settings().style(Tool::ContentHighlight).color,
+        mrpdf::model::Rgba::rgb(30, 136, 229)
+    );
+    assert!(h.state().settings().keeps_tool(Tool::ContentHighlight));
+    h.get_by_label("Auswahl beibehalten").click();
+    h.run_steps(2);
+    assert!(!h.state().settings().keeps_tool(Tool::ContentHighlight));
+
+    // "Textkorrektur": select text, Delete strikes it out, typing replaces it.
+    tab(&mut h, "Anmerkungen");
+    h.get_by_label("Textkorrektur").click();
+    h.run_steps(2);
+    let (a, b) = (at(&h, 74.0, 604.0), at(&h, 160.0, 604.0));
+    drag(&mut h, a, b);
+    assert!(h.state().active_tab().unwrap().selection.is_some(), "text should stay selected");
+    h.key_press(egui::Key::Delete);
+    h.run_steps(4);
+    assert_eq!(kinds(&mut h).last(), Some(&AnnotKind::StrikeOut));
+    let (a, b) = (at(&h, 170.0, 604.0), at(&h, 260.0, 604.0));
+    drag(&mut h, a, b);
+    h.input_mut().events.push(Event::Text("neu".into()));
+    h.run_steps(3);
+    save(&mut h, "anm-03-text-correction");
+    h.key_press(egui::Key::Enter);
+    h.run_steps(4);
+    let count = kinds(&mut h).len();
+    assert_eq!(count, 3);
+    {
+        let tab = h.state_mut().active_tab_mut().unwrap();
+        let last = tab.doc.annotations(0).unwrap().last().cloned().unwrap();
+        assert_eq!(last.kind, AnnotKind::StrikeOut);
+        assert!(last.contents.contains("neu"), "{}", last.contents);
+    }
+
+    // "Anzeigen": hide and show all comments, the menu, pop-ups.
+    h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, egui::Key::Num8);
+    h.run_steps(2);
+    assert!(!h.state().active_tab().unwrap().show_annotations);
+    h.key_press_modifiers(Modifiers::COMMAND, egui::Key::Num8);
+    h.run_steps(2);
+    assert!(h.state().active_tab().unwrap().show_annotations);
+    h.get_by_label("Anzeigen").click();
+    h.run_steps(3);
+    assert!(h.query_by_label("Alle Pop-ups öffnen").is_some(), "show menu should be open");
+    h.get_by_label_contains("Nach Typ").hover();
+    h.run_steps(3);
+    save(&mut h, "anm-04-show-menu");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(2);
+    quick(&mut h, "Alle Pop-ups öffnen");
+    assert_eq!(h.state().active_tab().unwrap().open_popups.len(), count);
+    save(&mut h, "anm-05-popups");
+    quick(&mut h, "Alle Pop-ups schließen");
+    assert!(h.state().active_tab().unwrap().open_popups.is_empty());
+
+    // "Rechner": 12 + 3 = 15, inserted as text box.
+    h.state_mut().active_tab_mut().unwrap().selected_annot = None;
+    quick(&mut h, "Rechner");
+    assert_eq!(h.state().open_calculators(), 1);
+    for key in ["1", "2", "+", "3", "="] {
+        h.get_all_by_label(key).last().unwrap().click();
+        h.run_steps(2);
+    }
+    save(&mut h, "anm-06-calculator");
+    h.get_all_by_label("Einfügen").last().unwrap().click();
+    h.run_steps(4);
+    {
+        let tab = h.state_mut().active_tab_mut().unwrap();
+        let last = tab.doc.annotations(0).unwrap().last().cloned().unwrap();
+        assert_eq!(last.kind, AnnotKind::FreeText);
+        assert!(last.contents.contains("15,00 ="), "{}", last.contents);
+    }
+
+    // "Medien": a video and a sound note are embedded and can be read back.
+    let ctx = h.ctx.clone();
+    let rect = mrpdf::geometry::RectF::new(300.0, 300.0, 460.0, 390.0);
+    h.state_mut().add_media_bytes(&ctx, 0, rect, Tool::Video, "Film.mp4", b"not really a video");
+    let mut wav =
+        b"RIFF\x2c\0\0\0WAVEfmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x80\x3e\0\0\x02\0\x10\0data\x08\0\0\0"
+            .to_vec();
+    wav.extend_from_slice(&[1, 0, 2, 0, 3, 0, 4, 0]);
+    let note = mrpdf::geometry::RectF::new(480.0, 300.0, 500.0, 320.0);
+    h.state_mut().add_media_bytes(&ctx, 0, note, Tool::SoundNote, "Aufnahme.wav", &wav);
+    h.run_steps(4);
+    save(&mut h, "anm-08-media");
+    {
+        let tab = h.state_mut().active_tab_mut().unwrap();
+        let annots = tab.doc.annotations(0).unwrap();
+        let media: Vec<usize> =
+            annots.iter().filter(|a| a.kind == AnnotKind::Media).map(|a| a.index).collect();
+        assert_eq!(media.len(), 2);
+        let (name, data) = tab.doc.media_file(0, media[0]).unwrap().unwrap();
+        assert_eq!((name.as_str(), data.as_slice()), ("Film.mp4", &b"not really a video"[..]));
+        let (name, data) = tab.doc.media_file(0, media[1]).unwrap().unwrap();
+        assert_eq!(name, "sound.wav");
+        assert_eq!(data, wav, "the recording comes back unchanged");
+    }
+
+    // "Formate für Anmerkungen".
+    h.get_by_label("Formate für Anmerkungen").click();
+    h.run_steps(3);
+    save(&mut h, "anm-07-comment-styles");
+    h.get_all_by_label("Schließen").last().unwrap().click();
+    h.run_steps(2);
+}
+
+#[test]
 fn delete_key_removes_selected_annotation() {
     let _guard = common::lock();
     let dir = tempfile::tempdir().unwrap();
@@ -372,7 +505,7 @@ fn delete_key_removes_selected_annotation() {
     h.run_steps(10);
     tab(&mut h, "Anmerkungen");
     h.run_steps(2);
-    h.get_by_label("Ellipse").click();
+    h.get_by_label("Oval").click();
     h.run_steps(2);
     drag(&mut h, pos2(500.0, 300.0), pos2(650.0, 420.0));
     h.run_steps(4);

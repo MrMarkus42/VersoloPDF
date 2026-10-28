@@ -2,7 +2,9 @@
 
 mod actions;
 mod backstage;
+mod calculator_ui;
 pub mod commands;
+pub mod comment_cmds;
 mod dialogs;
 mod export_dialog;
 mod features;
@@ -237,6 +239,8 @@ pub enum Dialog {
     MoveTabs(Box<windows::MoveTabsState>),
     /// "PDF-Portfolio erstellen".
     NewPortfolio(Box<portfolio_view::NewPortfolioState>),
+    /// "Formate für Anmerkungen": the tool whose style is edited.
+    CommentStyles(Tool),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -325,6 +329,9 @@ pub struct MrPdfApp {
     ribbon_widths: std::collections::HashMap<(RibbonTab, crate::ui::i18n::Language, usize, u8), f32>,
     /// Number of groups of each ribbon tab (last drawn).
     ribbon_groups: std::collections::HashMap<RibbonTab, usize>,
+    /// Open "Rechner" windows and the number of the next one.
+    calculators: Vec<calculator_ui::CalcWindow>,
+    next_calculator: usize,
 }
 
 impl MrPdfApp {
@@ -397,6 +404,8 @@ impl MrPdfApp {
             dialog_pos: None,
             ribbon_widths: Default::default(),
             ribbon_groups: Default::default(),
+            calculators: Vec::new(),
+            next_calculator: 1,
         }
     }
 
@@ -605,6 +614,12 @@ impl MrPdfApp {
         if pressed(cmd, Key::Num3) {
             self.fit_content();
         }
+        // "Alle Anmerkungen verbergen / anzeigen".
+        if pressed(cmd | Modifiers::SHIFT, Key::Num8) {
+            self.run(ctx, commands::Cmd::Comment(comment_cmds::CommentCmd::HideAll));
+        } else if pressed(cmd, Key::Num8) {
+            self.run(ctx, commands::Cmd::Comment(comment_cmds::CommentCmd::ShowAll));
+        }
         if pressed(cmd, Key::Period) {
             self.quick_focus = true;
         }
@@ -634,7 +649,22 @@ impl MrPdfApp {
             self.select_all_text();
         }
         let key = |k: Key| ctx.input(|i| i.key_pressed(k) && i.modifiers.is_none());
-        if key(Key::Delete) || key(Key::Backspace) {
+        if self.tool == Tool::TextCorrection && self.active_tab().is_some_and(|t| t.selection.is_some()) {
+            // "Textkorrektur": the keys act on the selected text.
+            let typed = ctx.input(|i| {
+                i.events.iter().find_map(|e| match e {
+                    egui::Event::Text(t) if !t.trim().is_empty() => Some(t.clone()),
+                    _ => None,
+                })
+            });
+            if key(Key::Delete) || key(Key::Backspace) {
+                self.correct_text(comment_cmds::Correction::Delete);
+            } else if key(Key::Insert) {
+                self.correct_text(comment_cmds::Correction::Insert);
+            } else if let Some(text) = typed {
+                self.correct_text(comment_cmds::Correction::Replace(text));
+            }
+        } else if key(Key::Delete) || key(Key::Backspace) {
             self.delete_selected_annotation(ctx);
         }
         if key(Key::Escape) {
@@ -762,6 +792,7 @@ impl MrPdfApp {
                 events: &mut self.events,
                 t,
                 view,
+                exclusive: self.settings.exclusive_mode,
             };
             canvas::show_document(ui, tab, &mut cx);
             if tab.search.is_running() && tab.continue_search(Duration::from_millis(15)) {
@@ -875,6 +906,7 @@ impl eframe::App for MrPdfApp {
             }
             egui::CentralPanel::no_frame().show(ui, |ui| self.central(ui));
             self.view_windows(&ctx);
+            self.calculator_windows(&ctx);
         }
         self.doc_windows(&ctx);
         self.dialogs(&ctx);

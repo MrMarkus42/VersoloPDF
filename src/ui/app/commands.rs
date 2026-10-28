@@ -4,6 +4,7 @@
 
 use egui::Context;
 
+use super::comment_cmds::CommentCmd;
 use super::structure::MarkKind;
 use super::view_cmds::ViewCmd;
 use super::{Dialog, InsertPosition, MrPdfApp, RangePurpose, SidePanel};
@@ -42,6 +43,7 @@ pub enum Unavailable {
     SnapObjects,
     Pane,
     Highlighting,
+    Layers,
 }
 
 impl Unavailable {
@@ -104,6 +106,10 @@ impl Unavailable {
             Unavailable::Highlighting => (
                 "Wörter und Sätze können beim Vorlesen nicht hervorgehoben werden.",
                 "Words and sentences cannot be highlighted while reading aloud.",
+            ),
+            Unavailable::Layers => (
+                "Ebenen (optionale Inhalte) werden noch nicht unterstützt.",
+                "Layers (optional content) are not supported yet.",
             ),
         };
         if lang == Language::German { de } else { en }
@@ -274,6 +280,8 @@ pub enum Cmd {
     Unavailable(Unavailable, &'static str, &'static str, Icon),
     /// Commands of the ribbon tab "Ansicht" (see `view_cmds.rs`).
     View(super::view_cmds::ViewCmd),
+    /// Commands of the ribbon tab "Anmerkungen" (see `comment_cmds.rs`).
+    Comment(super::comment_cmds::CommentCmd),
 }
 
 pub const HOMEPAGE: &str = "https://github.com/MrMarkus42/MrPDF";
@@ -318,6 +326,14 @@ pub const SEARCHABLE: &[Cmd] = &[
     Cmd::Tool(Tool::Squiggly),
     Cmd::Tool(Tool::Replace),
     Cmd::Tool(Tool::Caret),
+    Cmd::Tool(Tool::ContentHighlight),
+    Cmd::Tool(Tool::TextCorrection),
+    Cmd::Comment(CommentCmd::ShowAll),
+    Cmd::Comment(CommentCmd::HideAll),
+    Cmd::Comment(CommentCmd::OpenPopups),
+    Cmd::Comment(CommentCmd::ClosePopups),
+    Cmd::Comment(CommentCmd::Calculator),
+    Cmd::Comment(CommentCmd::CommentStyles),
     Cmd::Tool(Tool::Note),
     Cmd::Tool(Tool::FileAttach),
     Cmd::Tool(Tool::TextBox),
@@ -684,6 +700,7 @@ impl Cmd {
             Homepage => ("Homepage", "Homepage"),
             Unavailable(_, de, en, _) => (de, en),
             View(v) => v.names(),
+            Comment(c) => c.names(),
         }
     }
 
@@ -844,6 +861,7 @@ impl Cmd {
             FitContent => Icon::FitPage,
             Unavailable(_, _, _, icon) => icon,
             View(v) => v.icon(),
+            Comment(c) => c.icon(),
         }
     }
 
@@ -910,6 +928,7 @@ impl Cmd {
             Panel(SidePanel::Comments) => ("Strg+M", "Ctrl+M"),
             Panel(SidePanel::Attachments) => ("Strg+Umschalt+A", "Ctrl+Shift+A"),
             View(v) => return v.shortcut(),
+            Comment(c) => return c.shortcut(),
             _ => return None,
         })
     }
@@ -935,11 +954,11 @@ pub fn tool_names(tool: Tool) -> (&'static str, &'static str) {
         Tool::Typewriter => ("Schreibmaschine", "Typewriter"),
         Tool::Callout => ("Beschreibung", "Callout"),
         Tool::Rectangle => ("Rechteck", "Rectangle"),
-        Tool::Ellipse => ("Ellipse", "Ellipse"),
+        Tool::Ellipse => ("Oval", "Oval"),
         Tool::Line => ("Linie", "Line"),
         Tool::Arrow => ("Pfeil", "Arrow"),
-        Tool::Polygon => ("Polygon", "Polygon"),
-        Tool::Polyline => ("Polygonzug", "Polyline"),
+        Tool::Polygon => ("Vieleck", "Polygon"),
+        Tool::Polyline => ("Streckenzug", "Polyline"),
         Tool::Cloud => ("Wolke", "Cloud"),
         Tool::Pencil => ("Stift", "Pencil"),
         Tool::Eraser => ("Radiergummi", "Eraser"),
@@ -961,6 +980,12 @@ pub fn tool_names(tool: Tool) -> (&'static str, &'static str) {
         Tool::Crop => ("Seite zuschneiden (Werkzeug)", "Crop page (tool)"),
         Tool::DynamicZoom => ("Stufenlose Vergrößerung", "Dynamic zoom"),
         Tool::Loupe => ("Lupe", "Loupe"),
+        Tool::ContentHighlight => ("Inhalt hervorheben", "Highlight content"),
+        Tool::TextCorrection => ("Textkorrektur", "Text correction"),
+        Tool::Video => ("Video hinzufügen", "Add video"),
+        Tool::AudioClip => ("Audio hinzufügen", "Add audio"),
+        Tool::Model3d => ("3D hinzufügen", "Add 3D"),
+        Tool::SoundNote => ("Audio", "Audio"),
     }
 }
 
@@ -1007,6 +1032,7 @@ impl MrPdfApp {
             EmailAll => self.tabs.iter().any(|t| t.doc.path().is_some()),
             LayoutCover => true,
             View(v) => self.view_enabled(v),
+            Comment(c) => self.comment_enabled(c),
             _ => has_doc,
         }
     }
@@ -1024,6 +1050,7 @@ impl MrPdfApp {
             LayoutFacing => tab.is_some_and(|t| t.layout_mode == PageLayout::TwoPages),
             LayoutCover => self.settings.cover_alone,
             View(v) => self.view_selected(v),
+            Comment(c) => self.comment_selected(c),
             ToggleSidebar => self.settings.show_sidebar,
             ToggleProperties => self.settings.show_properties,
             DarkMode => self.settings.dark_mode,
@@ -1060,6 +1087,10 @@ impl MrPdfApp {
         // Page dialogs of "Dokumentaufbau" (insert, delete, extract, …).
         if let View(v) = cmd {
             self.run_view(ctx, v);
+            return;
+        }
+        if let Comment(c) = cmd {
+            self.run_comment(ctx, c);
             return;
         }
         if self.run_page_dialog(cmd)
@@ -1135,6 +1166,7 @@ impl MrPdfApp {
             LayoutFacing => self.set_layout(PageLayout::TwoPages),
             LayoutCover => self.settings.cover_alone = !self.settings.cover_alone,
             View(v) => self.run_view(ctx, v),
+            Comment(c) => self.run_comment(ctx, c),
             ToggleSidebar => self.settings.show_sidebar = !self.settings.show_sidebar,
             ToggleProperties => self.settings.show_properties = !self.settings.show_properties,
             Fullscreen => {

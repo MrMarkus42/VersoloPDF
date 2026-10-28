@@ -54,6 +54,19 @@ pub enum Tool {
     DynamicZoom,
     /// "Lupe": shows the area under the pointer magnified in a window.
     Loupe,
+    /// "Inhalt hervorheben": a click highlights the page object (text,
+    /// image or graphic) under the pointer.
+    ContentHighlight,
+    /// "Textkorrektur": select text, then Delete strikes it out, Insert
+    /// adds an insertion mark and typing replaces it.
+    TextCorrection,
+    /// "Video hinzufügen", "Audio hinzufügen", "3D hinzufügen": draw the
+    /// area, then choose the file.
+    Video,
+    AudioClip,
+    Model3d,
+    /// "Audio" note from a WAV recording.
+    SoundNote,
 }
 
 /// How a tool is operated on the page.
@@ -121,6 +134,11 @@ impl Tool {
             Tool::Crop => Icon::Crop,
             Tool::DynamicZoom => Icon::ZoomIn,
             Tool::Loupe => Icon::Search,
+            Tool::ContentHighlight => Icon::AreaHighlight,
+            Tool::TextCorrection => Icon::Replace,
+            Tool::Video => Icon::Image,
+            Tool::AudioClip | Tool::SoundNote => Icon::Comments,
+            Tool::Model3d => Icon::Background,
         }
     }
 
@@ -133,10 +151,20 @@ impl Tool {
             | Tool::Eraser
             | Tool::DynamicZoom
             | Tool::Loupe => Gesture::None,
-            Tool::Highlight | Tool::Underline | Tool::StrikeOut | Tool::Squiggly | Tool::Replace => {
-                Gesture::TextMarkup
-            }
-            Tool::Note | Tool::Stamp | Tool::Caret | Tool::FileAttach | Tool::Typewriter => Gesture::Click,
+            Tool::Highlight
+            | Tool::Underline
+            | Tool::StrikeOut
+            | Tool::Squiggly
+            | Tool::Replace
+            | Tool::TextCorrection => Gesture::TextMarkup,
+            Tool::Note
+            | Tool::Stamp
+            | Tool::Caret
+            | Tool::FileAttach
+            | Tool::Typewriter
+            | Tool::ContentHighlight
+            | Tool::SoundNote => Gesture::Click,
+            Tool::Video | Tool::AudioClip | Tool::Model3d => Gesture::Rect,
             Tool::Zoom
             | Tool::Snapshot
             | Tool::AreaHighlight
@@ -163,9 +191,9 @@ impl Tool {
 
     pub fn annot_kind(self) -> Option<AnnotKind> {
         Some(match self {
-            Tool::Highlight | Tool::AreaHighlight => AnnotKind::Highlight,
+            Tool::Highlight | Tool::AreaHighlight | Tool::ContentHighlight => AnnotKind::Highlight,
             Tool::Underline => AnnotKind::Underline,
-            Tool::StrikeOut | Tool::Replace => AnnotKind::StrikeOut,
+            Tool::StrikeOut | Tool::Replace | Tool::TextCorrection => AnnotKind::StrikeOut,
             Tool::Squiggly => AnnotKind::Squiggly,
             Tool::Caret => AnnotKind::Caret,
             Tool::Note => AnnotKind::Note,
@@ -244,6 +272,8 @@ impl Tool {
             Tool::Pencil
                 | Tool::Highlight
                 | Tool::AreaHighlight
+                | Tool::ContentHighlight
+                | Tool::TextCorrection
                 | Tool::Underline
                 | Tool::StrikeOut
                 | Tool::Squiggly
@@ -259,9 +289,11 @@ impl Tool {
     pub fn default_style(self) -> AnnotStyle {
         let base = AnnotStyle::default();
         match self {
-            Tool::Highlight | Tool::AreaHighlight => AnnotStyle { color: Rgba::YELLOW, ..base },
+            Tool::Highlight | Tool::AreaHighlight | Tool::ContentHighlight => {
+                AnnotStyle { color: Rgba::YELLOW, ..base }
+            }
             Tool::Underline | Tool::Squiggly => AnnotStyle { color: Rgba::GREEN, ..base },
-            Tool::StrikeOut | Tool::Replace => AnnotStyle { color: Rgba::RED, ..base },
+            Tool::StrikeOut | Tool::Replace | Tool::TextCorrection => AnnotStyle { color: Rgba::RED, ..base },
             Tool::Caret => AnnotStyle { color: Rgba::BLUE, ..base },
             Tool::Note | Tool::FileAttach => AnnotStyle { color: Rgba::YELLOW, ..base },
             Tool::TextBox => AnnotStyle { color: Rgba::BLACK, width: 0.0, font_size: 12.0, ..base },

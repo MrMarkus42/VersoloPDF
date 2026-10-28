@@ -71,6 +71,8 @@ pub enum AnnotKind {
     Link,
     Widget,
     Redact,
+    /// Video, audio or 3D (screen, sound, 3D, rich media, movie).
+    Media,
     Other,
 }
 
@@ -125,6 +127,7 @@ impl AnnotKind {
             AnnotKind::Link => "Link",
             AnnotKind::Widget => "Widget",
             AnnotKind::Redact => "Redact",
+            AnnotKind::Media => "Screen",
             AnnotKind::Other => "Unknown",
         }
     }
@@ -143,6 +146,39 @@ pub struct AnnotationInfo {
     pub author: String,
     pub modified: String,
     pub color: Option<Rgba>,
+}
+
+/// Which comments are shown ("Anmerkungen > Anzeigen"). Only affects the
+/// display; the document is not changed.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct AnnotFilter {
+    pub hidden_kinds: Vec<AnnotKind>,
+    pub hidden_authors: Vec<String>,
+    /// (page, index) of comments hidden one by one ("Ausgewählte verbergen").
+    pub hidden_annots: Vec<(usize, usize)>,
+    /// If set, only these comments are shown ("Nur ausgewählte anzeigen").
+    pub only: Option<Vec<(usize, usize)>>,
+    /// Also show comments that carry the PDF "hidden" flag.
+    pub show_flagged: bool,
+}
+
+impl AnnotFilter {
+    pub fn is_empty(&self) -> bool {
+        *self == AnnotFilter::default()
+    }
+
+    /// Whether the annotation should be hidden. `flagged` is its own
+    /// hidden flag; form fields, links and pop-ups keep it.
+    pub fn hides(&self, page: usize, index: usize, kind: AnnotKind, author: &str, flagged: bool) -> bool {
+        if !kind.is_comment() {
+            return flagged;
+        }
+        (flagged && !self.show_flagged)
+            || self.hidden_kinds.contains(&kind)
+            || self.hidden_authors.iter().any(|a| a == author)
+            || self.hidden_annots.contains(&(page, index))
+            || self.only.as_ref().is_some_and(|only| !only.contains(&(page, index)))
+    }
 }
 
 /// Visual style for newly created annotations.
