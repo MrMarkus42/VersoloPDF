@@ -78,7 +78,14 @@ impl MrPdfApp {
     }
 
     /// Large button with drop-down ("Einfügen ▾").
-    fn big_menu(&mut self, ui: &mut Ui, ctx: &Context, icon: Icon, label: (&str, &str), entries: &[Entry]) {
+    pub(super) fn big_menu(
+        &mut self,
+        ui: &mut Ui,
+        ctx: &Context,
+        icon: Icon,
+        label: (&str, &str),
+        entries: &[Entry],
+    ) {
         let label = if self.settings.language == Language::German { label.0 } else { label.1 };
         let enabled = entries.iter().any(|e| match e {
             Entry::C(c) => self.cmd_enabled(*c),
@@ -1153,23 +1160,6 @@ impl MrPdfApp {
             self.big(ui, ctx, Cmd::Email);
             self.big(ui, ctx, Cmd::OpenFolder);
             self.big(ui, ctx, Cmd::Print);
-        });
-    }
-
-    fn ribbon_review(&mut self, ui: &mut Ui, ctx: &Context) {
-        let de = self.settings.language == Language::German;
-        self.tools_group(ui, ctx);
-        group(ui, if de { "Rechtschreibung" } else { "Spelling" }, |ui| {
-            self.big(ui, ctx, UA(Unavailable::Spelling, "Rechtschreibprüfung", "Spell check", Icon::Count));
-            self.big(ui, ctx, Cmd::WordCount);
-            self.big(ui, ctx, Cmd::CompareDocuments);
-        });
-        group(ui, if de { "Anmerkungen" } else { "Comments" }, |ui| {
-            self.big(ui, ctx, Cmd::DeleteAllComments);
-            self.big(ui, ctx, Cmd::PrevComment);
-            self.big(ui, ctx, Cmd::NextComment);
-            self.big(ui, ctx, Cmd::ToggleAnnotations);
-            self.big(ui, ctx, Cmd::Flatten);
         });
     }
 

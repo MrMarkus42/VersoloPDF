@@ -45,6 +45,7 @@ pub mod report;
 pub mod search;
 pub mod security;
 pub mod speech;
+pub mod spell;
 pub mod text;
 pub mod transitions;
 pub mod ui;

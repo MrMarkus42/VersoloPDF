@@ -561,7 +561,7 @@ impl MrPdfApp {
             ui.vertical(|ui| {
                 self.small(ui, ctx, Cmd::ImportComments);
                 self.small(ui, ctx, Cmd::ExportComments);
-                self.show_menu(ui, ctx);
+                self.show_menu(ui, ctx, false);
             });
             self.smalls(ui, ctx, &[Cmd::Flatten, Cmd::CommentList, Cmd::Comment(CommentCmd::CommentStyles)]);
         });
@@ -611,15 +611,14 @@ impl MrPdfApp {
     }
 
     /// "Anzeigen ▾": which comments are shown, and their pop-ups.
-    fn show_menu(&mut self, ui: &mut Ui, ctx: &Context) {
+    pub(super) fn show_menu(&mut self, ui: &mut Ui, ctx: &Context, big: bool) {
         let de = self.cm_de();
-        let resp = small_menu_button(
-            ui,
-            Icon::Eye,
-            if de { "Anzeigen" } else { "Show" },
-            !self.tabs.is_empty(),
-            false,
-        );
+        let label = if de { "Anzeigen" } else { "Show" };
+        let resp = if big {
+            big_menu_button(ui, Icon::Eye, label, !self.tabs.is_empty(), false)
+        } else {
+            small_menu_button(ui, Icon::Eye, label, !self.tabs.is_empty(), false)
+        };
         let mut chosen = None;
         let t = self.t();
         egui::Popup::menu(&resp).show(|ui| {

@@ -173,6 +173,10 @@ pub struct Settings {
     /// the languages ("deu+eng").
     pub tesseract: Option<PathBuf>,
     pub ocr_languages: String,
+    /// Rechtschreibprüfung: chosen dictionary (.dic; None: first found)
+    /// and the words added by the user.
+    pub spell_dictionary: Option<PathBuf>,
+    pub spell_personal: Vec<String>,
 }
 
 /// Kinds of form fields in "Felder hervorheben ▾".
@@ -352,6 +356,8 @@ impl Default for Settings {
             highlight_required_only: false,
             tesseract: None,
             ocr_languages: "deu+eng".into(),
+            spell_dictionary: None,
+            spell_personal: Vec::new(),
         }
     }
 }

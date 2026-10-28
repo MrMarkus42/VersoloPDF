@@ -402,6 +402,9 @@ impl MrPdfApp {
                     Dialog::Scripts(list) => {
                         outcome = self.scripts_dialog(ui, list);
                     }
+                    Dialog::SpellCheck(state) => {
+                        outcome = self.spell_dialog(ui, state);
+                    }
                     Dialog::NewPortfolio(state) => {
                         let (o, a) = self.new_portfolio_dialog(ui, state);
                         outcome = o;

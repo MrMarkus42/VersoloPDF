@@ -26,6 +26,7 @@ mod print_dialog;
 mod properties;
 mod props_dialog;
 mod review;
+pub mod review_cmds;
 mod ribbon;
 pub mod settings_dialog;
 mod shape_dialogs;
@@ -259,6 +260,8 @@ pub enum Dialog {
     FillForms(Box<form_cmds::FillState>),
     /// "Alle JavaScripte".
     Scripts(Box<form_cmds::ScriptList>),
+    /// "Rechtschreibprüfung".
+    SpellCheck(Box<review_cmds::SpellState>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -350,6 +353,8 @@ pub struct MrPdfApp {
     /// Open "Rechner" windows and the number of the next one.
     calculators: Vec<calculator_ui::CalcWindow>,
     next_calculator: usize,
+    /// Loaded spelling dictionary and its file.
+    spell_dict: Option<(PathBuf, crate::spell::Dictionary)>,
 }
 
 impl MrPdfApp {
@@ -425,6 +430,7 @@ impl MrPdfApp {
             ribbon_groups: Default::default(),
             calculators: Vec::new(),
             next_calculator: 1,
+            spell_dict: None,
         }
     }
 

@@ -1014,6 +1014,88 @@ fn review_tools_ui() {
 }
 
 #[test]
+fn spell_check_and_comment_menus() {
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let file = sample_file(&dir, 2);
+    // A tiny Hunspell dictionary (MrPDF ships none).
+    std::fs::write(dir.path().join("mini.aff"), "SET UTF-8\nTRY estinrdaS\n").unwrap();
+    std::fs::write(dir.path().join("mini.dic"), "5\nDies\nist\nein\nTest\nNotiz\n").unwrap();
+    let settings = Settings {
+        language: Language::German,
+        backstage_at_start: false,
+        spell_dictionary: Some(dir.path().join("mini.dic")),
+        ..Settings::default()
+    };
+    let mut h = harness_with(settings, vec![file]);
+    h.run_steps(10);
+    let notes = |h: &mut Harness<'_, MrPdfApp>| -> Vec<String> {
+        let tab = h.state_mut().active_tab_mut().unwrap();
+        tab.doc
+            .annotations(0)
+            .unwrap()
+            .into_iter()
+            .filter(|a| a.kind.is_comment())
+            .map(|a| a.contents)
+            .collect()
+    };
+    {
+        let tab = h.state_mut().active_tab_mut().unwrap();
+        for (i, text) in ["Dies ist ein Tset", "Notiz"].into_iter().enumerate() {
+            let mut note = mrpdf::pdf_edit::NewAnnotation::new(AnnotKind::Note, Default::default());
+            let x = 400.0 + 40.0 * i as f32;
+            note.rect = mrpdf::geometry::RectF::new(x, 700.0, x + 20.0, 720.0);
+            note.contents = text.into();
+            tab.doc.add_annotation(0, &note).unwrap();
+        }
+        tab.after_edit();
+    }
+    tab(&mut h, "Überprüfen");
+    save(&mut h, "rev-01-ribbon");
+    h.get_by_label("Rechtschreibprüfung").click();
+    h.run_steps(3);
+    h.get_by_label("Prüfung starten").click();
+    h.run_steps(4);
+    match h.state().dialog() {
+        Some(mrpdf::ui::app::Dialog::SpellCheck(s)) => {
+            let words: Vec<&str> = s.findings.as_ref().unwrap().iter().map(|f| f.word.as_str()).collect();
+            assert_eq!(words, ["Tset"]);
+            assert_eq!(s.replacement, "Test");
+        }
+        other => panic!("unexpected dialog {other:?}"),
+    }
+    save(&mut h, "rev-02-spell-check");
+    h.get_all_by_label("Ändern").last().unwrap().click();
+    h.run_steps(4);
+    assert!(notes(&mut h).contains(&"Dies ist ein Test".to_string()), "{:?}", notes(&mut h));
+    h.get_all_by_label("Schließen").last().unwrap().click();
+    h.run_steps(3);
+    assert!(h.state().dialog().is_none());
+
+    // "Anmerkungen löschen ▾" > "Anmerkungen dieser Seite löschen".
+    h.get_by_label("Anmerkungen löschen").click();
+    h.run_steps(3);
+    save(&mut h, "rev-03-delete-menu");
+    h.get_by_label("Anmerkungen dieser Seite löschen").click();
+    h.run_steps(4);
+    assert!(notes(&mut h).is_empty());
+    {
+        let tab = h.state_mut().active_tab_mut().unwrap();
+        assert!(tab.doc.undo().unwrap());
+        tab.after_edit();
+    }
+    h.run_steps(3);
+    assert_eq!(notes(&mut h).len(), 2);
+
+    // "Anmerkungen einbetten ▾" > "Alle Anmerkungen einbetten".
+    h.get_by_label("Anmerkungen einbetten").click();
+    h.run_steps(3);
+    h.get_by_label("Alle Anmerkungen einbetten").click();
+    h.run_steps(6);
+    assert!(notes(&mut h).is_empty(), "flattened");
+}
+
+#[test]
 fn organize_ribbon_menus() {
     let _guard = common::lock();
     let dir = tempfile::tempdir().unwrap();

@@ -30,7 +30,6 @@ pub enum Unavailable {
     JavaScript,
     Scanner,
     Media,
-    Spelling,
     TextEditing,
     Speech,
     Barcodes,
@@ -61,9 +60,6 @@ impl Unavailable {
             }
             Unavailable::Media => {
                 ("Video, Audio und 3D werden nicht unterstützt.", "Video, audio and 3D are not supported.")
-            }
-            Unavailable::Spelling => {
-                ("Eine Rechtschreibprüfung ist noch nicht enthalten.", "A spell checker is not included yet.")
             }
             Unavailable::TextEditing => (
                 "Das Bearbeiten von vorhandenem Seiteninhalt wird noch nicht unterstützt.",
@@ -246,6 +242,9 @@ pub enum Cmd {
     RecognizeText,
     ReplaceFonts,
     RecolorPages,
+    SpellCheck,
+    DeletePageComments,
+    FlattenAll,
     Grayscale,
     // Review / accessibility
     WordCount,
@@ -478,6 +477,9 @@ pub const SEARCHABLE: &[Cmd] = &[
     Cmd::RecognizeText,
     Cmd::ReplaceFonts,
     Cmd::RecolorPages,
+    Cmd::SpellCheck,
+    Cmd::DeletePageComments,
+    Cmd::FlattenAll,
     Cmd::Grayscale,
     Cmd::WordCount,
     Cmd::CompareDocuments,
@@ -691,6 +693,9 @@ impl Cmd {
             RecognizeText => ("Text auf Seiten erkennen", "Recognize text"),
             ReplaceFonts => ("Schriften ersetzen", "Replace fonts"),
             RecolorPages => ("Seiten neu einfärben", "Recolor pages"),
+            SpellCheck => ("Rechtschreibprüfung", "Spell check"),
+            DeletePageComments => ("Anmerkungen dieser Seite löschen", "Delete comments of this page"),
+            FlattenAll => ("Alle Anmerkungen einbetten", "Flatten all comments"),
             Grayscale => ("Farben umwandeln", "Convert colours"),
             WordCount => ("Wörter zählen", "Count words"),
             CompareDocuments => ("Dokumente vergleichen", "Compare documents"),
@@ -845,6 +850,9 @@ impl Cmd {
             RecognizeText => Icon::Search,
             ReplaceFonts => Icon::TextBox,
             RecolorPages => Icon::Theme,
+            SpellCheck => Icon::Count,
+            DeletePageComments => Icon::Delete,
+            FlattenAll => Icon::Flatten,
             Grayscale => Icon::Theme,
             WordCount => Icon::Count,
             CompareDocuments => Icon::Compare,

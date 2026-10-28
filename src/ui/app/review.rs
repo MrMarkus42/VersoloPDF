@@ -46,6 +46,9 @@ impl MrPdfApp {
                 }
             }
             Cmd::CompareDocuments => self.compare_documents(ctx),
+            Cmd::SpellCheck => self.open_spell_check(),
+            Cmd::DeletePageComments => self.delete_page_comments(ctx),
+            Cmd::FlattenAll => self.flatten_all(ctx),
             Cmd::AccessibilityCheck => self.accessibility_report(ctx),
             Cmd::ContentsToImages => {
                 let n = self.active_tab().map_or(0, |t| t.doc.page_count());
