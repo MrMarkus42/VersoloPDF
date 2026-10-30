@@ -71,6 +71,10 @@ pub enum Tool {
     Model3d,
     /// "Audio" note from a WAV recording.
     SoundNote,
+    /// "Text bearbeiten": edit the text of the page content.
+    EditText,
+    /// "Objekte bearbeiten": select, move, scale and format page objects.
+    EditObjects,
 }
 
 /// How a tool is operated on the page.
@@ -145,6 +149,8 @@ impl Tool {
             Tool::Video => Icon::Image,
             Tool::AudioClip | Tool::SoundNote => Icon::Comments,
             Tool::Model3d => Icon::Background,
+            Tool::EditText => Icon::TextBox,
+            Tool::EditObjects => Icon::Pointer,
         }
     }
 
@@ -156,6 +162,8 @@ impl Tool {
             | Tool::SelectFields
             | Tool::Eraser
             | Tool::DynamicZoom
+            | Tool::EditText
+            | Tool::EditObjects
             | Tool::Loupe => Gesture::None,
             Tool::Highlight
             | Tool::Underline
@@ -293,6 +301,8 @@ impl Tool {
                 | Tool::Signature
                 | Tool::DynamicZoom
                 | Tool::Loupe
+                | Tool::EditText
+                | Tool::EditObjects
         )
     }
 

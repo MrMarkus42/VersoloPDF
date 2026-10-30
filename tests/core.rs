@@ -1450,6 +1450,93 @@ fn bookmarks_from_text_rules_and_contents_options() {
 }
 
 #[test]
+fn page_objects_are_edited() {
+    use mrpdf::content::{Affine, Align, ObjectKind, ObjectStyle, TextStyle, ZOrder, text_blocks};
+    use mrpdf::model::Rgba;
+    let _guard = common::lock();
+    let mut doc = open(1);
+    let objects = doc.page_objects(0).unwrap();
+    assert_eq!(objects.len(), 2);
+    assert!(objects.iter().all(|o| o.kind == ObjectKind::Text));
+    assert_eq!(objects[0].text, "Page 1 Hello World");
+    assert!((objects[0].font_size - 24.0).abs() < 0.01, "{}", objects[0].font_size);
+    assert!((objects[0].rect.x0 - 72.0).abs() < 3.0);
+
+    // Move the heading 100 pt down; text follows.
+    doc.transform_objects(0, &[0], Affine::translate(0.0, -100.0)).unwrap();
+    let moved = doc.page_objects(0).unwrap();
+    assert!((moved[0].origin().y - 600.0).abs() < 0.5, "{:?}", moved[0].origin());
+    let words = doc.page_text(0).unwrap().all_text();
+    assert!(words.contains("Page 1"));
+
+    // Colour and stacking order.
+    let red = ObjectStyle { fill: Some(Rgba::rgb(200, 0, 0)), ..Default::default() };
+    doc.style_objects(0, &[1], &red).unwrap();
+    assert_eq!(doc.page_objects(0).unwrap()[1].fill.map(|c| (c.r, c.g, c.b)), Some((200, 0, 0)));
+    assert_eq!(doc.reorder_objects(0, &[1], ZOrder::Back).unwrap(), vec![0]);
+    assert!(doc.page_objects(0).unwrap()[0].text.starts_with("Zweite"));
+    assert!(doc.undo().unwrap(), "one undo step");
+    assert!(doc.page_objects(0).unwrap()[0].text.starts_with("Page"));
+
+    // Duplicate (apart from the original: text on top of the same text is
+    // taken for "fake bold" by the text extraction), then delete the copy.
+    let new = doc.duplicate_objects(0, &[0], (10.0, -60.0)).unwrap();
+    assert_eq!(new, vec![2]);
+    let all = doc.page_objects(0).unwrap();
+    assert_eq!(all[2].text, "Page 1 Hello World");
+    assert!((all[2].origin().x - all[0].origin().x - 10.0).abs() < 0.5);
+    doc.delete_objects(0, &[2]).unwrap();
+    assert_eq!(doc.page_objects(0).unwrap().len(), 2);
+
+    // A text block is set again, wrapped and centred, in its own font.
+    let blocks = text_blocks(&doc.page_objects(0).unwrap());
+    assert_eq!(blocks.len(), 2);
+    let body = blocks.iter().find(|b| b.text().starts_with("Zweite")).unwrap().clone();
+    let style = TextStyle { align: Align::Center, ..TextStyle::of_block(&body) };
+    let new = doc
+        .replace_text_block(
+            0,
+            &body.objects,
+            "Grüße aus Köln und noch viel mehr Text für zwei Zeilen",
+            &style,
+            72.0,
+            body.baselines[0],
+            200.0,
+            18.0,
+        )
+        .unwrap();
+    assert!(new.len() >= 2, "wrapped: {new:?}");
+    let text = doc.page_text(0).unwrap().all_text();
+    assert!(text.contains("Grüße aus Köln") && !text.contains("Zweite Zeile"), "{text}");
+    let after = doc.page_objects(0).unwrap();
+    assert!(
+        after.iter().filter(|o| new.contains(&o.index)).all(|o| o.rect.x1 <= 72.0 + 201.0),
+        "inside the width"
+    );
+    assert!(
+        after.iter().filter(|o| new.contains(&o.index)).all(|o| o.font_size > 13.9 && o.font_size < 14.1)
+    );
+
+    // Characters outside WinAnsi use another font, but still show.
+    let heading = text_blocks(&doc.page_objects(0).unwrap())
+        .into_iter()
+        .find(|b| b.text().starts_with("Page"))
+        .unwrap();
+    doc.replace_text_block(
+        0,
+        &heading.objects,
+        "Ωmega",
+        &TextStyle::of_block(&heading),
+        heading.left,
+        heading.baselines[0],
+        0.0,
+        30.0,
+    )
+    .unwrap();
+    assert!(doc.page_text(0).unwrap().all_text().contains("Ωmega"));
+}
+
+#[test]
 fn insert_pages_from_open_document() {
     let _guard = common::lock();
     let mut target = open(2);

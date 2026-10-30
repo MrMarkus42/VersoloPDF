@@ -30,7 +30,6 @@ pub enum Unavailable {
     JavaScript,
     Scanner,
     Media,
-    TextEditing,
     Speech,
     Barcodes,
     Guides,
@@ -61,10 +60,6 @@ impl Unavailable {
             Unavailable::Media => {
                 ("Video, Audio und 3D werden nicht unterstützt.", "Video, audio and 3D are not supported.")
             }
-            Unavailable::TextEditing => (
-                "Das Bearbeiten von vorhandenem Seiteninhalt wird noch nicht unterstützt.",
-                "Editing existing page content is not supported yet.",
-            ),
             Unavailable::Speech => {
                 ("Vorlesen wird noch nicht unterstützt.", "Read aloud is not supported yet.")
             }
@@ -293,6 +288,8 @@ pub enum Cmd {
     Comment(super::comment_cmds::CommentCmd),
     /// Commands of the ribbon tab "Formular" (see `form_cmds.rs`).
     Form(super::form_cmds::FormCmd),
+    /// "Text bearbeiten" / "Objekte bearbeiten".
+    Content(crate::ui::content_state::ContentCmd),
 }
 
 pub const HOMEPAGE: &str = "https://github.com/MrMarkus42/MrPDF";
@@ -352,6 +349,10 @@ pub const SEARCHABLE: &[Cmd] = &[
     Cmd::Form(super::form_cmds::FormCmd::EmailFormData),
     Cmd::Form(super::form_cmds::FormCmd::FillForms),
     Cmd::Form(super::form_cmds::FormCmd::AllJavaScripts),
+    Cmd::Tool(Tool::EditText),
+    Cmd::Tool(Tool::EditObjects),
+    Cmd::Content(crate::ui::content_state::ContentCmd::AddText),
+    Cmd::Content(crate::ui::content_state::ContentCmd::AddImage),
     Cmd::Tool(Tool::Note),
     Cmd::Tool(Tool::FileAttach),
     Cmd::Tool(Tool::TextBox),
@@ -757,6 +758,7 @@ impl Cmd {
             View(v) => v.names(),
             Comment(c) => c.names(),
             Form(f) => f.names(),
+            Content(c) => c.names(),
         }
     }
 
@@ -937,6 +939,7 @@ impl Cmd {
             View(v) => v.icon(),
             Comment(c) => c.icon(),
             Form(f) => f.icon(),
+            Content(c) => c.icon(),
         }
     }
 
@@ -1005,6 +1008,7 @@ impl Cmd {
             View(v) => return v.shortcut(),
             Comment(c) => return c.shortcut(),
             Form(f) => return f.shortcut(),
+            Content(c) => return c.shortcut(),
             _ => return None,
         })
     }
@@ -1064,6 +1068,8 @@ pub fn tool_names(tool: Tool) -> (&'static str, &'static str) {
         Tool::AudioClip => ("Audio hinzufügen", "Add audio"),
         Tool::Model3d => ("3D hinzufügen", "Add 3D"),
         Tool::SoundNote => ("Audio", "Audio"),
+        Tool::EditText => ("Text bearbeiten", "Edit text"),
+        Tool::EditObjects => ("Objekte bearbeiten", "Edit objects"),
     }
 }
 
@@ -1132,6 +1138,7 @@ impl MrPdfApp {
             View(v) => self.view_enabled(v),
             Comment(c) => self.comment_enabled(c),
             Form(f) => self.form_enabled(f),
+            Content(c) => self.content_enabled(c),
             _ => has_doc,
         }
     }
@@ -1151,6 +1158,7 @@ impl MrPdfApp {
             View(v) => self.view_selected(v),
             Comment(c) => self.comment_selected(c),
             Form(f) => self.form_selected(f),
+            Content(c) => self.content_selected(c),
             ToggleSidebar => self.settings.show_sidebar,
             ToggleProperties => self.settings.show_properties,
             DarkMode => self.settings.dark_mode,
@@ -1195,6 +1203,10 @@ impl MrPdfApp {
         }
         if let Form(f) = cmd {
             self.run_form(ctx, f);
+            return;
+        }
+        if let Content(c) = cmd {
+            self.run_content(ctx, c);
             return;
         }
         if self.run_page_dialog(cmd)
@@ -1272,6 +1284,7 @@ impl MrPdfApp {
             View(v) => self.run_view(ctx, v),
             Comment(c) => self.run_comment(ctx, c),
             Form(f) => self.run_form(ctx, f),
+            Content(c) => self.run_content(ctx, c),
             ToggleSidebar => self.settings.show_sidebar = !self.settings.show_sidebar,
             ToggleProperties => self.settings.show_properties = !self.settings.show_properties,
             Fullscreen => {

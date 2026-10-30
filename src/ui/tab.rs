@@ -189,6 +189,9 @@ pub struct DocTab {
     links: HashMap<usize, Cached<Vec<LinkInfo>>>,
     fields: HashMap<usize, Cached<Vec<FormFieldInfo>>>,
     bookmarks: Option<Cached<Vec<Bookmark>>>,
+    content_objects: HashMap<usize, Cached<Vec<crate::content::ContentObject>>>,
+    /// "Objekte bearbeiten" / "Text bearbeiten".
+    pub content: crate::ui::content_state::ContentEdit,
     pub selection: Option<TextSelection>,
     pub selected_annot: Option<AnnotRef>,
     /// Bookmark selected in the bookmarks pane (child indices).
@@ -265,6 +268,8 @@ impl DocTab {
             links: HashMap::new(),
             fields: HashMap::new(),
             bookmarks: None,
+            content_objects: HashMap::new(),
+            content: Default::default(),
             selection: None,
             selected_annot: None,
             selected_bookmark: None,
@@ -480,6 +485,17 @@ impl DocTab {
         }
         let list = Arc::new(self.doc.annotations(page).unwrap_or_default());
         self.annots.insert(page, Cached { revision: rev, value: list.clone() });
+        list
+    }
+
+    /// The objects of a page ("Objekte bearbeiten").
+    pub fn objects(&mut self, page: usize) -> Arc<Vec<crate::content::ContentObject>> {
+        let rev = self.doc.revision();
+        if let Some(c) = self.content_objects.get(&page).filter(|c| c.revision == rev) {
+            return c.value.clone();
+        }
+        let list = Arc::new(self.doc.page_objects(page).unwrap_or_default());
+        self.content_objects.insert(page, Cached { revision: rev, value: list.clone() });
         list
     }
 

@@ -640,6 +640,7 @@ impl MrPdfApp {
             CanvasEvent::DeleteSelected => self.delete_selected_annotation(ctx),
             CanvasEvent::ShowProperties => self.settings.show_properties = true,
             CanvasEvent::Status(text) => self.set_status(ctx, text),
+            CanvasEvent::Content(op) => self.content_op(ctx, op),
             other => self.handle_tool_event(ctx, other),
         }
     }

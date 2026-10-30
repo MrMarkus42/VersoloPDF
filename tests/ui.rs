@@ -1041,6 +1041,113 @@ fn bookmark_tools_ui() {
 }
 
 #[test]
+fn edit_page_content_ui() {
+    use mrpdf::ui::tools::Tool;
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let file = sample_file(&dir, 1);
+    let mut h = harness(vec![file], false);
+    h.run_steps(10);
+    let at = |h: &Harness<'_, MrPdfApp>, x: f32, y: f32| {
+        h.state().active_tab().unwrap().screen_pos(0, mrpdf::geometry::PointF::new(x, y)).unwrap()
+    };
+    let objects =
+        |h: &mut Harness<'_, MrPdfApp>| h.state_mut().active_tab_mut().unwrap().doc.page_objects(0).unwrap();
+    tab(&mut h, "Start");
+    save(&mut h, "obj-01-start");
+
+    // "Objekte bearbeiten": click the heading, drag it 50 pt down.
+    quick(&mut h, "Objekte bearbeiten");
+    assert_eq!(h.state().tool(), Tool::EditObjects);
+    let p = at(&h, 150.0, 710.0);
+    click(&mut h, p);
+    h.run_steps(3);
+    assert_eq!(h.state().active_tab().unwrap().content.selected, vec![0]);
+    save(&mut h, "obj-02-selected");
+    let (a, b) = (at(&h, 150.0, 710.0), at(&h, 150.0, 660.0));
+    drag(&mut h, a, b);
+    h.run_steps(4);
+    let y = objects(&mut h)[0].origin().y;
+    assert!((y - 650.0).abs() < 2.0, "moved to {y}");
+    assert_eq!(h.state().active_tab().unwrap().content.selected, vec![0], "stays selected");
+
+    // The contextual tab "Anordnen".
+    tab(&mut h, "Anordnen");
+    save(&mut h, "obj-03-arrange");
+    tab(&mut h, "Format");
+    save(&mut h, "obj-04-format");
+
+    // Strg+D duplicates, Entf deletes the copy.
+    h.key_press_modifiers(Modifiers::COMMAND, egui::Key::D);
+    h.run_steps(4);
+    assert_eq!(objects(&mut h).len(), 3);
+    h.key_press(egui::Key::Delete);
+    h.run_steps(4);
+    assert_eq!(objects(&mut h).len(), 2);
+
+    // Resize with the bottom right handle, then rotate with the round handle.
+    let p = at(&h, 150.0, 660.0);
+    click(&mut h, p);
+    h.run_steps(3);
+    let r = objects(&mut h)[0].rect;
+    let corner = at(&h, r.x1, r.y0);
+    let further = corner + egui::vec2(60.0, 20.0);
+    drag(&mut h, corner, further);
+    h.run_steps(4);
+    let wider = objects(&mut h)[0].rect;
+    assert!(wider.width() > r.width() + 40.0, "{r:?} -> {wider:?}");
+    let top = at(&h, (wider.x0 + wider.x1) / 2.0, wider.y1);
+    let knob = top - egui::vec2(0.0, 22.0);
+    let side = knob + egui::vec2(120.0, 120.0);
+    drag(&mut h, knob, side);
+    h.run_steps(4);
+    let m = objects(&mut h)[0].matrix.0;
+    assert!(m[1].abs() > 0.1, "rotated: {m:?}");
+    save(&mut h, "obj-05-rotated");
+    // Undo both, step by step.
+    h.key_press_modifiers(Modifiers::COMMAND, egui::Key::Z);
+    h.run_steps(2);
+    h.key_press_modifiers(Modifiers::COMMAND, egui::Key::Z);
+    h.run_steps(3);
+    assert!((objects(&mut h)[0].rect.width() - r.width()).abs() < 1.0);
+
+    // "Hinzufügen › Text hinzufügen": new text in the editor.
+    tab(&mut h, "Start");
+    h.get_by_label("Hinzufügen").click();
+    h.run_steps(2);
+    h.get_by_label("Text hinzufügen").click();
+    h.run_steps(4);
+    assert_eq!(h.state().tool(), Tool::EditText);
+    h.state_mut().active_tab_mut().unwrap().content.text.as_mut().unwrap().text = "Hinzugefügt".into();
+    h.key_press_modifiers(Modifiers::COMMAND, egui::Key::Enter);
+    h.run_steps(4);
+    assert!(h.state().active_tab().unwrap().doc.page_text(0).unwrap().all_text().contains("Hinzugefügt"));
+    assert_eq!(objects(&mut h).len(), 3);
+
+    // "Text bearbeiten": click the second line, replace its text.
+    quick(&mut h, "Text bearbeiten");
+    assert_eq!(h.state().tool(), Tool::EditText);
+    let p = at(&h, 120.0, 604.0);
+    click(&mut h, p);
+    h.run_steps(4);
+    assert!(h.state().active_tab().unwrap().content.text.is_some(), "editor open");
+    // Typing goes into the editor; the test replaces the whole text.
+    h.input_mut().events.push(Event::Text("!".into()));
+    h.run_steps(2);
+    assert!(h.state().active_tab().unwrap().content.text.as_ref().unwrap().text.ends_with('!'));
+    h.state_mut().active_tab_mut().unwrap().content.text.as_mut().unwrap().text =
+        "Neuer Inhalt der Zeile".into();
+    h.run_steps(3);
+    save(&mut h, "obj-06-text-editor");
+    h.key_press_modifiers(Modifiers::COMMAND, egui::Key::Enter);
+    h.run_steps(6);
+    let text = h.state().active_tab().unwrap().doc.page_text(0).unwrap().all_text();
+    assert!(text.contains("Neuer Inhalt der Zeile") && !text.contains("Zweite Zeile"), "{text}");
+    save(&mut h, "obj-07-text-applied");
+    assert!(h.state().active_tab().unwrap().doc.is_modified());
+}
+
+#[test]
 fn insert_pages_source_list() {
     let _guard = common::lock();
     let dir = tempfile::tempdir().unwrap();

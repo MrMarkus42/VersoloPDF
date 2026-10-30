@@ -206,7 +206,11 @@ impl MrPdfApp {
         // An active comment tool has a Format tab for its default style
         // (it wins over the comment it has just created).
         let tool_format = self.tool.annot_kind().is_some();
-        if !has_selection && !tool_format && self.ribbon == RibbonTab::Format {
+        // "Objekte bearbeiten" / "Text bearbeiten": "Format" and "Anordnen".
+        let content_tabs = self.content_tabs();
+        if (!has_selection && !tool_format && !content_tabs && self.ribbon == RibbonTab::Format)
+            || (!content_tabs && self.ribbon == RibbonTab::Arrange)
+        {
             self.ribbon = RibbonTab::Home;
         }
         Panel::top("ribbon")
@@ -253,8 +257,14 @@ impl MrPdfApp {
                         (RibbonTab::Bookmarks, t.tab_bookmarks),
                         (RibbonTab::Help, t.tab_help),
                     ];
-                    if has_selection || tool_format {
+                    if has_selection || tool_format || content_tabs {
                         tabs.push((RibbonTab::Format, t.format_tab));
+                    }
+                    if content_tabs {
+                        tabs.push((
+                            RibbonTab::Arrange,
+                            if self.settings.language == Language::German { "Anordnen" } else { "Arrange" },
+                        ));
                     }
                     self.tab_row(ui, &tabs);
                 });
@@ -268,7 +278,9 @@ impl MrPdfApp {
                 // known to fit (or not measured yet) is used.
                 let avail = ui.available_width();
                 let lang = self.settings.language;
-                let content_key = if self.ribbon == RibbonTab::Format && tool_format {
+                let content_key = if self.ribbon == RibbonTab::Format && content_tabs {
+                    250u8
+                } else if self.ribbon == RibbonTab::Format && tool_format {
                     100u8.wrapping_add(self.tool as u8)
                 } else if self.ribbon == RibbonTab::Format {
                     self.tab().and_then(|tab| tab.selected_annotation()).map_or(0, |a| a.kind as u8)
@@ -316,6 +328,8 @@ impl MrPdfApp {
                                     RibbonTab::Accessibility => self.ribbon_accessibility(ui, &ctx),
                                     RibbonTab::Bookmarks => self.ribbon_bookmarks(ui, &ctx),
                                     RibbonTab::Help => self.ribbon_help(ui, &ctx),
+                                    RibbonTab::Format if content_tabs => self.ribbon_content_format(ui, &ctx),
+                                    RibbonTab::Arrange => self.ribbon_arrange(ui, &ctx),
                                     RibbonTab::Format if tool_format => self.ribbon_tool_format(ui, &ctx),
                                     RibbonTab::Format => self.ribbon_format(ui, &ctx),
                                 }
@@ -341,7 +355,7 @@ impl MrPdfApp {
     fn tab_row(&mut self, ui: &mut Ui, tabs: &[(RibbonTab, &str)]) {
         let text_of = |tab: RibbonTab, label: &str| {
             let text = RichText::new(label).size(13.0);
-            if tab == RibbonTab::Format {
+            if matches!(tab, RibbonTab::Format | RibbonTab::Arrange) {
                 text.color(egui::Color32::from_rgb(160, 110, 0)).strong()
             } else {
                 text
@@ -584,18 +598,7 @@ impl MrPdfApp {
                 });
             });
         });
-        group(ui, if de { "Objekte" } else { "Objects" }, |ui| {
-            self.big(ui, ctx, UA(Unavailable::TextEditing, "Text bearbeiten", "Edit text", Icon::TextBox));
-            self.big(
-                ui,
-                ctx,
-                UA(Unavailable::TextEditing, "Objekte bearbeiten", "Edit objects", Icon::Pointer),
-            );
-            ui.vertical(|ui| {
-                self.small(ui, ctx, Cmd::InsertImage);
-                self.small(ui, ctx, Cmd::Tool(Tool::Typewriter));
-            });
-        });
+        self.ribbon_objects_group(ui, ctx);
         group(ui, if de { "Anmerkungen" } else { "Comments" }, |ui| {
             self.smalls(
                 ui,

@@ -7,6 +7,7 @@ pub mod bookmark_dialogs;
 mod calculator_ui;
 pub mod commands;
 pub mod comment_cmds;
+mod content_cmds;
 mod convert_dialogs;
 mod dialogs;
 mod export_dialog;
@@ -75,6 +76,8 @@ pub enum RibbonTab {
     Help,
     /// Contextual tab shown while a comment is selected.
     Format,
+    /// Contextual tab "Anordnen" of the content tools.
+    Arrange,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -348,6 +351,15 @@ pub struct MrPdfApp {
     next_calculator: usize,
     /// Loaded spelling dictionary and its file.
     spell_dict: Option<(PathBuf, crate::spell::Dictionary)>,
+    /// Copied page objects ("Objekte bearbeiten") and their bounding box.
+    object_clip: Option<crate::document::ObjectClip>,
+    clip_rect: Option<crate::geometry::RectF>,
+    /// Pastes since the last copy (each one a bit further away).
+    paste_count: u32,
+    /// "Ausrichtung": align to the page instead of the selection.
+    align_to_page: bool,
+    /// Values of the content "Format" tab.
+    content_format: Option<content_cmds::FormatUi>,
 }
 
 impl MrPdfApp {
@@ -424,6 +436,11 @@ impl MrPdfApp {
             calculators: Vec::new(),
             next_calculator: 1,
             spell_dict: None,
+            object_clip: None,
+            clip_rect: None,
+            paste_count: 0,
+            align_to_page: false,
+            content_format: None,
         }
     }
 
@@ -517,6 +534,14 @@ impl MrPdfApp {
     }
 
     fn select_tool(&mut self, tool: Tool) {
+        // Leaving "Text bearbeiten" applies the open text.
+        if tool != Tool::EditText
+            && let Some(tab) = self.tab()
+            && let Some(edit) = tab.content.text.take()
+            && edit.changed()
+        {
+            self.events.push(CanvasEvent::Content(edit.to_op()));
+        }
         self.tool = tool;
         if let Some(tab) = self.tab() {
             tab.interaction = crate::ui::tab::Interaction::None;
@@ -528,6 +553,8 @@ impl MrPdfApp {
         if self.dialog.is_some() {
             return;
         }
+        // "Objekte bearbeiten" uses Strg+C/X/V/D/A, Entf and the arrows.
+        self.content_shortcuts(ctx);
         let cmd = Modifiers::COMMAND;
         let pressed =
             |m: Modifiers, k: Key| ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(m, k)));

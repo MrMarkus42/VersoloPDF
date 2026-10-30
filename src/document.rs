@@ -29,7 +29,9 @@ use crate::text::{CharInfo, PageText};
 use crate::xfdf;
 
 mod bookmarks;
+mod content;
 pub use bookmarks::{LinkOptions, TextBookmarkOptions, TocLevel, TocOptions, TocPageNumbers};
+pub use content::{ClipItem, ObjectClip, PathSeg};
 
 /// Files larger than this are refused to protect against memory exhaustion.
 pub const MAX_FILE_SIZE: u64 = 1 << 31;

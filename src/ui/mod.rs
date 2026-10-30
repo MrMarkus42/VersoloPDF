@@ -3,6 +3,7 @@
 pub mod app;
 pub mod cache;
 pub mod canvas;
+pub mod content_state;
 pub mod i18n;
 pub mod icons;
 pub mod pickers;

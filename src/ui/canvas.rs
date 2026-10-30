@@ -59,6 +59,8 @@ impl Default for ViewOptions {
     }
 }
 
+mod content;
+
 /// Width of the rulers in points.
 pub const RULER: f32 = 18.0;
 /// Size of the loupe picture in points.
@@ -143,6 +145,8 @@ pub enum CanvasEvent {
         page: usize,
         rect: RectF,
     },
+    /// "Objekte bearbeiten" / "Text bearbeiten".
+    Content(crate::ui::content_state::ContentOp),
 }
 
 pub struct CanvasCtx<'a> {
@@ -655,7 +659,11 @@ fn draw_and_interact(ui: &mut Ui, tab: &mut DocTab, cx: &mut CanvasCtx, viewport
         tab.ruler_page = ruler_page;
     }
 
-    handle_input(ui, tab, cx, &response, &on_screen);
+    if matches!(cx.tool, Tool::EditText | Tool::EditObjects) {
+        content::interact(ui, tab, cx, &response, &on_screen);
+    } else {
+        handle_input(ui, tab, cx, &response, &on_screen);
+    }
     draw_field_editor(ui, tab, &on_screen, cx);
 }
 
