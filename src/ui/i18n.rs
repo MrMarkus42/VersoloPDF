@@ -339,7 +339,7 @@ strings! {
     license_text: "Lizenz: MIT oder Apache-2.0 (nach Wahl). Copyright © Mr. M und Mitwirkende.", "License: MIT or Apache-2.0 (at your option). Copyright © Mr. M and contributors.";
     third_party_text: "Verwendet PDFium (BSD-3-Clause/Apache-2.0), egui/eframe, pdfium-render, lopdf und weitere Bibliotheken unter MIT-, Apache- oder BSD-Lizenzen. Details: THIRD_PARTY_NOTICES.md.", "Uses PDFium (BSD-3-Clause/Apache-2.0), egui/eframe, pdfium-render, lopdf and further libraries under MIT, Apache or BSD licenses. Details: THIRD_PARTY_NOTICES.md.";
     shortcuts_title: "Tastenkürzel", "Keyboard shortcuts";
-    shortcuts_text: "Strg+O Öffnen · Strg+S Speichern · Strg+P Drucken · Strg+Z/Y Rückgängig/Wiederholen · Strg+F Suchen · F3 Weitersuchen · Strg+C Kopieren · Strg+A Alles auswählen · Entf Kommentar löschen · Strg+Plus/Minus Zoom · Strg+0 Ganze Seite · Strg+1 Originalgröße · Strg+2 Breite · Bild↑/↓ Blättern · H Hand · V Text auswählen · F4 Seitenleiste · Esc Auswahl aufheben", "Ctrl+O Open · Ctrl+S Save · Ctrl+P Print · Ctrl+Z/Y Undo/Redo · Ctrl+F Find · F3 Find next · Ctrl+C Copy · Ctrl+A Select all · Del Delete comment · Ctrl+Plus/Minus Zoom · Ctrl+0 Fit page · Ctrl+1 Actual size · Ctrl+2 Fit width · PgUp/PgDn Page · H Hand · V Select text · F4 Sidebar · Esc Clear selection";
+    shortcuts_text: "Strg+O Öffnen · Strg+S Speichern · Strg+P Drucken · Strg+Z/Y Rückgängig/Wiederholen · Strg+F Suchen · F3 Weitersuchen · Strg+C Kopieren · Strg+A Alles auswählen · Entf Kommentar löschen · Strg+Plus/Minus Zoom · Strg+0 Ganze Seite · Strg+1 Originalgröße · Strg+2 Breite · Bild↑/↓ Blättern · H Hand · V Text auswählen · E Text bearbeiten · O Objekte bearbeiten · M Hervorheben · N Kommentar · R Rechteck (weitere Werkzeugtasten in den Tooltips) · F4 Seitenleiste · Esc Auswahl aufheben", "Ctrl+O Open · Ctrl+S Save · Ctrl+P Print · Ctrl+Z/Y Undo/Redo · Ctrl+F Find · F3 Find next · Ctrl+C Copy · Ctrl+A Select all · Del Delete comment · Ctrl+Plus/Minus Zoom · Ctrl+0 Fit page · Ctrl+1 Actual size · Ctrl+2 Fit width · PgUp/PgDn Page · H Hand · V Select text · E Edit text · O Edit objects · M Highlight · N Comment · R Rectangle (more tool keys in the tooltips) · F4 Sidebar · Esc Clear selection";
 
     // Errors
     error: "Fehler", "Error";
@@ -352,6 +352,11 @@ strings! {
     err_encrypted: "Diese Funktion ist für verschlüsselte Dokumente nicht verfügbar.", "This function is not available for encrypted documents.";
     err_not_permitted: "Das Dokument erlaubt diese Aktion nicht.", "The document does not permit this action.";
     err_generic: "Die Aktion ist fehlgeschlagen.", "The action failed.";
+    err_not_found: "Die Datei oder der Ordner wurde nicht gefunden:", "The file or folder was not found:";
+    err_access_denied: "Kein Zugriff auf die Datei. Vielleicht ist sie schreibgeschützt oder in einem anderen Programm geöffnet:", "No access to the file. It may be read-only or open in another program:";
+    err_engine_step: "Dieser Schritt hat bei diesem Dokument nicht geklappt. Die Datei ist vielleicht beschädigt oder nutzt eine Besonderheit, die MrPDF noch nicht kennt. Das Dokument selbst wurde nicht verändert.", "This step did not work for this document. The file may be damaged or use a feature MrPDF does not know yet. The document itself was not changed.";
+    err_page_missing: "Diese Seite gibt es im Dokument nicht:", "This page does not exist in the document:";
+    err_details: "Technische Angabe:", "Technical detail:";
 }
 
 impl Strings {

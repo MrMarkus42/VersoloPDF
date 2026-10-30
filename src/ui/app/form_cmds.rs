@@ -185,7 +185,7 @@ impl MrPdfApp {
             ] {
                 self.big(ui, ctx, Cmd::Tool(tool));
             }
-            self.big(ui, ctx, UA(Unavailable::Barcodes, "Barcode", "Barcode", Icon::Count));
+            self.big(ui, ctx, UA(Unavailable::Barcodes, "Barcode", "Barcode", Icon::Barcode));
             self.big(ui, ctx, Cmd::Tool(Tool::FieldDate));
             self.big(ui, ctx, Cmd::Tool(Tool::FieldImage));
             ui.vertical(|ui| {
@@ -249,7 +249,7 @@ impl MrPdfApp {
                     chosen = Some(cmd);
                 }
             }
-            self.menu_row(ui, UA(Unavailable::Barcodes, "Barcodes", "Barcodes", Icon::Count));
+            self.menu_row(ui, UA(Unavailable::Barcodes, "Barcodes", "Barcodes", Icon::Barcode));
             ui.separator();
             let cmd = Cmd::Form(FormCmd::RequiredOnly);
             if self.menu_row(ui, cmd) {

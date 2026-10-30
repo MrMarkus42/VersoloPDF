@@ -1147,6 +1147,104 @@ fn edit_page_content_ui() {
     assert!(h.state().active_tab().unwrap().doc.is_modified());
 }
 
+/// All icons in light and dark, in the ribbon sizes (26 and 16 points).
+#[test]
+fn icon_gallery() {
+    use mrpdf::ui::icons::{Icon, paint};
+    use mrpdf::ui::theme;
+    let _guard = common::lock();
+    for dark in [false, true] {
+        let mut h = Harness::builder().with_size(egui::vec2(1240.0, 820.0)).wgpu().build_ui(move |ui| {
+            theme::apply(ui.ctx(), dark, theme::Design::Standard);
+            let bg = if dark { egui::Color32::from_gray(38) } else { egui::Color32::from_gray(250) };
+            ui.painter().rect_filled(ui.max_rect(), 0.0, bg);
+            let ink = theme::icon_color(dark);
+            egui::Grid::new("icons").spacing([4.0, 6.0]).min_col_width(96.0).show(ui, |ui| {
+                for (i, icon) in Icon::ALL.iter().enumerate() {
+                    ui.vertical(|ui| {
+                        ui.horizontal(|ui| {
+                            let (r, _) = ui.allocate_exact_size(egui::vec2(26.0, 26.0), egui::Sense::hover());
+                            paint(ui.painter(), r, *icon, ink);
+                            let (r, _) = ui.allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::hover());
+                            paint(ui.painter(), r, *icon, ink);
+                        });
+                        ui.label(egui::RichText::new(format!("{icon:?}")).size(9.5));
+                    });
+                    if i % 12 == 11 {
+                        ui.end_row();
+                    }
+                }
+            });
+        });
+        h.run_steps(2);
+        let name = if dark { "icons-dark.png" } else { "icons-light.png" };
+        match h.render() {
+            Ok(img) => img.save(screenshot_dir().join(name)).unwrap(),
+            Err(err) => eprintln!("rendering {name} failed: {err}"),
+        }
+    }
+}
+
+/// One-letter tool keys and the named undo step.
+#[test]
+fn tool_keys_and_undo_name() {
+    use mrpdf::ui::tools::Tool;
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = harness(vec![sample_file(&dir, 2)], false);
+    h.run_steps(8);
+    for (key, tool) in [
+        (egui::Key::E, Tool::EditText),
+        (egui::Key::O, Tool::EditObjects),
+        (egui::Key::M, Tool::Highlight),
+        (egui::Key::H, Tool::Hand),
+        (egui::Key::R, Tool::Rectangle),
+    ] {
+        h.key_press(key);
+        h.run_steps(3);
+        assert_eq!(h.state().tool(), tool, "{key:?}");
+    }
+    assert_eq!(h.state().undo_label(false), None);
+    drag(&mut h, pos2(560.0, 360.0), pos2(720.0, 460.0));
+    h.run_steps(5);
+    assert_eq!(h.state().undo_label(false).as_deref(), Some("Rückgängig: Anmerkung hinzufügen"));
+    h.key_press_modifiers(Modifiers::COMMAND, egui::Key::Z);
+    h.run_steps(4);
+    assert_eq!(h.state().undo_label(false), None);
+    assert_eq!(h.state().undo_label(true).as_deref(), Some("Wiederholen: Anmerkung hinzufügen"));
+    save(&mut h, "tool-keys-undo");
+}
+
+/// Every ribbon tab with a document open, light and dark.
+#[test]
+fn ribbon_tour() {
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let file = sample_file(&dir, 3);
+    let tabs = [
+        "Start",
+        "Anmerkungen",
+        "Dokumentaufbau",
+        "Umwandeln",
+        "Formular",
+        "Schützen",
+        "Teilen",
+        "Überprüfen",
+        "Barrierefreiheit",
+        "Lesezeichen",
+        "Ansicht",
+        "Hilfe",
+    ];
+    for dark in [false, true] {
+        let mut h = harness(vec![file.clone()], dark);
+        h.run_steps(8);
+        for (i, label) in tabs.iter().enumerate() {
+            tab(&mut h, label);
+            save(&mut h, &format!("ribbon-{:02}-{}", i, if dark { "dark" } else { "light" }));
+        }
+    }
+}
+
 #[test]
 fn insert_pages_source_list() {
     let _guard = common::lock();

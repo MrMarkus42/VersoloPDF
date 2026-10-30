@@ -855,7 +855,7 @@ impl Cmd {
             MovePageDown => Icon::MoveDown,
             MergeFiles => Icon::Merge,
             SplitDocument => Icon::Split,
-            DuplicatePages => Icon::Copy,
+            DuplicatePages => Icon::Duplicate,
             ReplacePages => Icon::InsertFile,
             SwapPages => Icon::Swap,
             NormalizePages => Icon::Resize,
@@ -882,7 +882,7 @@ impl Cmd {
             RecognizeText => Icon::Search,
             ReplaceFonts => Icon::TextBox,
             RecolorPages => Icon::Theme,
-            SpellCheck => Icon::Count,
+            SpellCheck => Icon::SpellCheck,
             DeletePageComments => Icon::Delete,
             FlattenAll => Icon::Flatten,
             Grayscale => Icon::Theme,
@@ -919,7 +919,7 @@ impl Cmd {
             About => Icon::Logo,
             FileAssociation => Icon::Gear,
             Homepage => Icon::Web,
-            InsertClipboard => Icon::Copy,
+            InsertClipboard => Icon::Paste,
             InsertImages => Icon::Image,
             InsertText => Icon::TextFile,
             InsertRtf => Icon::WordFile,
@@ -928,7 +928,7 @@ impl Cmd {
             NUp => Icon::Merge,
             SplitPages => Icon::Split,
             Overlay => Icon::Background,
-            Rotate180 => Icon::RotateRight,
+            Rotate180 => Icon::Rotate180,
             RemoveCropped => Icon::Crop,
             TrimWhite(_) => Icon::Margins,
             RemoveMarks(_) => Icon::Delete,
@@ -1000,6 +1000,10 @@ impl Cmd {
             FitWidth => ("Strg+2", "Ctrl+2"),
             FitContent => ("Strg+3", "Ctrl+3"),
             Tool(crate::ui::tools::Tool::Loupe) => ("Strg+Alt+L", "Ctrl+Alt+L"),
+            Tool(t) => {
+                let k = t.key()?;
+                (k, k)
+            }
             DarkMode => ("Strg+Umschalt+3", "Ctrl+Shift+3"),
             Panel(SidePanel::Bookmarks) => ("Strg+B", "Ctrl+B"),
             Panel(SidePanel::Thumbnails) => ("Strg+T", "Ctrl+T"),
@@ -1012,6 +1016,122 @@ impl Cmd {
             _ => return None,
         })
     }
+}
+
+/// Short explanation shown under the name in a command's tooltip.
+fn explain(cmd: Cmd) -> Option<(&'static str, &'static str)> {
+    use crate::ui::tools::Tool as T;
+    use Cmd::*;
+    Some(match cmd {
+        Tool(T::Hand) => (
+            "Seite verschieben; Links und Formularfelder lassen sich anklicken.",
+            "Move the page; links and form fields can be clicked.",
+        ),
+        Tool(T::SelectText) => ("Text markieren und kopieren.", "Select and copy text."),
+        Tool(T::SelectAnnot) => {
+            ("Anmerkungen auswählen, verschieben und ändern.", "Select, move and change comments.")
+        }
+        Tool(T::Zoom) => ("Klicken vergrößert, mit Umschalt verkleinert.", "Click zooms in, with Shift out."),
+        Tool(T::EditText) => (
+            "Den Text der Seite selbst ändern, wie in einer Textverarbeitung.",
+            "Change the page's own text, like in a word processor.",
+        ),
+        Tool(T::EditObjects) => (
+            "Text, Bilder und Grafiken der Seite auswählen, verschieben und formatieren.",
+            "Select, move and format the page's text, images and graphics.",
+        ),
+        Tool(T::Highlight) => {
+            ("Text farbig hervorheben wie mit einem Textmarker.", "Highlight text like a marker.")
+        }
+        Tool(T::Note) => ("Eine Notiz an eine Stelle der Seite heften.", "Pin a note to a spot on the page."),
+        Tool(T::Typewriter) => ("Text direkt auf die Seite schreiben.", "Type text directly onto the page."),
+        Tool(T::Stamp) => ("Einen Stempel wie „Genehmigt“ aufbringen.", "Put a stamp such as “Approved”."),
+        Tool(T::Redact) => (
+            "Bereiche zum Schwärzen markieren; „Übernehmen“ entfernt sie endgültig.",
+            "Mark areas for redaction; “Apply” removes them for good.",
+        ),
+        SaveOptimized => (
+            "Datei kleiner machen, z. B. Bilder verkleinern und Unnötiges entfernen.",
+            "Make the file smaller, e.g. shrink images and drop unused data.",
+        ),
+        FitContent => {
+            ("Vergrößern, bis der Inhalt die Breite füllt.", "Zoom until the content fills the width.")
+        }
+        SummarizeComments => (
+            "Alle Anmerkungen als übersichtliche Liste in ein neues Dokument.",
+            "All comments as a clear list in a new document.",
+        ),
+        Flatten => (
+            "Anmerkungen fest in die Seite einbrennen; sie sind danach nicht mehr änderbar.",
+            "Burn comments into the page; they can no longer be changed.",
+        ),
+        PasswordProtect => (
+            "Kennwort zum Öffnen oder Einschränkungen für Drucken und Ändern festlegen.",
+            "Set a password to open, or limit printing and changes.",
+        ),
+        ApplyRedactions => (
+            "Markierte Stellen endgültig schwärzen – der Inhalt darunter wird gelöscht.",
+            "Redact marked areas for good – the content below is deleted.",
+        ),
+        InsertBlank => {
+            ("Leere Seiten vor oder nach einer Seite einfügen.", "Insert blank pages before or after a page.")
+        }
+        DeletePages => {
+            ("Ausgewählte Seiten oder einen Seitenbereich löschen.", "Delete chosen pages or a page range.")
+        }
+        ExtractPages => ("Seiten als neue PDF-Datei speichern.", "Save pages as a new PDF file."),
+        MergeFiles => ("Mehrere Dateien zu einem PDF zusammenfügen.", "Combine several files into one PDF."),
+        SplitDocument => (
+            "Dokument nach Seitenzahl, Lesezeichen oder Größe in mehrere Dateien teilen.",
+            "Split the document into several files by pages, bookmarks or size.",
+        ),
+        CropPages => ("Seitenränder abschneiden.", "Cut off page margins."),
+        ResizePages => ("Papierformat der Seiten ändern.", "Change the paper size of pages."),
+        Watermark => {
+            ("Text oder Bild schräg über die Seiten legen.", "Lay text or an image across the pages.")
+        }
+        HeaderFooter => (
+            "Kopf- und Fußzeilen, z. B. Seitenzahlen oder Datum.",
+            "Headers and footers, e.g. page numbers or date.",
+        ),
+        Bates => (
+            "Fortlaufende Nummern auf jede Seite (für Akten).",
+            "Running numbers on every page (for records).",
+        ),
+        NUp => ("Mehrere Seiten verkleinert auf ein Blatt.", "Several pages shrunk onto one sheet."),
+        Overlay => (
+            "Seiten einer anderen Datei darüber oder darunter legen.",
+            "Lay pages of another file over or under.",
+        ),
+        ExportImages => {
+            ("Bilder aus dem Dokument als Dateien speichern.", "Save the document's images as files.")
+        }
+        ExportWord => {
+            ("Text und Absätze als Word-Dokument speichern.", "Save text and paragraphs as a Word document.")
+        }
+        RecognizeText => (
+            "Text auf den Seiten erkennen, damit er durchsucht werden kann.",
+            "Recognize text on the pages so it can be searched.",
+        ),
+        ReplaceFonts => {
+            ("Schriftarten im Dokument gegen andere tauschen.", "Swap fonts in the document for others.")
+        }
+        SpellCheck => ("Rechtschreibung prüfen und Fehler zeigen.", "Check spelling and show mistakes."),
+        WordCount => ("Wörter im Dokument zählen.", "Count the words in the document."),
+        CompareDocuments => (
+            "Zwei Fassungen vergleichen und Unterschiede markieren.",
+            "Compare two versions and mark the differences.",
+        ),
+        AccessibilityCheck => (
+            "Prüfen, ob das Dokument für Screenreader gut lesbar ist.",
+            "Check whether screen readers can read the document well.",
+        ),
+        BookmarkToc => (
+            "Inhaltsverzeichnis aus den Lesezeichen als Seite einfügen.",
+            "Insert a table of contents page from the bookmarks.",
+        ),
+        _ => return None,
+    })
 }
 
 pub fn tool_names(tool: Tool) -> (&'static str, &'static str) {
@@ -1180,8 +1300,39 @@ impl MrPdfApp {
                 cmd.label(lang),
                 if lang == Language::German { "In Vorbereitung." } else { "In preparation." }
             ),
-            _ => cmd.label(lang).to_string(),
+            _ => {
+                let de = lang == Language::German;
+                let doc = self.active_tab().map(|t| &t.doc);
+                // "Rückgängig: Seiten löschen".
+                let step = match cmd {
+                    Cmd::Undo => doc.and_then(|d| d.can_undo()),
+                    Cmd::Redo => doc.and_then(|d| d.can_redo()),
+                    _ => None,
+                };
+                let mut tip = match step {
+                    Some(step) => {
+                        format!("{}: {}", cmd.label(lang), crate::ui::undo_names::undo_name(step, lang))
+                    }
+                    None => cmd.label(lang).to_string(),
+                };
+                if let Some((g, e)) = cmd.shortcut() {
+                    tip = format!("{tip}  ({})", if de { g } else { e });
+                }
+                if let Some((g, e)) = explain(cmd) {
+                    tip = format!("{tip}\n{}", if de { g } else { e });
+                }
+                tip
+            }
         }
+    }
+
+    /// Label of the undo/redo menu entry with the step it undoes.
+    pub fn undo_label(&self, redo: bool) -> Option<String> {
+        let lang = self.lang();
+        let doc = &self.active_tab()?.doc;
+        let step = if redo { doc.can_redo()? } else { doc.can_undo()? };
+        let cmd = if redo { Cmd::Redo } else { Cmd::Undo };
+        Some(format!("{}: {}", cmd.label(lang), crate::ui::undo_names::undo_name(step, lang)))
     }
 
     /// Executes a command.

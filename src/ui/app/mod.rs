@@ -739,11 +739,13 @@ impl MrPdfApp {
                 tab.go_to_page(page_count.saturating_sub(1));
             }
         }
-        if key(Key::H) {
-            self.select_tool(Tool::Hand);
-        }
-        if key(Key::V) {
-            self.select_tool(Tool::SelectText);
+        // One-letter tool keys ("H" Hand, "V" Textauswahl, …); not while
+        // "Textkorrektur" takes typed letters.
+        let correcting = self.tool == Tool::TextCorrection;
+        for &(label, tool) in crate::ui::tools::TOOL_KEYS {
+            if !correcting && Key::from_name(label).is_some_and(key) {
+                self.run(ctx, commands::Cmd::Tool(tool));
+            }
         }
         if ctx.input(|i| i.key_pressed(Key::F3)) {
             let back = ctx.input(|i| i.modifiers.shift);

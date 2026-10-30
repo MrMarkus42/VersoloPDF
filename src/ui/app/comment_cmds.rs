@@ -94,7 +94,7 @@ impl CommentCmd {
             ShowAll | ShowFlagged | ShowAllAgain | OnlySelected => Icon::Eye,
             HideAll | HideSelected => Icon::Close,
             OpenPopups | OpenNonEmptyPopups | ClosePopups => Icon::Note,
-            Calculator => Icon::Count,
+            Calculator => Icon::Calculator,
             CloseCalculators => Icon::Close,
             CommentStyles => Icon::Theme,
             KeepTool => Icon::Pointer,
@@ -570,12 +570,18 @@ impl MrPdfApp {
     /// "Rechner" with its drop-down of open calculators.
     fn calculator_button(&mut self, ui: &mut Ui, ctx: &Context) {
         let de = self.cm_de();
-        let resp = big_menu_button(ui, Icon::Count, if de { "Rechner" } else { "Calculator" }, true, false)
-            .on_hover_text(if de {
-                "Tischrechner mit Rechenstreifen; die Rechnung lässt sich als Textfeld auf der Seite einfügen."
-            } else {
-                "Desk calculator with a tape; the calculation can be placed on the page as a text box."
-            });
+        let resp = big_menu_button(
+            ui,
+            Icon::Calculator,
+            if de { "Rechner" } else { "Calculator" },
+            true,
+            false,
+        )
+        .on_hover_text(if de {
+            "Tischrechner mit Rechenstreifen; die Rechnung lässt sich als Textfeld auf der Seite einfügen."
+        } else {
+            "Desk calculator with a tape; the calculation can be placed on the page as a text box."
+        });
         let mut chosen = None;
         egui::Popup::menu(&resp).show(|ui| {
             ui.set_min_width(220.0);

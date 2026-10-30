@@ -470,7 +470,7 @@ impl MrPdfApp {
             // "Objekte bearbeiten ▾": the button selects the tool, the menu the filter.
             let selected = self.tool == Tool::EditObjects;
             let label = tr(de, "Objekte bearbeiten", "Edit objects");
-            let resp = big_menu_button(ui, Icon::Pointer, label, !self.tabs.is_empty(), selected);
+            let resp = big_menu_button(ui, Icon::EditObjects, label, !self.tabs.is_empty(), selected);
             self.popup_menu(
                 ctx,
                 &resp,
@@ -739,13 +739,19 @@ impl MrPdfApp {
     pub(super) fn ribbon_arrange(&mut self, ui: &mut Ui, ctx: &Context) {
         let de = self.ct_de();
         let mut run: Option<ContentCmd> = None;
-        // Text buttons: the icons of these commands would look alike.
+        // Small buttons with their own icon (the last argument is a fallback
+        // for commands without one).
         let mut btn = |app: &MrPdfApp, ui: &mut Ui, c: ContentCmd, label: (&str, &str), _icon: Icon| {
             let text = if de { label.0 } else { label.1 };
             let (g, e) = c.names();
-            let button = egui::Button::selectable(app.content_selected(c), text).small();
-            if ui.add_enabled(app.content_enabled(c), button).on_hover_text(if de { g } else { e }).clicked()
-            {
+            let resp = crate::ui::widgets::small_button(
+                ui,
+                c.icon(),
+                text,
+                app.content_selected(c),
+                app.content_enabled(c),
+            );
+            if resp.on_hover_text(if de { g } else { e }).clicked() {
                 run = Some(c);
             }
         };

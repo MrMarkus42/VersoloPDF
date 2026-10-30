@@ -182,20 +182,27 @@ impl ContentCmd {
     pub fn icon(self) -> Icon {
         use ContentCmd::*;
         match self {
-            Cut => Icon::Split,
-            Copy | Duplicate => Icon::Copy,
-            Paste => Icon::Import,
+            Cut => Icon::Cut,
+            Copy => Icon::Copy,
+            Duplicate => Icon::Duplicate,
+            Paste => Icon::Paste,
             Delete => Icon::Delete,
-            SelectAll | SelectKind(_) | Filter(_) | Deselect => Icon::Pointer,
-            Arrange(_) | AlignToPage => Icon::Margins,
+            SelectAll | SelectKind(_) | Filter(_) | Deselect => Icon::EditObjects,
+            Arrange(a) => arrange_icon(a),
+            AlignToPage => Icon::SinglePage,
             RotateLeft => Icon::RotateLeft,
-            RotateRight | Rotate180 => Icon::RotateRight,
-            FlipH | FlipV => Icon::Swap,
-            Z(ZOrder::Forward | ZOrder::Front) => Icon::MoveUp,
-            Z(_) => Icon::MoveDown,
+            RotateRight => Icon::RotateRight,
+            Rotate180 => Icon::Rotate180,
+            FlipH => Icon::FlipH,
+            FlipV => Icon::FlipV,
+            Z(ZOrder::Forward) => Icon::BringForward,
+            Z(ZOrder::Front) => Icon::BringToFront,
+            Z(ZOrder::Backward) => Icon::SendBackward,
+            Z(ZOrder::Back) => Icon::SendToBack,
             ExportImage => Icon::Export,
             ReplaceImage => Icon::Image,
-            EditText | AddText => Icon::TextBox,
+            EditText => Icon::EditText,
+            AddText => Icon::TextBox,
             AddImage => Icon::Image,
         }
     }
@@ -210,6 +217,28 @@ impl ContentCmd {
             ContentCmd::SelectAll => ("Strg+A", "Ctrl+A"),
             _ => return None,
         })
+    }
+}
+
+fn arrange_icon(a: Arrange) -> Icon {
+    match a {
+        Arrange::Left => Icon::AlignLeft,
+        Arrange::CenterH => Icon::AlignCenterH,
+        Arrange::Right => Icon::AlignRight,
+        Arrange::Top => Icon::AlignTop,
+        Arrange::CenterV => Icon::AlignCenterV,
+        Arrange::Bottom => Icon::AlignBottom,
+        Arrange::SpaceH => Icon::SpaceH,
+        Arrange::SpaceV => Icon::SpaceV,
+        Arrange::DistLeft => Icon::DistLeft,
+        Arrange::DistCenterH => Icon::DistCenterH,
+        Arrange::DistRight => Icon::DistRight,
+        Arrange::DistTop => Icon::DistTop,
+        Arrange::DistCenterV => Icon::DistCenterV,
+        Arrange::DistBottom => Icon::DistBottom,
+        Arrange::SameSize => Icon::SameSize,
+        Arrange::SameWidth => Icon::SameWidth,
+        Arrange::SameHeight => Icon::SameHeight,
     }
 }
 

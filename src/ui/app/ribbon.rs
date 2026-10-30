@@ -15,7 +15,7 @@ use crate::ui::icons::Icon;
 use crate::ui::theme;
 use crate::ui::tools::{PALETTE, Tool};
 use crate::ui::widgets::{
-    RibbonFit, big_button, big_menu_button, group, icon_button, menu_item, ribbon_fit, set_ribbon_fit,
+    RibbonFit, big_button, big_menu_button, group, icon_button_named, menu_item, ribbon_fit, set_ribbon_fit,
     small_button, small_menu_button, swatch,
 };
 
@@ -27,6 +27,21 @@ pub(super) enum Entry {
     Sep,
     /// Sub menu: icon, (German, English) label, commands.
     Sub(Icon, (&'static str, &'static str), &'static [Cmd]),
+}
+
+/// Topic colour of a ribbon tab (same colours as the icons).
+fn tab_color(tab: RibbonTab) -> egui::Color32 {
+    use egui::Color32 as C;
+    match tab {
+        RibbonTab::Home | RibbonTab::View | RibbonTab::Organize | RibbonTab::Bookmarks => theme::ACCENT,
+        RibbonTab::Comment => C::from_rgb(234, 88, 12),
+        RibbonTab::Protect => C::from_rgb(217, 119, 6),
+        RibbonTab::Form => C::from_rgb(124, 58, 237),
+        RibbonTab::Convert | RibbonTab::Share => C::from_rgb(13, 148, 136),
+        RibbonTab::Review | RibbonTab::Accessibility => C::from_rgb(22, 163, 74),
+        RibbonTab::Help => C::from_gray(130),
+        RibbonTab::Format | RibbonTab::Arrange => C::from_rgb(200, 140, 0),
+    }
 }
 
 impl MrPdfApp {
@@ -49,9 +64,10 @@ impl MrPdfApp {
     }
 
     pub(super) fn icon(&mut self, ui: &mut Ui, ctx: &Context, cmd: Cmd) {
-        let resp = icon_button(
+        let resp = icon_button_named(
             ui,
             cmd.icon(),
+            cmd.label(self.settings.language),
             &self.cmd_tooltip(cmd),
             self.cmd_selected(cmd),
             self.cmd_enabled(cmd),
@@ -272,8 +288,10 @@ impl MrPdfApp {
                     return;
                 }
                 ui.add_space(2.0);
-                // Fit the ribbon into the window: level 0 full size, 1 small
-                // buttons without labels, 2.. collapse groups from the right.
+                // Fit the ribbon into the window: level 0 full size, 1 dense
+                // (narrower large buttons, less space), 2 small buttons
+                // without labels, 3.. collapse groups from the right. The
+                // first group (the most used commands) never collapses.
                 // Each level's width is measured when drawn; the first level
                 // known to fit (or not measured yet) is used.
                 let avail = ui.available_width();
@@ -290,7 +308,8 @@ impl MrPdfApp {
                 let tab_now = self.ribbon;
                 let groups = self.ribbon_groups.get(&tab_now).copied().unwrap_or(0);
                 let mut level = 0;
-                while level < 1 + groups
+                let last_level = 1 + groups;
+                while level < last_level
                     && self
                         .ribbon_widths
                         .get(&(tab_now, lang, level, content_key))
@@ -301,8 +320,13 @@ impl MrPdfApp {
                 set_ribbon_fit(
                     &ctx,
                     RibbonFit {
-                        compact: level >= 1,
-                        collapse_from: if level >= 2 { groups.saturating_sub(level - 1) } else { usize::MAX },
+                        dense: level >= 1,
+                        compact: level >= 2,
+                        collapse_from: if level >= 3 {
+                            groups.saturating_sub(level - 2).max(1)
+                        } else {
+                            usize::MAX
+                        },
                         ..RibbonFit::FULL
                     },
                 );
@@ -344,7 +368,7 @@ impl MrPdfApp {
                 if self.ribbon == tab_now {
                     self.ribbon_widths.insert((tab_now, lang, level, content_key), drawn_width);
                     self.ribbon_groups.insert(tab_now, counted);
-                    if drawn_width > avail + 0.5 && level < 1 + counted {
+                    if drawn_width > avail + 0.5 && level < 1 + counted.max(groups) {
                         ctx.request_repaint();
                     }
                 }
@@ -386,7 +410,24 @@ impl MrPdfApp {
         let backstage = self.backstage_open();
         let mut chosen = None;
         for &(tab, label) in &tabs[..shown] {
-            if ui.selectable_label(self.ribbon == tab && !backstage, text_of(tab, label)).clicked() {
+            let active = self.ribbon == tab && !backstage;
+            let resp = ui.selectable_label(active, text_of(tab, label));
+            // Each tab has its topic colour: a bar under the active tab and
+            // a faint one on hover.
+            let bar = |alpha: f32| {
+                let r = resp.rect;
+                let line = egui::Rect::from_min_max(
+                    egui::pos2(r.left() + 4.0, r.bottom() - 2.5),
+                    egui::pos2(r.right() - 4.0, r.bottom()),
+                );
+                ui.painter().rect_filled(line, 1.0, tab_color(tab).gamma_multiply(alpha));
+            };
+            if active {
+                bar(1.0);
+            } else if resp.hovered() {
+                bar(0.45);
+            }
+            if resp.clicked() {
                 chosen = Some(tab);
             }
         }
@@ -821,7 +862,7 @@ impl MrPdfApp {
                         Entry::C(v(V::PanZoom)),
                         pane("Stempelpalette", "Stamp palette", Icon::Stamp),
                         Entry::Sep,
-                        pane("Rechtschreibprüfung", "Spell checking", Icon::TextBox),
+                        pane("Rechtschreibprüfung", "Spell checking", Icon::SpellCheck),
                         pane("Verlauf", "History", Icon::Undo),
                         Entry::Sep,
                         Entry::C(Cmd::ToggleProperties),

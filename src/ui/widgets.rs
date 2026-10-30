@@ -14,6 +14,8 @@ use crate::ui::theme;
 /// collapse from the right into one drop-down button each.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RibbonFit {
+    /// Narrower large buttons and less space between groups.
+    pub dense: bool,
     /// Small buttons show only their icon (label as tooltip).
     pub compact: bool,
     /// Groups with this index or higher are collapsed.
@@ -29,6 +31,7 @@ pub struct RibbonFit {
 impl RibbonFit {
     /// Everything at full size (also used outside the ribbon).
     pub const FULL: RibbonFit = RibbonFit {
+        dense: false,
         compact: false,
         collapse_from: usize::MAX,
         next_group: 0,
@@ -38,6 +41,10 @@ impl RibbonFit {
 
     fn shrunk(self) -> bool {
         self.compact && !self.in_popup
+    }
+
+    fn tight(self) -> bool {
+        self.dense && !self.in_popup
     }
 }
 
@@ -70,40 +77,66 @@ fn note_icon(ui: &Ui, icon: Icon) {
     }
 }
 
+/// Background of a ribbon button: soft tint on hover, stronger when pressed,
+/// accent fill with outline when selected (active tool, open panel).
 fn button_frame(ui: &Ui, rect: Rect, response: &Response, selected: bool) {
-    let visuals = ui.visuals();
-    let (fill, stroke) = if selected {
-        (theme::ACCENT.gamma_multiply(0.22), Stroke::new(1.0, theme::ACCENT.gamma_multiply(0.7)))
-    } else if response.is_pointer_button_down_on() {
-        (visuals.widgets.active.weak_bg_fill, visuals.widgets.active.bg_stroke)
-    } else if response.hovered() {
-        (visuals.widgets.hovered.weak_bg_fill, visuals.widgets.hovered.bg_stroke)
+    let hovered = response.hovered();
+    let (fill, stroke) = if response.is_pointer_button_down_on() {
+        (theme::ACCENT.gamma_multiply(0.32), Stroke::new(1.0, theme::ACCENT.gamma_multiply(0.8)))
+    } else if selected {
+        let fill = theme::ACCENT.gamma_multiply(if hovered { 0.26 } else { 0.18 });
+        (fill, Stroke::new(1.2, theme::ACCENT.gamma_multiply(0.85)))
+    } else if hovered {
+        (theme::ACCENT.gamma_multiply(0.1), Stroke::new(1.0, theme::ACCENT.gamma_multiply(0.3)))
     } else {
         return;
     };
-    ui.painter().rect(rect, 3.0, fill, stroke, StrokeKind::Inside);
+    ui.painter().rect(rect, 5.0, fill, stroke, StrokeKind::Inside);
+}
+
+/// Accent bar under a selected large button, so the active tool stands out.
+fn selected_bar(ui: &Ui, rect: Rect) {
+    let bar = Rect::from_min_max(
+        egui::pos2(rect.left() + 10.0, rect.bottom() - 3.5),
+        egui::pos2(rect.right() - 10.0, rect.bottom() - 1.5),
+    );
+    ui.painter().rect_filled(bar, 1.0, theme::ACCENT);
+}
+
+/// Font and minimum width of large buttons (narrower in a dense ribbon).
+fn big_metrics(ui: &Ui) -> (FontId, f32) {
+    if ribbon_fit(ui.ctx()).tight() {
+        (FontId::proportional(11.0), 44.0)
+    } else {
+        (FontId::proportional(11.5), 54.0)
+    }
 }
 
 fn icon_tint(ui: &Ui, enabled: bool) -> Color32 {
     let c = theme::icon_color(ui.visuals().dark_mode);
-    if enabled { c } else { c.gamma_multiply(0.35) }
+    // Disabled buttons also lower the painter's opacity; the faded ink makes
+    // the icon's topic colours grey as well.
+    if enabled { c } else { c.gamma_multiply(0.7) }
 }
 
 /// Large ribbon button: icon on top, label below.
 pub fn big_button(ui: &mut Ui, icon: Icon, label: &str, selected: bool, enabled: bool) -> Response {
     note_icon(ui, icon);
     // Wide enough for the longest word so labels only wrap between words.
-    let font = FontId::proportional(11.5);
+    let (font, min_w) = big_metrics(ui);
     let widest_word = label
         .split_whitespace()
         .map(|w| ui.painter().layout_no_wrap(w.to_string(), font.clone(), Color32::WHITE).size().x)
         .fold(0.0, f32::max);
-    let size = vec2((widest_word + 10.0).max(54.0), 62.0);
+    let size = vec2((widest_word + 10.0).max(min_w), 62.0);
     let sense = if enabled { Sense::click() } else { Sense::hover() };
     let (rect, response) = ui.allocate_exact_size(size, sense);
     response.widget_info(|| WidgetInfo::selected(WidgetType::Button, enabled, selected, label));
     if ui.is_rect_visible(rect) {
         button_frame(ui, rect, &response, selected);
+        if selected {
+            selected_bar(ui, rect);
+        }
         let icon_rect = Rect::from_center_size(rect.center_top() + vec2(0.0, 18.0), Vec2::splat(26.0));
         let painter = ui.painter_at(rect);
         let mut alpha_painter = painter.clone();
@@ -130,12 +163,12 @@ fn paint_chevron(ui: &Ui, center: egui::Pos2, color: Color32) {
 /// Large ribbon button that opens a drop-down menu (label with ▾ below).
 pub fn big_menu_button(ui: &mut Ui, icon: Icon, label: &str, enabled: bool, open: bool) -> Response {
     note_icon(ui, icon);
-    let font = FontId::proportional(11.5);
+    let (font, min_w) = big_metrics(ui);
     let widest_word = label
         .split_whitespace()
         .map(|w| ui.painter().layout_no_wrap(w.to_string(), font.clone(), Color32::WHITE).size().x)
         .fold(0.0, f32::max);
-    let size = vec2((widest_word + 10.0).max(54.0), 64.0);
+    let size = vec2((widest_word + 10.0).max(min_w), 64.0);
     let sense = if enabled { Sense::click() } else { Sense::hover() };
     let (rect, response) = ui.allocate_exact_size(size, sense);
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, label));
@@ -290,11 +323,24 @@ pub fn small_button(ui: &mut Ui, icon: Icon, label: &str, selected: bool, enable
 
 /// Square icon-only button with tooltip.
 pub fn icon_button(ui: &mut Ui, icon: Icon, tooltip: &str, selected: bool, enabled: bool) -> Response {
+    icon_button_named(ui, icon, tooltip, tooltip, selected, enabled)
+}
+
+/// Icon-only button whose name (for screen readers) differs from its
+/// longer tooltip.
+pub fn icon_button_named(
+    ui: &mut Ui,
+    icon: Icon,
+    name: &str,
+    tooltip: &str,
+    selected: bool,
+    enabled: bool,
+) -> Response {
     note_icon(ui, icon);
     let size = Vec2::splat(24.0);
     let sense = if enabled { Sense::click() } else { Sense::hover() };
     let (rect, response) = ui.allocate_exact_size(size, sense);
-    response.widget_info(|| WidgetInfo::selected(WidgetType::Button, enabled, selected, tooltip));
+    response.widget_info(|| WidgetInfo::selected(WidgetType::Button, enabled, selected, name));
     if ui.is_rect_visible(rect) {
         button_frame(ui, rect, &response, selected);
         let painter = ui.painter_at(rect);
@@ -341,7 +387,7 @@ pub fn group(ui: &mut Ui, caption: &str, add: impl FnOnce(&mut Ui)) {
                 },
             );
         });
-        ui.add(egui::Separator::default().vertical().spacing(10.0));
+        group_separator(ui);
         return;
     }
     fit.first_icon = None;
@@ -352,9 +398,22 @@ pub fn group(ui: &mut Ui, caption: &str, add: impl FnOnce(&mut Ui)) {
             ui.set_min_height(64.0);
             add(ui);
         });
-        ui.add(
-            egui::Label::new(egui::RichText::new(caption).size(10.5).weak()).wrap_mode(TextWrapMode::Extend),
-        );
+        // Caption centred under the group (by indenting it: a centred layout
+        // would take the whole ribbon width).
+        let content_w = ui.min_rect().width();
+        let caption_w = ui
+            .painter()
+            .layout_no_wrap(caption.to_string(), FontId::proportional(10.5), Color32::WHITE)
+            .size()
+            .x;
+        ui.horizontal(|ui| {
+            ui.add_space(((content_w - caption_w) / 2.0).max(0.0));
+            ui.add(
+                egui::Label::new(egui::RichText::new(caption).size(10.5).weak())
+                    .wrap_mode(TextWrapMode::Extend)
+                    .selectable(false),
+            );
+        });
     });
     // Remember the group's first icon for its collapsed button.
     if let Some(icon) = ribbon_fit(&ctx).first_icon
@@ -362,7 +421,13 @@ pub fn group(ui: &mut Ui, caption: &str, add: impl FnOnce(&mut Ui)) {
     {
         ctx.data_mut(|d| d.insert_temp(icon_id, icon));
     }
-    ui.add(egui::Separator::default().vertical().spacing(10.0));
+    group_separator(ui);
+}
+
+/// Thin line between ribbon groups, with more air in a wide ribbon.
+fn group_separator(ui: &mut Ui) {
+    let spacing = if ribbon_fit(ui.ctx()).tight() { 8.0 } else { 14.0 };
+    ui.add(egui::Separator::default().vertical().spacing(spacing).shrink(6.0));
 }
 
 /// A colour swatch; returns the click response.

@@ -23,9 +23,18 @@ pub fn error_text(t: &Strings, err: &Error) -> String {
         Error::WrongPassword => t.err_wrong_password.to_string(),
         Error::InvalidFormat => t.err_invalid_pdf.to_string(),
         Error::FileTooLarge { .. } => t.err_too_large.to_string(),
-        Error::Io { path, source } => format!("{} {}\n{source}", t.err_io, path.display()),
+        Error::Io { path, source } => match source.kind() {
+            std::io::ErrorKind::NotFound => format!("{}\n{}", t.err_not_found, path.display()),
+            std::io::ErrorKind::PermissionDenied => format!("{}\n{}", t.err_access_denied, path.display()),
+            _ => format!("{} {}\n\n{} {source}", t.err_io, path.display(), t.err_details),
+        },
         Error::EncryptedNotSupported => t.err_encrypted.to_string(),
         Error::NotPermitted => t.err_not_permitted.to_string(),
+        Error::PageOutOfRange(index) => format!("{} {}", t.err_page_missing, index + 1),
+        // Library errors are technical: plain words first, details after.
+        Error::Pdfium(detail) | Error::Structure(detail) => {
+            format!("{}\n\n{} {detail}", t.err_engine_step, t.err_details)
+        }
         other => format!("{}\n{other}", t.err_generic),
     }
 }
@@ -327,12 +336,21 @@ impl MrPdfApp {
         }
     }
 
+    /// Undoes the last change and names it in the status bar.
     pub fn undo(&mut self, ctx: &Context) {
+        let label = self.undo_label(false);
         self.edit(ctx, |tab| tab.doc.undo().map(|_| ()));
+        if let Some(label) = label {
+            self.set_status(ctx, label);
+        }
     }
 
     pub fn redo(&mut self, ctx: &Context) {
+        let label = self.undo_label(true);
         self.edit(ctx, |tab| tab.doc.redo().map(|_| ()));
+        if let Some(label) = label {
+            self.set_status(ctx, label);
+        }
     }
 
     pub fn zoom_step(&mut self, zoom_in: bool) {

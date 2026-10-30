@@ -77,6 +77,28 @@ pub enum Tool {
     EditObjects,
 }
 
+/// One-letter keys that switch tools (without modifier keys, while no text
+/// field has the focus).
+pub const TOOL_KEYS: &[(&str, Tool)] = &[
+    ("H", Tool::Hand),
+    ("V", Tool::SelectText),
+    ("A", Tool::SelectAnnot),
+    ("Z", Tool::Zoom),
+    ("G", Tool::Snapshot),
+    ("E", Tool::EditText),
+    ("O", Tool::EditObjects),
+    ("M", Tool::Highlight),
+    ("U", Tool::Underline),
+    ("K", Tool::StrikeOut),
+    ("N", Tool::Note),
+    ("T", Tool::Typewriter),
+    ("X", Tool::TextBox),
+    ("R", Tool::Rectangle),
+    ("L", Tool::Line),
+    ("P", Tool::Pencil),
+    ("S", Tool::Stamp),
+];
+
 /// How a tool is operated on the page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Gesture {
@@ -97,6 +119,11 @@ pub enum Gesture {
 }
 
 impl Tool {
+    /// The one-letter key of the tool, if it has one.
+    pub fn key(self) -> Option<&'static str> {
+        TOOL_KEYS.iter().find(|(_, t)| *t == self).map(|(k, _)| *k)
+    }
+
     pub fn icon(self) -> Icon {
         match self {
             Tool::Hand => Icon::Hand,
@@ -149,8 +176,8 @@ impl Tool {
             Tool::Video => Icon::Image,
             Tool::AudioClip | Tool::SoundNote => Icon::Comments,
             Tool::Model3d => Icon::Background,
-            Tool::EditText => Icon::TextBox,
-            Tool::EditObjects => Icon::Pointer,
+            Tool::EditText => Icon::EditText,
+            Tool::EditObjects => Icon::EditObjects,
         }
     }
 
