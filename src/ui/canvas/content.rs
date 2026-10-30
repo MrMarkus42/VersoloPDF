@@ -443,6 +443,15 @@ fn finish_drag(
                     tab.content.selected.iter().copied().filter(|i| !hit.contains(i)).collect();
                 hit.extend(extra);
             }
+            // Comments are not page content: say which tool selects them.
+            if hit.is_empty()
+                && tab
+                    .annotations(pos.page)
+                    .iter()
+                    .any(|a| r.contains(pos.pdf_rect_to_screen(&a.rect).center()))
+            {
+                cx.events.push(CanvasEvent::Status(cx.t.hint_comments_not_objects.into()));
+            }
             let rev = tab.doc.revision();
             tab.content.select(pos.page, hit, rev);
         }

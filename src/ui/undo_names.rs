@@ -48,6 +48,8 @@ const NAMES: &[(&str, &str)] = &[
     ("links from bookmarks", "Verweise aus Lesezeichen"),
     ("mark for redaction", "Zum Schwärzen markieren"),
     ("merge duplicate bookmarks", "Doppelte Lesezeichen zusammenführen"),
+    ("move annotation", "Anmerkung verschieben"),
+    ("move annotations", "Anmerkungen verschieben"),
     ("move objects", "Objekte verschieben"),
     ("move pages", "Seiten verschieben"),
     ("normalize pages", "Seiten vereinheitlichen"),

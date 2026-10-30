@@ -1215,6 +1215,71 @@ fn tool_keys_and_undo_name() {
     save(&mut h, "tool-keys-undo");
 }
 
+/// "Anmerkungen bearbeiten": a rectangle selects several comments, they move
+/// together (one undo step) and are deleted together.
+#[test]
+fn select_move_delete_several_comments() {
+    use mrpdf::ui::tools::Tool;
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = harness(vec![sample_file(&dir, 2)], false);
+    h.run_steps(8);
+    h.key_press(egui::Key::R);
+    h.run_steps(2);
+    drag(&mut h, pos2(560.0, 360.0), pos2(720.0, 460.0));
+    h.key_press(egui::Key::R);
+    h.run_steps(2);
+    drag(&mut h, pos2(560.0, 520.0), pos2(720.0, 600.0));
+    let rects = |h: &mut Harness<'_, MrPdfApp>| -> Vec<mrpdf::geometry::RectF> {
+        let tab = h.state_mut().active_tab_mut().unwrap();
+        tab.annotations(0).iter().map(|a| a.rect.normalized()).collect()
+    };
+    let before = rects(&mut h);
+    assert_eq!(before.len(), 2, "two rectangles drawn");
+
+    h.key_press(egui::Key::A);
+    h.run_steps(2);
+    assert_eq!(h.state().tool(), Tool::SelectAnnot);
+    drag(&mut h, pos2(520.0, 330.0), pos2(780.0, 640.0));
+    let selected = h.state().active_tab().unwrap().selected_annots();
+    assert_eq!(selected.len(), 2, "selection rectangle picks both: {selected:?}");
+    save(&mut h, "comments-selected");
+
+    // Drag the first rectangle at its left edge: both move, shown while dragging.
+    let input = |h: &mut Harness<'_, MrPdfApp>, e: Event| h.input_mut().events.push(e);
+    let button = |pos: Pos2, pressed: bool| Event::PointerButton {
+        pos,
+        button: PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    input(&mut h, Event::PointerMoved(pos2(560.0, 410.0)));
+    h.step();
+    input(&mut h, button(pos2(560.0, 410.0), true));
+    h.step();
+    for i in 1..=6 {
+        input(&mut h, Event::PointerMoved(pos2(560.0 + 10.0 * i as f32, 410.0)));
+        h.step();
+    }
+    save(&mut h, "comments-dragging");
+    let start = std::time::Instant::now();
+    input(&mut h, button(pos2(620.0, 410.0), false));
+    h.run_steps(4);
+    let took = start.elapsed();
+    save(&mut h, "comments-moved");
+    let after = rects(&mut h);
+    for (b, a) in before.iter().zip(&after) {
+        assert!(a.x0 - b.x0 > 20.0, "moved right: {b:?} -> {a:?}");
+    }
+    assert_eq!(h.state().active_tab().unwrap().selected_annots().len(), 2, "selection kept");
+    assert_eq!(h.state().undo_label(false).as_deref(), Some("Rückgängig: Anmerkungen verschieben"));
+    eprintln!("drag and move took {took:?}");
+
+    h.key_press(egui::Key::Delete);
+    h.run_steps(4);
+    assert!(rects(&mut h).is_empty(), "both deleted");
+}
+
 /// Every ribbon tab with a document open, light and dark.
 #[test]
 fn ribbon_tour() {

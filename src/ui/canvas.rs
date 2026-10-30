@@ -13,7 +13,9 @@ use crate::text::TextRange;
 use crate::ui::cache::Budget;
 use crate::ui::i18n::Strings;
 use crate::ui::pickers::Unit;
-use crate::ui::tab::{AnnotRef, DocTab, FieldEdit, Guide, Interaction, ScrollRequest, Split, TextSelection};
+use crate::ui::tab::{
+    AnnotRef, DocTab, FieldEdit, Guide, Interaction, MovePreview, ScrollRequest, Split, TextSelection,
+};
 use crate::ui::theme;
 use crate::ui::tools::{Gesture, Tool};
 use crate::ui::view::{
@@ -649,6 +651,13 @@ fn draw_and_interact(ui: &mut Ui, tab: &mut DocTab, cx: &mut CanvasCtx, viewport
                 }
             }
         }
+        draw_move_preview(
+            &painter.with_clip_rect(screen.intersect(visible_screen)),
+            tab,
+            &pos,
+            opts,
+            [px_w, px_h],
+        );
         painter.rect_stroke(screen, 0.0, Stroke::new(1.0, Color32::from_gray(150)), StrokeKind::Outside);
         if let Some((main, sub)) = cx.view.grid {
             draw_grid(&painter.with_clip_rect(screen.intersect(visible_screen)), screen, scale, main, sub);
@@ -698,6 +707,99 @@ fn draw_grid(painter: &egui::Painter, page: Rect, scale: f32, main: f32, sub: u3
     };
     lines(true);
     lines(false);
+}
+
+/// While comments are dragged, shows them at the new place right away: the
+/// old place shows the page without them, the comments alone follow the
+/// pointer. The document itself changes when the drag ends.
+fn draw_move_preview(
+    painter: &egui::Painter,
+    tab: &mut DocTab,
+    pos: &PageOnScreen,
+    opts: crate::document::RenderOptions,
+    full_px: [u32; 2],
+) {
+    let Interaction::MoveAnnot { annot, delta } = tab.interaction else {
+        tab.move_preview = None;
+        return;
+    };
+    if annot.page != pos.page || delta == Vec2::ZERO {
+        return;
+    }
+    let key = (annot, tab.doc.page_revision(pos.page), full_px);
+    if tab.move_preview.as_ref().is_none_or(|m| m.key != key) {
+        let parts = move_preview_parts(painter.ctx(), tab, pos, opts, full_px, annot);
+        tab.move_preview = Some(MovePreview { key, parts });
+    }
+    let Some(preview) = &tab.move_preview else { return };
+    let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
+    for (area, base, alone) in &preview.parts {
+        let r = area.translate(pos.rect.min.to_vec2());
+        painter.image(base.id(), r, uv, Color32::WHITE);
+        painter.image(alone.id(), r.translate(delta), uv, Color32::WHITE);
+    }
+}
+
+/// Renders the areas of the dragged comments with and without comments;
+/// the pixels that differ are the comments.
+fn move_preview_parts(
+    ctx: &egui::Context,
+    tab: &mut DocTab,
+    pos: &PageOnScreen,
+    opts: crate::document::RenderOptions,
+    full_px: [u32; 2],
+    annot: AnnotRef,
+) -> Vec<(Rect, egui::TextureHandle, egui::TextureHandle)> {
+    let annots = tab.annotations(pos.page);
+    let ppp = full_px[0] as f32 / pos.rect.width().max(1.0);
+    let bare = crate::document::RenderOptions { annotations: false, ..opts };
+    let mut parts = Vec::new();
+    for sel in moving_annots(tab, annot) {
+        let Some(a) = annots.get(sel.index) else { continue };
+        let src = pos.pdf_rect_to_screen(&a.rect).expand(4.0).intersect(pos.rect);
+        let x = ((src.min.x - pos.rect.min.x) * ppp).max(0.0) as u32;
+        let y = ((src.min.y - pos.rect.min.y) * ppp).max(0.0) as u32;
+        let w = ((src.width() * ppp) as u32).min(full_px[0].saturating_sub(x));
+        let h = ((src.height() * ppp) as u32).min(full_px[1].saturating_sub(y));
+        // Very large areas would take too long; the frame alone still shows the move.
+        if w == 0 || h == 0 || u64::from(w) * u64::from(h) > 8_000_000 {
+            continue;
+        }
+        let (Ok(with), Ok(without)) = (
+            tab.doc.render_tile(pos.page, full_px[0], full_px[1], x, y, w, h, opts),
+            tab.doc.render_tile(pos.page, full_px[0], full_px[1], x, y, w, h, bare),
+        ) else {
+            continue;
+        };
+        let mut alone = with.rgba.clone();
+        for (px, base) in alone.chunks_mut(4).zip(without.rgba.chunks(4)) {
+            let diff: i32 = (0..3).map(|c| (i32::from(px[c]) - i32::from(base[c])).abs()).sum();
+            // Soft edges; tiny differences (text smoothing) stay invisible.
+            px[3] = ((diff - 60) * 255 / 120).clamp(0, 255) as u8;
+        }
+        let size = [w as usize, h as usize];
+        let opts_tex = egui::TextureOptions::LINEAR;
+        let base_tex = ctx.load_texture(
+            "move-preview-base",
+            egui::ColorImage::from_rgba_unmultiplied(size, &without.rgba),
+            opts_tex,
+        );
+        let alone_tex = ctx.load_texture(
+            "move-preview",
+            egui::ColorImage::from_rgba_unmultiplied(size, &alone),
+            opts_tex,
+        );
+        let area =
+            Rect::from_min_size(pos2(x as f32 / ppp, y as f32 / ppp), vec2(w as f32 / ppp, h as f32 / ppp));
+        parts.push((area, base_tex, alone_tex));
+    }
+    parts
+}
+/// The comments that move with `annot`: the whole selection if `annot` is
+/// part of it, else `annot` alone.
+fn moving_annots(tab: &DocTab, annot: AnnotRef) -> Vec<AnnotRef> {
+    let selected = tab.selected_annots();
+    if selected.contains(&annot) { selected } else { vec![annot] }
 }
 
 fn style_stroke(cx: &CanvasCtx, scale: f32) -> Stroke {
@@ -799,14 +901,18 @@ fn draw_overlays(
             );
         }
     }
-    // Selected annotation or form field.
-    if let Some(sel) = tab.selected_annot.filter(|s| s.page == page)
-        && let Some(a) = tab.annotations(page).get(sel.index)
-    {
+    // Selected annotations or form field (moved along while dragged).
+    let moving = match &interaction {
+        Interaction::MoveAnnot { annot, delta } => {
+            moving_annots(tab, *annot).into_iter().map(|a| (a, *delta)).collect()
+        }
+        _ => Vec::new(),
+    };
+    let annots = tab.annotations(page);
+    for sel in tab.selected_annots().into_iter().filter(|s| s.page == page) {
+        let Some(a) = annots.get(sel.index) else { continue };
         let mut r = pos.pdf_rect_to_screen(&a.rect).expand(2.0);
-        if let Interaction::MoveAnnot { annot, delta } = &interaction
-            && *annot == sel
-        {
+        if let Some((_, delta)) = moving.iter().find(|(m, _)| *m == sel) {
             r = r.translate(*delta);
         }
         let accent = theme::ACCENT;
@@ -814,6 +920,15 @@ fn draw_overlays(
         for c in [r.left_top(), r.right_top(), r.left_bottom(), r.right_bottom()] {
             painter.rect_filled(Rect::from_center_size(c, vec2(6.0, 6.0)), 0.0, accent);
         }
+    }
+    // Selection rectangle.
+    if let Interaction::Marquee { page: p, start, current, .. } = &interaction
+        && *p == page
+    {
+        let r = Rect::from_two_pos(pos.view_to_screen(*start), pos.view_to_screen(*current));
+        painter.rect_filled(r, 0.0, theme::ACCENT.gamma_multiply(0.12));
+        let pts = [r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom(), r.left_top()];
+        painter.extend(egui::Shape::dashed_line(&pts, Stroke::new(1.2, theme::ACCENT), 5.0, 3.0));
     }
     // Open pop-ups ("Alle Pop-ups öffnen"): author and text next to the comment.
     let popups: Vec<usize> = tab.open_popups.iter().filter(|r| r.page == page).map(|r| r.index).collect();
@@ -1092,7 +1207,7 @@ fn handle_input(
     if response.drag_started_by(PointerButton::Primary)
         && let Some(start) = press
     {
-        tab.interaction = start_drag(tab, cx, find_page(on_screen, start), start, tol);
+        tab.interaction = start_drag(tab, cx, find_page(on_screen, start), start, tol, shift_down);
     }
 
     if response.dragged_by(PointerButton::Primary)
@@ -1167,6 +1282,7 @@ fn start_drag(
     page: Option<PageOnScreen>,
     start: Pos2,
     tol: f32,
+    shift_down: bool,
 ) -> Interaction {
     if cx.tool == Tool::DynamicZoom {
         return Interaction::DynamicZoom { anchor: start };
@@ -1184,7 +1300,10 @@ fn start_drag(
         && tab.annotations(pos.page).get(i).is_some_and(|a| a.kind.is_movable())
     {
         let annot = AnnotRef { page: pos.page, index: i };
-        tab.selected_annot = Some(annot);
+        // Dragging a part of the selection moves all of it.
+        if !tab.selected_annots().contains(&annot) {
+            tab.selected_annot = Some(annot);
+        }
         return Interaction::MoveAnnot { annot, delta: Vec2::ZERO };
     }
     match cx.tool {
@@ -1205,10 +1324,16 @@ fn start_drag(
                             || tab.selected_annot == Some(AnnotRef { page: pos.page, index: i })) =>
                 {
                     let annot = AnnotRef { page: pos.page, index: i };
-                    tab.selected_annot = Some(annot);
+                    if !tab.selected_annots().contains(&annot) {
+                        tab.selected_annot = Some(annot);
+                    }
                     Interaction::MoveAnnot { annot, delta: Vec2::ZERO }
                 }
                 _ if cx.tool == Tool::Hand => Interaction::Pan,
+                // "Anmerkungen bearbeiten": a rectangle selects the comments in it.
+                None if cx.tool == Tool::SelectAnnot => {
+                    Interaction::Marquee { page: pos.page, start: v, current: v, add: shift_down }
+                }
                 _ => Interaction::None,
             }
         }
@@ -1293,6 +1418,11 @@ fn continue_drag(
             }
         }
         Interaction::MoveAnnot { delta: d, .. } => *d += delta,
+        Interaction::Marquee { page, current, .. } => {
+            if let Some(pos) = on_screen.iter().find(|p| p.page == *page) {
+                *current = pos.view_at(cur.clamp(pos.rect.min, pos.rect.max));
+            }
+        }
         Interaction::DynamicZoom { anchor } => {
             // Up zooms in, down zooms out.
             let factor = (-delta.y * 0.01).exp();
@@ -1364,6 +1494,24 @@ fn finish_drag(tab: &mut DocTab, cx: &mut CanvasCtx, interaction: Interaction, o
                 let (dx, dy) = pos.geo.view_delta_to_pdf(delta.x / scale, delta.y / scale);
                 cx.events.push(CanvasEvent::Move { annot, dx, dy });
             }
+        }
+        Interaction::Marquee { page, start, current, add } => {
+            let Some(pos) = on_screen.iter().find(|p| p.page == page) else { return };
+            if start.distance(current) * scale < 3.0 {
+                return;
+            }
+            let area = pos.view_rect_to_pdf(start, current).normalized();
+            let mut chosen = if add { tab.selected_annots() } else { Vec::new() };
+            chosen.retain(|a| a.page == page);
+            for (index, a) in tab.annotations(page).iter().enumerate() {
+                // Comments whose centre lies in the rectangle.
+                let r = AnnotRef { page, index };
+                if area.contains(a.rect.normalized().center()) && a.kind.is_movable() && !chosen.contains(&r)
+                {
+                    chosen.push(r);
+                }
+            }
+            tab.select_annots(chosen);
         }
         Interaction::Erase { page, hits } if !hits.is_empty() => {
             cx.events
@@ -1528,8 +1676,21 @@ fn handle_click(tab: &mut DocTab, cx: &mut CanvasCtx, on_screen: &[PageOnScreen]
             _ => cx.events.push(CanvasEvent::Status(cx.t.no_content_here.into())),
         },
         Tool::SelectAnnot => {
-            tab.selected_annot =
-                annotation_at(tab, pos.page, pdf, tol).map(|index| AnnotRef { page: pos.page, index });
+            let hit = annotation_at(tab, pos.page, pdf, tol).map(|index| AnnotRef { page: pos.page, index });
+            match hit {
+                // Shift+click adds a comment to the selection or removes it.
+                Some(r) if shift => {
+                    let mut chosen = tab.selected_annots();
+                    chosen.retain(|a| a.page == r.page);
+                    if let Some(i) = chosen.iter().position(|a| *a == r) {
+                        chosen.remove(i);
+                    } else {
+                        chosen.push(r);
+                    }
+                    tab.select_annots(chosen);
+                }
+                _ => tab.select_annots(hit.into_iter().collect()),
+            }
         }
         Tool::SelectFields => {
             tab.selected_annot =

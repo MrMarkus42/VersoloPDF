@@ -436,12 +436,18 @@ impl MrPdfApp {
     }
 
     pub fn delete_selected_annotation(&mut self, ctx: &Context) {
-        let Some(sel) = self.active_tab().and_then(|t| t.selected_annot) else {
+        let selected = self.active_tab().map(|t| t.selected_annots()).unwrap_or_default();
+        let Some(first) = selected.first().copied() else {
             return;
         };
         self.edit(ctx, |tab| {
-            tab.selected_annot = None;
-            tab.doc.delete_annotation(sel.page, sel.index)
+            tab.select_annots(Vec::new());
+            if selected.len() == 1 {
+                tab.doc.delete_annotation(first.page, first.index)
+            } else {
+                let indices: Vec<usize> = selected.iter().map(|a| a.index).collect();
+                tab.doc.delete_annotations(first.page, &indices)
+            }
         });
     }
 
@@ -595,11 +601,14 @@ impl MrPdfApp {
             }
             CanvasEvent::Move { annot, dx, dy } => {
                 self.edit(ctx, |tab| {
-                    tab.doc.update_annotation(
-                        annot.page,
-                        annot.index,
-                        &AnnotUpdate { translate: Some((dx, dy)), ..AnnotUpdate::default() },
-                    )
+                    // The whole selection moves if the dragged comment is part of it.
+                    let selected = tab.selected_annots();
+                    let indices: Vec<usize> = if selected.contains(&annot) {
+                        selected.iter().map(|a| a.index).collect()
+                    } else {
+                        vec![annot.index]
+                    };
+                    tab.doc.move_annotations(annot.page, &indices, dx, dy)
                 });
             }
             CanvasEvent::OpenUri(uri) => {

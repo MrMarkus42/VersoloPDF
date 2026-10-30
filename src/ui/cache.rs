@@ -86,7 +86,8 @@ impl TextureCache {
         id: u64,
         opts: RenderOptions,
     ) -> Option<&CachedImage> {
-        let fresh = self.pages.get(&page).is_some_and(|c| c.revision == doc.revision() && c.px == px);
+        let fresh =
+            self.pages.get(&page).is_some_and(|c| c.revision >= doc.page_revision(page) && c.px == px);
         if !fresh && budget.allow() {
             match doc.render_tile(page, px[0], px[1], 0, 0, px[0], px[1], opts) {
                 Ok(img) => {
@@ -120,7 +121,7 @@ impl TextureCache {
         opts: RenderOptions,
     ) -> Option<&Tile> {
         let covers = |t: &Tile| {
-            t.revision == doc.revision()
+            t.revision >= doc.page_revision(page)
                 && t.full_px == full_px
                 && t.area[0] <= want[0]
                 && t.area[1] <= want[1]
@@ -170,7 +171,8 @@ impl TextureCache {
         id: u64,
         opts: RenderOptions,
     ) -> Option<&CachedImage> {
-        let fresh = self.thumbs.get(&page).is_some_and(|c| c.revision == doc.revision() && c.px == px);
+        let fresh =
+            self.thumbs.get(&page).is_some_and(|c| c.revision >= doc.page_revision(page) && c.px == px);
         if !fresh && budget.allow() {
             match doc.render_tile(page, px[0], px[1], 0, 0, px[0], px[1], opts) {
                 Ok(img) => {

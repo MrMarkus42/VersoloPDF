@@ -62,3 +62,20 @@ Overhaul of 2026-10-30. All icons are MrPDF's own drawings
   not work and the document was not changed, with the technical detail last.
 * Tooltips: name, shortcut and, for the main commands, one sentence on what
   the command does (`explain` in `src/ui/app/commands.rs`).
+
+## Comments: selecting and moving (2026-10-30)
+
+* "Anmerkungen bearbeiten" (A): dragging on empty page area draws a
+  selection rectangle; comments whose centre lies inside are selected.
+  Shift+drag adds, Shift+click adds or removes one comment
+  (`DocTab::multi_annots`, valid while its first entry is `selected_annot`).
+* Dragging a selected comment moves the whole selection; Entf deletes it.
+  One undo step each ("Anmerkungen verschieben").
+* While dragging, the comments are shown at the new place at once: the page
+  area is rendered with and without comments, the difference is the comment
+  picture (`draw_move_preview` in `src/ui/canvas.rs`).
+* Comment edits only change their own page: `Document::page_revision` keeps
+  the rendered pictures, texts and object lists of all other pages, so only
+  one page is redrawn after a move instead of every page and thumbnail.
+* A rectangle of "Objekte bearbeiten" around comments says which tool
+  selects them (comments are not page content).

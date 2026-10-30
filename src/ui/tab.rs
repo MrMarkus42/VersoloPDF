@@ -38,6 +38,16 @@ pub struct TextSelection {
     pub range: TextRange,
 }
 
+/// Pictures shown while comments are dragged: for each comment the page
+/// area without comments (covers the old place) and the comment alone.
+pub struct MovePreview {
+    /// Dragged comment, page revision and page size in pixels.
+    pub key: (AnnotRef, u64, [u32; 2]),
+    /// Area relative to the page's top left corner (points), page without
+    /// comments, comments only.
+    pub parts: Vec<(egui::Rect, egui::TextureHandle, egui::TextureHandle)>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Interaction {
     None,
@@ -58,9 +68,18 @@ pub enum Interaction {
         current: PointF,
         points: Vec<PointF>,
     },
+    /// Dragging a comment (with the other selected comments of its page).
     MoveAnnot {
         annot: AnnotRef,
         delta: Vec2,
+    },
+    /// Selection rectangle of "Anmerkungen bearbeiten" (view space).
+    Marquee {
+        page: usize,
+        start: PointF,
+        current: PointF,
+        /// Shift held: add to the selection.
+        add: bool,
     },
     /// Eraser: annotations touched so far.
     Erase {
@@ -194,6 +213,12 @@ pub struct DocTab {
     pub content: crate::ui::content_state::ContentEdit,
     pub selection: Option<TextSelection>,
     pub selected_annot: Option<AnnotRef>,
+    /// Several selected comments of one page (selection rectangle, Shift
+    /// click). Valid only while its first entry is selected_annot, so any
+    /// other way of selecting a single comment ends the multi selection.
+    pub multi_annots: Vec<AnnotRef>,
+    /// Pictures of the comments being dragged (see [MovePreview]).
+    pub move_preview: Option<MovePreview>,
     /// Bookmark selected in the bookmarks pane (child indices).
     pub selected_bookmark: Option<Vec<usize>>,
     details: Option<(AnnotRef, u64, AnnotDetails)>,
@@ -272,6 +297,8 @@ impl DocTab {
             content: Default::default(),
             selection: None,
             selected_annot: None,
+            multi_annots: Vec::new(),
+            move_preview: None,
             selected_bookmark: None,
             details: None,
             search: SearchState::default(),
@@ -470,7 +497,8 @@ impl DocTab {
 
     pub fn page_text(&mut self, page: usize) -> Option<Arc<PageText>> {
         let rev = self.doc.revision();
-        if let Some(c) = self.texts.get(&page).filter(|c| c.revision == rev) {
+        // Comment edits on other pages keep this entry.
+        if let Some(c) = self.texts.get(&page).filter(|c| c.revision >= self.doc.page_revision(page)) {
             return Some(c.value.clone());
         }
         let text = Arc::new(self.doc.page_text(page).ok()?);
@@ -480,7 +508,7 @@ impl DocTab {
 
     pub fn annotations(&mut self, page: usize) -> Arc<Vec<AnnotationInfo>> {
         let rev = self.doc.revision();
-        if let Some(c) = self.annots.get(&page).filter(|c| c.revision == rev) {
+        if let Some(c) = self.annots.get(&page).filter(|c| c.revision >= self.doc.page_revision(page)) {
             return c.value.clone();
         }
         let list = Arc::new(self.doc.annotations(page).unwrap_or_default());
@@ -491,7 +519,9 @@ impl DocTab {
     /// The objects of a page ("Objekte bearbeiten").
     pub fn objects(&mut self, page: usize) -> Arc<Vec<crate::content::ContentObject>> {
         let rev = self.doc.revision();
-        if let Some(c) = self.content_objects.get(&page).filter(|c| c.revision == rev) {
+        if let Some(c) =
+            self.content_objects.get(&page).filter(|c| c.revision >= self.doc.page_revision(page))
+        {
             return c.value.clone();
         }
         let list = Arc::new(self.doc.page_objects(page).unwrap_or_default());
@@ -501,7 +531,7 @@ impl DocTab {
 
     pub fn links(&mut self, page: usize) -> Arc<Vec<LinkInfo>> {
         let rev = self.doc.revision();
-        if let Some(c) = self.links.get(&page).filter(|c| c.revision == rev) {
+        if let Some(c) = self.links.get(&page).filter(|c| c.revision >= self.doc.page_revision(page)) {
             return c.value.clone();
         }
         let list = Arc::new(self.doc.links(page).unwrap_or_default());
@@ -552,6 +582,21 @@ impl DocTab {
         Some(details)
     }
 
+    /// All selected comments: the multi selection or the single one.
+    pub fn selected_annots(&self) -> Vec<AnnotRef> {
+        match self.selected_annot {
+            None => Vec::new(),
+            Some(s) if self.multi_annots.first() == Some(&s) => self.multi_annots.clone(),
+            Some(s) => vec![s],
+        }
+    }
+
+    /// Selects several comments of one page (empty: nothing selected).
+    pub fn select_annots(&mut self, annots: Vec<AnnotRef>) {
+        self.selected_annot = annots.first().copied();
+        self.multi_annots = if annots.len() > 1 { annots } else { Vec::new() };
+    }
+
     pub fn selected_annotation(&mut self) -> Option<AnnotationInfo> {
         let sel = self.selected_annot?;
         self.annotations(sel.page).get(sel.index).cloned()
@@ -574,10 +619,14 @@ impl DocTab {
 
     /// Called after any document change.
     pub fn after_edit(&mut self) {
-        if let Some(sel) = self.selected_annot
-            && sel.index >= self.annotations(sel.page).len()
-        {
-            self.selected_annot = None;
+        if let Some(sel) = self.selected_annot {
+            let count = self.annotations(sel.page).len();
+            if sel.index >= count {
+                self.selected_annot = None;
+            }
+            if self.multi_annots.iter().any(|a| a.index >= count) {
+                self.multi_annots.clear();
+            }
         }
         if self.current_page >= self.doc.page_count() {
             self.current_page = self.doc.page_count().saturating_sub(1);

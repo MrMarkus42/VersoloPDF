@@ -89,6 +89,40 @@ fn extracts_text_and_searches() {
     assert!(hits[0].context.contains("Hello"));
 }
 
+/// Comment edits only invalidate the pictures of their own page; moving
+/// several comments is one undo step.
+#[test]
+fn comment_edits_are_page_local() {
+    let _guard = common::lock();
+    let mut doc = open(3);
+    let before = [doc.page_revision(0), doc.page_revision(1), doc.page_revision(2)];
+    let mut square = NewAnnotation::new(AnnotKind::Square, style(Rgba::RED));
+    square.rect = RectF::new(100.0, 100.0, 200.0, 180.0);
+    doc.add_annotation(1, &square).unwrap();
+    square.rect = RectF::new(300.0, 100.0, 400.0, 180.0);
+    doc.add_annotation(1, &square).unwrap();
+    assert_eq!(doc.page_revision(0), before[0]);
+    assert_eq!(doc.page_revision(2), before[2]);
+    assert!(doc.page_revision(1) > before[1]);
+
+    let page1 = doc.page_revision(1);
+    doc.move_annotations(1, &[0, 1], 10.0, -20.0).unwrap();
+    assert!(doc.page_revision(1) > page1);
+    assert_eq!(doc.page_revision(0), before[0]);
+    let rects: Vec<RectF> = doc.annotations(1).unwrap().iter().map(|a| a.rect.normalized()).collect();
+    assert!((rects[0].x0 - 110.0).abs() < 3.0 && (rects[0].y0 - 80.0).abs() < 3.0, "{rects:?}");
+    assert!((rects[1].x0 - 310.0).abs() < 3.0, "{rects:?}");
+    assert_eq!(doc.can_undo(), Some("move annotations"));
+    doc.undo().unwrap();
+    let rects: Vec<RectF> = doc.annotations(1).unwrap().iter().map(|a| a.rect.normalized()).collect();
+    assert!((rects[0].x0 - 100.0).abs() < 3.0 && (rects[1].x0 - 300.0).abs() < 3.0, "{rects:?}");
+
+    // A change of the whole document invalidates every page.
+    let rev0 = doc.page_revision(0);
+    doc.rotate_pages(&[2], 90).unwrap();
+    assert!(doc.page_revision(0) > rev0);
+}
+
 #[test]
 fn annotations_add_list_update_delete_undo() {
     let _guard = common::lock();

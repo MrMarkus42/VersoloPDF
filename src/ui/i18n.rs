@@ -162,6 +162,7 @@ strings! {
     hint_vertices: "Eckpunkte nacheinander anklicken; Doppelklick oder Eingabe beendet, Esc bricht ab.", "Click the corners one after another; double click or Enter finishes, Esc cancels.";
     hint_eraser: "Über Freihand-Zeichnungen ziehen, um sie zu löschen.", "Drag over freehand drawings to erase them.";
     hint_zoom: "Klicken vergrößert, Umschalt+Klick oder Rechtsklick verkleinert, Aufziehen zoomt auf den Bereich.", "Click zooms in, Shift+click or right click zooms out, dragging zooms to the area.";
+    hint_select_annots: "Anmerkung anklicken oder einen Rahmen um mehrere ziehen; Umschalt+Klick ergänzt die Auswahl. Ziehen verschiebt, Entf löscht.", "Click a comment or drag a rectangle around several; Shift+click adds to the selection. Drag to move, Del deletes.";
     hint_select_objects: "Objekt anklicken zum Auswählen, ziehen zum Verschieben, Entf löscht.", "Click an object to select it, drag to move it, Del deletes it.";
     hint_edit_objects: "Objekt anklicken (Umschalt: mehrere) oder Rahmen aufziehen. Ziehen verschiebt, die Griffe ändern Größe und Drehung (Umschalt: Seitenverhältnis bzw. 15°-Schritte). Pfeiltasten verschieben, Entf löscht, Strg+C/X/V/D kopiert, schneidet aus, fügt ein, dupliziert. Doppelklick auf Text bearbeitet ihn.", "Click an object (Shift: several) or drag a frame. Drag to move; the handles change size and rotation (Shift: keep the ratio or 15° steps). Arrow keys move, Del deletes, Ctrl+C/X/V/D copy, cut, paste, duplicate. Double-click text to edit it.";
     hint_edit_text: "Textblock anklicken und tippen. Schrift, Größe, Farbe und Ausrichtung im Reiter Format. Strg+Enter oder ein Klick daneben übernimmt, Esc verwirft.", "Click a text block and type. Font, size, colour and alignment are on the Format tab. Ctrl+Enter or a click outside applies, Esc discards.";
@@ -351,6 +352,7 @@ strings! {
     err_io: "Fehler beim Zugriff auf", "Could not access";
     err_encrypted: "Diese Funktion ist für verschlüsselte Dokumente nicht verfügbar.", "This function is not available for encrypted documents.";
     err_not_permitted: "Das Dokument erlaubt diese Aktion nicht.", "The document does not permit this action.";
+    hint_comments_not_objects: "Das sind Anmerkungen, kein Seiteninhalt. Auswählen mit „Anmerkungen bearbeiten“ (Taste A): Rahmen ziehen oder Umschalt+Klick.", "These are comments, not page content. Select them with “Edit comments” (key A): drag a rectangle or Shift+click.";
     err_generic: "Die Aktion ist fehlgeschlagen.", "The action failed.";
     err_not_found: "Die Datei oder der Ordner wurde nicht gefunden:", "The file or folder was not found:";
     err_access_denied: "Kein Zugriff auf die Datei. Vielleicht ist sie schreibgeschützt oder in einem anderen Programm geöffnet:", "No access to the file. It may be read-only or open in another program:";
@@ -379,6 +381,7 @@ impl Strings {
             Tool::SelectText => self.hint_select,
             Tool::Eraser => self.hint_eraser,
             Tool::Zoom => self.hint_zoom,
+            Tool::SelectAnnot => self.hint_select_annots,
             Tool::EditObjects => self.hint_edit_objects,
             Tool::EditText => self.hint_edit_text,
             t => match t.gesture() {

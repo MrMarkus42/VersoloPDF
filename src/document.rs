@@ -175,6 +175,13 @@ pub struct Document {
     geometry: Vec<PageGeometry>,
     history: History,
     revision: u64,
+    /// Revision of the last change that may affect every page; changes of
+    /// single pages (comments) are kept in page_revs so the other pages
+    /// keep their rendered pictures.
+    structure_rev: u64,
+    page_revs: HashMap<usize, u64>,
+    /// Set while an edit only touches this page.
+    local_page: Option<usize>,
     modified: bool,
     /// Security handler details of encrypted documents.
     security: Option<SecurityInfo>,
@@ -321,6 +328,9 @@ impl Document {
             geometry: Vec::new(),
             history: History::default(),
             revision: 0,
+            structure_rev: 0,
+            page_revs: HashMap::new(),
+            local_page: None,
             modified: false,
             security: None,
             annot_filter: AnnotFilter::default(),
@@ -427,6 +437,41 @@ impl Document {
     /// Increases with every change; caches compare against it.
     pub fn revision(&self) -> u64 {
         self.revision
+    }
+
+    /// Revision of the last change that affects how page looks (for
+    /// rendered pictures): comment edits on other pages do not count.
+    pub fn page_revision(&self, page: usize) -> u64 {
+        self.page_revs.get(&page).copied().unwrap_or(0).max(self.structure_rev)
+    }
+
+    /// Records a new revision for the pages the change affects.
+    fn bump_revision(&mut self) {
+        self.revision += 1;
+        match self.local_page.take() {
+            Some(page) => {
+                self.page_revs.insert(page, self.revision);
+            }
+            None => {
+                self.structure_rev = self.revision;
+                self.page_revs.clear();
+            }
+        }
+    }
+
+    /// Runs an edit that only changes page (its comments).
+    fn page_edit<T>(&mut self, page: usize, f: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
+        self.local_page = Some(page);
+        let result = f(self);
+        // A failed edit may have reloaded the whole document.
+        if result.is_err() || self.local_page.is_some() {
+            self.local_page = None;
+            if result.is_err() {
+                self.structure_rev = self.revision;
+                self.page_revs.clear();
+            }
+        }
+        result
     }
 
     pub fn is_modified(&self) -> bool {
@@ -1087,12 +1132,12 @@ impl Document {
         self.bytes = bytes;
         self.engine_dirty = false;
         self.refresh_geometry();
-        self.revision += 1;
+        self.bump_revision();
         Ok(())
     }
 
     fn mark_changed(&mut self) {
-        self.revision += 1;
+        self.bump_revision();
         self.modified = true;
     }
 
@@ -1215,7 +1260,7 @@ impl Document {
         self.check_page(page)?;
         self.require(self.permissions().annotate)?;
         let label = format!("add {}", annot.kind.pdf_subtype());
-        self.edit_bytes(&label, |b, pw| pdf_edit::add_annotation(b, pw, page, annot))
+        self.page_edit(page, |d| d.edit_bytes(&label, |b, pw| pdf_edit::add_annotation(b, pw, page, annot)))
     }
 
     /// "Video/Audio/3D hinzufügen": embeds a media file in `rect`.
@@ -1258,13 +1303,34 @@ impl Document {
     pub fn update_annotation(&mut self, page: usize, index: usize, update: &AnnotUpdate) -> Result<()> {
         self.check_page(page)?;
         self.require(self.permissions().annotate)?;
-        self.edit_bytes("edit annotation", |b, pw| pdf_edit::update_annotation(b, pw, page, index, update))
+        self.page_edit(page, |d| {
+            d.edit_bytes("edit annotation", |b, pw| pdf_edit::update_annotation(b, pw, page, index, update))
+        })
+    }
+
+    /// Moves several comments of one page in one step (one undo step).
+    pub fn move_annotations(&mut self, page: usize, indices: &[usize], dx: f32, dy: f32) -> Result<()> {
+        self.check_page(page)?;
+        self.require(self.permissions().annotate)?;
+        let update = AnnotUpdate { translate: Some((dx, dy)), ..AnnotUpdate::default() };
+        let label = if indices.len() == 1 { "move annotation" } else { "move annotations" };
+        self.page_edit(page, |d| {
+            d.edit_bytes(label, |b, pw| {
+                let mut bytes = b.to_vec();
+                for &index in indices {
+                    bytes = pdf_edit::update_annotation(&bytes, pw, page, index, &update)?;
+                }
+                Ok(bytes)
+            })
+        })
     }
 
     pub fn delete_annotations(&mut self, page: usize, indices: &[usize]) -> Result<()> {
         self.check_page(page)?;
         self.require(self.permissions().annotate)?;
-        self.edit_bytes("delete annotations", |b, pw| pdf_edit::delete_annotations(b, pw, page, indices))
+        self.page_edit(page, |d| {
+            d.edit_bytes("delete annotations", |b, pw| pdf_edit::delete_annotations(b, pw, page, indices))
+        })
     }
 
     pub fn add_links(&mut self, page: usize, links: &[(RectF, pdf_edit::LinkSpec)]) -> Result<()> {
@@ -1325,7 +1391,9 @@ impl Document {
     pub fn delete_annotation(&mut self, page: usize, index: usize) -> Result<()> {
         self.check_page(page)?;
         self.require(self.permissions().annotate)?;
-        self.edit_bytes("delete annotation", |b, pw| pdf_edit::delete_annotation(b, pw, page, index))
+        self.page_edit(page, |d| {
+            d.edit_bytes("delete annotation", |b, pw| pdf_edit::delete_annotation(b, pw, page, index))
+        })
     }
 
     /// Converts all annotations and form fields of the given pages into
