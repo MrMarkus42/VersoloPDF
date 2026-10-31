@@ -123,6 +123,31 @@ fn comment_edits_are_page_local() {
     assert!(doc.page_revision(0) > rev0);
 }
 
+/// The undo list: several steps back and forward at once.
+#[test]
+fn undo_and_redo_several_steps() {
+    let _guard = common::lock();
+    let mut doc = open(1);
+    let mut square = NewAnnotation::new(AnnotKind::Square, style(Rgba::RED));
+    for i in 0..3 {
+        square.rect = RectF::new(100.0 + 100.0 * i as f32, 100.0, 180.0 + 100.0 * i as f32, 180.0);
+        doc.add_annotation(0, &square).unwrap();
+    }
+    doc.move_annotations(0, &[0], 5.0, 5.0).unwrap();
+    assert_eq!(doc.undo_list(), ["move annotation", "add Square", "add Square", "add Square"]);
+    assert!(doc.undo_steps(3).unwrap());
+    assert_eq!(doc.annotations(0).unwrap().len(), 1);
+    assert_eq!(doc.undo_list().len(), 1);
+    assert_eq!(doc.redo_list(), ["add Square", "add Square", "move annotation"]);
+    assert!(doc.redo_steps(2).unwrap());
+    assert_eq!(doc.annotations(0).unwrap().len(), 3);
+    assert_eq!(doc.redo_list(), ["move annotation"]);
+    // More steps than there are: all of them.
+    assert!(doc.undo_steps(99).unwrap());
+    assert!(doc.annotations(0).unwrap().is_empty());
+    assert!(!doc.undo_steps(1).unwrap());
+}
+
 #[test]
 fn annotations_add_list_update_delete_undo() {
     let _guard = common::lock();

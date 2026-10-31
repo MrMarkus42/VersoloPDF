@@ -353,6 +353,19 @@ impl MrPdfApp {
         }
     }
 
+    /// Undoes (or redoes) `n` steps at once, chosen in the history list.
+    pub fn travel_history(&mut self, ctx: &Context, n: usize, redo: bool) {
+        self.edit(ctx, |tab| if redo { tab.doc.redo_steps(n) } else { tab.doc.undo_steps(n) }.map(|_| ()));
+        let de = self.settings.language == crate::ui::i18n::Language::German;
+        let text = match (redo, de) {
+            (false, true) => format!("{n} Schritte rückgängig gemacht"),
+            (false, false) => format!("{n} steps undone"),
+            (true, true) => format!("{n} Schritte wiederholt"),
+            (true, false) => format!("{n} steps redone"),
+        };
+        self.set_status(ctx, text);
+    }
+
     pub fn zoom_step(&mut self, zoom_in: bool) {
         if let Some(tab) = self.tab() {
             tab.zoom = if zoom_in { view::zoom_in(tab.zoom) } else { view::zoom_out(tab.zoom) };

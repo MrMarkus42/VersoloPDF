@@ -79,3 +79,23 @@ Overhaul of 2026-10-30. All icons are MrPDF's own drawings
   one page is redrawn after a move instead of every page and thumbnail.
 * A rectangle of "Objekte bearbeiten" around comments says which tool
   selects them (comments are not page content).
+
+## Style presets, undo list, speed, drawing (2026-10-31)
+
+* Comment tool buttons have a small arrow in the lower right corner.
+  Holding the mouse button down (0.4 s) opens a palette of style
+  presets: Rot, Violett, Indigo, Blau, Grün, Gelb and Schwarz (Grau for
+  highlights and comments); closed shapes also offer "… Rahmen" (outline
+  only). The palette stays open after releasing the button; choosing a
+  preset sets the tool's style and picks the tool. "Formatpalette für
+  Anmerkungen…" opens "Formate für Anmerkungen"
+  (`src/ui/app/style_flyout.rs`). Colours are our own values.
+* "▾" next to Rückgängig/Wiederholen lists the steps; hovering marks a step
+  and all newer ones, a click takes them back in one go
+  (`Document::undo_steps`, the document is loaded once).
+* Comment edits no longer re-read the size of every page after reloading:
+  moving a comment in a 274 MB / 1476 page file went from 2.95 s to 0.26 s
+  (timings with real files: `tests/real_files.rs`, ignored by default).
+* Drawing goes through wgpu (DirectX on Windows) instead of OpenGL, which
+  showed brief black flashes on Windows; without a usable driver MrPDF falls
+  back to OpenGL, `--opengl` or `MRPDF_RENDERER=opengl` forces it.

@@ -1280,6 +1280,71 @@ fn select_move_delete_several_comments() {
     assert!(rects(&mut h).is_empty(), "both deleted");
 }
 
+/// The "▾" next to Rückgängig lists the steps; choosing one undoes it and
+/// all newer ones.
+#[test]
+fn undo_history_list() {
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = harness(vec![sample_file(&dir, 1)], false);
+    h.run_steps(8);
+    for y in [360.0, 520.0] {
+        h.key_press(egui::Key::R);
+        h.run_steps(2);
+        drag(&mut h, pos2(560.0, y), pos2(720.0, y + 80.0));
+    }
+    let count = |h: &mut Harness<'_, MrPdfApp>| h.state_mut().active_tab_mut().unwrap().annotations(0).len();
+    assert_eq!(count(&mut h), 2);
+    h.get_by_label("Liste der letzten Aktionen").click();
+    h.run_steps(4);
+    save(&mut h, "undo-history-list");
+    let rows: Vec<_> = h.get_all_by_label("Anmerkung hinzufügen").collect();
+    assert_eq!(rows.len(), 2, "both steps listed");
+    rows[1].click();
+    h.run_steps(5);
+    assert_eq!(count(&mut h), 0, "both steps undone");
+    assert_eq!(h.state().undo_label(true).as_deref(), Some("Wiederholen: Anmerkung hinzufügen"));
+}
+
+/// Holding the mouse button on a comment tool opens its style presets; a
+/// click alone just picks the tool.
+#[test]
+fn hold_down_style_presets() {
+    use mrpdf::model::Rgba;
+    use mrpdf::ui::tools::Tool;
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = harness(vec![sample_file(&dir, 1)], false);
+    h.run_steps(8);
+    tab(&mut h, "Anmerkungen");
+    let button = h.get_by_label("Rechteck").rect().center();
+    let input = |h: &mut Harness<'_, MrPdfApp>, e: Event| h.input_mut().events.push(e);
+    let press = |pressed: bool| Event::PointerButton {
+        pos: button,
+        button: PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    input(&mut h, Event::PointerMoved(button));
+    h.step();
+    input(&mut h, press(true));
+    // Hold for about a second (the harness advances the clock each step).
+    for _ in 0..70 {
+        h.step();
+    }
+    input(&mut h, press(false));
+    h.run_steps(3);
+    save(&mut h, "style-presets");
+    assert_ne!(h.state().tool(), Tool::Rectangle, "a long press does not pick the tool");
+    h.get_by_label("Blauer Rahmen").click();
+    h.run_steps(3);
+    assert_eq!(h.state().tool(), Tool::Rectangle);
+    let style = h.state().settings().style(Tool::Rectangle);
+    assert_eq!(style.color, Rgba::rgb(33, 150, 243));
+    assert_eq!(style.fill, None);
+    assert!(h.query_by_label("Roter Rahmen").is_none(), "palette closed");
+}
+
 /// Every ribbon tab with a document open, light and dark.
 #[test]
 fn ribbon_tour() {

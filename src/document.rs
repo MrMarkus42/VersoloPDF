@@ -1131,7 +1131,11 @@ impl Document {
         self.pdf = pdf;
         self.bytes = bytes;
         self.engine_dirty = false;
-        self.refresh_geometry();
+        // Comment edits keep every page's size and rotation; reading them
+        // again takes seconds in documents with thousands of pages.
+        if self.local_page.is_none() || self.geometry.len() != self.pdf.pages().len() as usize {
+            self.refresh_geometry();
+        }
         self.bump_revision();
         Ok(())
     }
@@ -1181,25 +1185,52 @@ impl Document {
     }
 
     pub fn undo(&mut self) -> Result<bool> {
-        let Some(snapshot) = self.history.undo.pop() else {
-            return Ok(false);
-        };
-        self.sync_bytes()?;
-        let current = Snapshot { label: snapshot.label.clone(), bytes: self.bytes.clone() };
-        self.reload(snapshot.bytes)?;
-        self.history.redo.push(current);
-        self.modified = true;
-        Ok(true)
+        self.undo_steps(1)
     }
 
     pub fn redo(&mut self) -> Result<bool> {
-        let Some(snapshot) = self.history.redo.pop() else {
+        self.redo_steps(1)
+    }
+
+    /// Labels of the steps undo would take back, the most recent first.
+    pub fn undo_list(&self) -> Vec<&str> {
+        self.history.undo.iter().rev().map(|s| s.label.as_str()).collect()
+    }
+
+    /// Labels of the steps redo would repeat, the next one first.
+    pub fn redo_list(&self) -> Vec<&str> {
+        self.history.redo.iter().rev().map(|s| s.label.as_str()).collect()
+    }
+
+    /// Takes back the last `n` steps at once (the document is loaded once).
+    pub fn undo_steps(&mut self, n: usize) -> Result<bool> {
+        self.travel(n, false)
+    }
+
+    /// Repeats the next `n` undone steps at once.
+    pub fn redo_steps(&mut self, n: usize) -> Result<bool> {
+        self.travel(n, true)
+    }
+
+    fn travel(&mut self, n: usize, forward: bool) -> Result<bool> {
+        let available = if forward { self.history.redo.len() } else { self.history.undo.len() };
+        let n = n.min(available);
+        if n == 0 {
             return Ok(false);
-        };
+        }
         self.sync_bytes()?;
-        let current = Snapshot { label: snapshot.label.clone(), bytes: self.bytes.clone() };
-        self.reload(snapshot.bytes)?;
-        self.history.undo.push(current);
+        let mut current = self.bytes.clone();
+        for _ in 0..n {
+            let (from, to) = if forward {
+                (&mut self.history.redo, &mut self.history.undo)
+            } else {
+                (&mut self.history.undo, &mut self.history.redo)
+            };
+            let Some(snapshot) = from.pop() else { break };
+            to.push(Snapshot { label: snapshot.label, bytes: current });
+            current = snapshot.bytes;
+        }
+        self.reload(current)?;
         self.modified = true;
         Ok(true)
     }

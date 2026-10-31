@@ -37,6 +37,7 @@ mod shape_dialogs;
 mod sidebar;
 mod statusbar;
 mod structure;
+mod style_flyout;
 pub mod view_cmds;
 pub mod windows;
 

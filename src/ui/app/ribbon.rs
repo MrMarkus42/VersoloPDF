@@ -47,33 +47,135 @@ fn tab_color(tab: RibbonTab) -> egui::Color32 {
 impl MrPdfApp {
     pub(super) fn big(&mut self, ui: &mut Ui, ctx: &Context, cmd: Cmd) {
         let label = cmd.label(self.settings.language);
-        let resp = big_button(ui, cmd.icon(), label, self.cmd_selected(cmd), self.cmd_enabled(cmd))
-            .on_hover_text(self.cmd_tooltip(cmd));
-        if resp.clicked() {
-            self.run(ctx, cmd);
-        }
+        let resp = big_button(ui, cmd.icon(), label, self.cmd_selected(cmd), self.cmd_enabled(cmd));
+        self.finish_button(ui, ctx, cmd, resp);
     }
 
     pub(super) fn small(&mut self, ui: &mut Ui, ctx: &Context, cmd: Cmd) {
         let label = cmd.label(self.settings.language);
-        let resp = small_button(ui, cmd.icon(), label, self.cmd_selected(cmd), self.cmd_enabled(cmd))
-            .on_hover_text(self.cmd_tooltip(cmd));
-        if resp.clicked() {
+        let resp = small_button(ui, cmd.icon(), label, self.cmd_selected(cmd), self.cmd_enabled(cmd));
+        self.finish_button(ui, ctx, cmd, resp);
+    }
+
+    /// Tooltip and click of a ribbon button; comment tools also get their
+    /// hold-down palette of style presets.
+    fn finish_button(&mut self, ui: &mut Ui, ctx: &Context, cmd: Cmd, resp: egui::Response) {
+        let mut tip = self.cmd_tooltip(cmd);
+        let mut run = true;
+        if let Cmd::Tool(tool) = cmd
+            && super::style_flyout::has_presets(tool)
+        {
+            run = self.style_flyout(ui, ctx, &resp, tool);
+            tip.push_str(self.hold_hint());
+        }
+        let resp = resp.on_hover_text(tip);
+        if resp.clicked() && run {
             self.run(ctx, cmd);
         }
     }
 
     pub(super) fn icon(&mut self, ui: &mut Ui, ctx: &Context, cmd: Cmd) {
+        let mut tip = self.cmd_tooltip(cmd);
+        let presets = matches!(cmd, Cmd::Tool(t) if super::style_flyout::has_presets(t));
+        if presets {
+            tip.push_str(self.hold_hint());
+        }
         let resp = icon_button_named(
             ui,
             cmd.icon(),
             cmd.label(self.settings.language),
-            &self.cmd_tooltip(cmd),
+            &tip,
             self.cmd_selected(cmd),
             self.cmd_enabled(cmd),
         );
-        if resp.clicked() {
+        let run = match cmd {
+            Cmd::Tool(tool) if presets => self.style_flyout(ui, ctx, &resp, tool),
+            _ => true,
+        };
+        if resp.clicked() && run {
             self.run(ctx, cmd);
+        }
+    }
+
+    fn hold_hint(&self) -> &'static str {
+        if self.settings.language == Language::German {
+            "\nGedrückt halten: Formatvorlagen"
+        } else {
+            "\nHold down: style presets"
+        }
+    }
+
+    /// "▾" next to Rückgängig/Wiederholen: the list of steps; choosing one
+    /// undoes (or redoes) it together with all steps above it.
+    fn history_menu(&mut self, ui: &mut Ui, ctx: &Context, redo: bool) {
+        let de = self.settings.language == Language::German;
+        let lang = self.settings.language;
+        let steps: Vec<String> = self
+            .active_tab()
+            .map(|t| if redo { t.doc.redo_list() } else { t.doc.undo_list() })
+            .unwrap_or_default()
+            .into_iter()
+            .map(|s| crate::ui::undo_names::undo_name(s, lang))
+            .collect();
+        let tip = match (redo, de) {
+            (false, true) => "Liste der letzten Aktionen",
+            (false, false) => "List of recent actions",
+            (true, true) => "Liste der rückgängig gemachten Aktionen",
+            (true, false) => "List of undone actions",
+        };
+        let (rect, resp) = ui.allocate_exact_size(egui::vec2(12.0, 24.0), egui::Sense::click());
+        let enabled = !steps.is_empty();
+        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, tip));
+        if ui.is_rect_visible(rect) {
+            if enabled && resp.hovered() {
+                ui.painter().rect_filled(rect, 3.0, theme::ACCENT.gamma_multiply(0.15));
+            }
+            let c = if enabled { ui.visuals().text_color() } else { ui.visuals().weak_text_color() };
+            let m = rect.center();
+            ui.painter().line(
+                vec![m + egui::vec2(-3.0, -1.5), m + egui::vec2(0.0, 1.5), m + egui::vec2(3.0, -1.5)],
+                egui::Stroke::new(1.3, c),
+            );
+        }
+        let resp = resp.on_hover_text(tip);
+        if !enabled {
+            return;
+        }
+        let mut chosen = None;
+        egui::Popup::menu(&resp).show(|ui| {
+            ui.set_min_width(240.0);
+            let hover_id = ui.id().with("history-hover");
+            let hovered: Option<usize> = ui.data(|d| d.get_temp(hover_id));
+            let mut now_hovered = None;
+            egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
+                for (i, name) in steps.iter().enumerate() {
+                    // Hovering a row marks it and all newer steps.
+                    let marked = hovered.is_some_and(|h| i <= h);
+                    let r = ui.add(egui::Button::selectable(marked, name).min_size(egui::vec2(230.0, 0.0)));
+                    if r.hovered() {
+                        now_hovered = Some(i);
+                    }
+                    if r.clicked() {
+                        chosen = Some(i + 1);
+                        ui.close();
+                    }
+                }
+            });
+            ui.data_mut(|d| d.insert_temp(hover_id, now_hovered));
+            let n = now_hovered.map_or(0, |h| h + 1);
+            let footer = match (redo, de, n) {
+                (_, true, 0) => "Eintrag wählen: bis dorthin zurück".to_string(),
+                (_, false, 0) => "Choose an entry to go back to it".to_string(),
+                (false, true, _) => format!("{n} Aktion(en) rückgängig machen"),
+                (false, false, _) => format!("Undo {n} action(s)"),
+                (true, true, _) => format!("{n} Aktion(en) wiederholen"),
+                (true, false, _) => format!("Redo {n} action(s)"),
+            };
+            ui.separator();
+            ui.label(RichText::new(footer).weak().small());
+        });
+        if let Some(n) = chosen {
+            self.travel_history(ctx, n, redo);
         }
     }
 
@@ -251,6 +353,10 @@ impl MrPdfApp {
                         Cmd::ViewForward,
                     ] {
                         self.icon(ui, &ctx, cmd);
+                        // A small arrow lists all steps to undo or redo.
+                        if matches!(cmd, Cmd::Undo | Cmd::Redo) {
+                            self.history_menu(ui, &ctx, cmd == Cmd::Redo);
+                        }
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         self.quick_start(ui, &ctx);

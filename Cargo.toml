@@ -20,7 +20,7 @@ name = "mrpdf"
 path = "src/main.rs"
 
 [dependencies]
-eframe = { version = "=0.36.2", default-features = false, features = ["accesskit", "default_fonts", "glow", "links", "persistence", "wayland", "x11"] }
+eframe = { version = "=0.36.2", default-features = false, features = ["accesskit", "default_fonts", "glow", "links", "persistence", "wayland", "wgpu", "x11"] }
 egui = "=0.36.2"
 pdfium-render = { version = "=0.9.4", default-features = false, features = ["image_025", "pdfium_7881", "thread_safe"] }
 lopdf = { version = "=0.45.0", default-features = false }

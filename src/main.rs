@@ -37,13 +37,8 @@ fn app_icon() -> egui::IconData {
     egui::IconData { rgba, width: N, height: N }
 }
 
-fn main() -> eframe::Result {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
-
-    let files: Vec<PathBuf> =
-        std::env::args_os().skip(1).map(PathBuf::from).filter(|p| p.is_file()).collect();
-
-    let options = eframe::NativeOptions {
+fn options(renderer: eframe::Renderer) -> eframe::NativeOptions {
+    eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("MrPDF")
             .with_app_id("mrpdf")
@@ -51,7 +46,37 @@ fn main() -> eframe::Result {
             .with_min_inner_size([640.0, 420.0])
             .with_drag_and_drop(true)
             .with_icon(app_icon()),
+        renderer,
         ..Default::default()
+    }
+}
+
+fn main() -> eframe::Result {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+
+    let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+    // "--opengl" (or MRPDF_RENDERER=opengl) uses OpenGL instead of the
+    // default DirectX/Vulkan/Metal drawing through wgpu.
+    let opengl = args.iter().any(|a| a == "--opengl")
+        || std::env::var("MRPDF_RENDERER").is_ok_and(|v| v.eq_ignore_ascii_case("opengl"));
+    let files: Vec<PathBuf> = args.iter().map(PathBuf::from).filter(|p| p.is_file()).collect();
+
+    let start = |renderer, files: Vec<PathBuf>| {
+        eframe::run_native(
+            "MrPDF",
+            options(renderer),
+            Box::new(move |cc| Ok(Box::new(MrPdfApp::new(cc, files)))),
+        )
     };
-    eframe::run_native("MrPDF", options, Box::new(move |cc| Ok(Box::new(MrPdfApp::new(cc, files)))))
+    if opengl {
+        return start(eframe::Renderer::Glow, files);
+    }
+    match start(eframe::Renderer::Wgpu, files.clone()) {
+        // No usable graphics driver for wgpu: fall back to OpenGL.
+        Err(err @ eframe::Error::Wgpu(_)) => {
+            log::warn!("wgpu not available ({err}), using OpenGL");
+            start(eframe::Renderer::Glow, files)
+        }
+        result => result,
+    }
 }
