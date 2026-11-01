@@ -1196,9 +1196,10 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
             poly(&[(0.64, 0.42), (0.86, 0.42), (0.75, 0.58)], k.purple, Stroke::NONE);
         }
         Icon::Logo => {
-            let brand = Color32::from_rgb(200, 35, 45).gamma_multiply(color.a() as f32 / 255.0);
-            p.rect_filled(Rect::from_min_max(u(0.05, 0.05), u(0.95, 0.95)), s * 0.2, brand);
-            text(0.5, 0.52, "M", 0.62, Color32::WHITE.gamma_multiply(color.a() as f32 / 255.0));
+            // The application icon itself (a picture, not a drawing).
+            let tint = Color32::WHITE.gamma_multiply(color.a() as f32 / 255.0);
+            let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
+            p.image(logo_texture(p.ctx()).id(), Rect::from_min_size(o, vec2(s, s)), uv, tint);
         }
         Icon::AlignLeft => align(false, 0.0),
         Icon::AlignCenterH => align(false, 0.5),
@@ -1296,6 +1297,36 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
             path(&[(0.22, 0.7), (0.42, 0.88), (0.82, 0.5)], Stroke::new(w * 1.7, k.green));
         }
     }
+}
+
+/// The application icon (256 px PNG, see `scripts/make_icon.rs`).
+pub const LOGO_PNG: &[u8] = include_bytes!("../../assets/mrpdf.png");
+
+/// The application icon as RGBA pixels (width, height, pixels).
+pub fn logo_rgba() -> (u32, u32, Vec<u8>) {
+    match image::load_from_memory(LOGO_PNG) {
+        Ok(img) => {
+            let img = img.to_rgba8();
+            (img.width(), img.height(), img.into_raw())
+        }
+        // Cannot happen with the built-in file; a red square keeps it visible.
+        Err(_) => (1, 1, vec![200, 35, 45, 255]),
+    }
+}
+
+/// The application icon as a texture, loaded once per context.
+fn logo_texture(ctx: &egui::Context) -> egui::TextureHandle {
+    let id = egui::Id::new("mrpdf-logo-texture");
+    if let Some(tex) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
+        return tex;
+    }
+    let (w, h, rgba) = logo_rgba();
+    let image = egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &rgba);
+    // Mipmaps keep the picture smooth when it is drawn small (20 px).
+    let options = egui::TextureOptions::LINEAR.with_mipmap_mode(Some(egui::TextureFilter::Linear));
+    let tex = ctx.load_texture("mrpdf-logo", image, options);
+    ctx.data_mut(|d| d.insert_temp(id, tex.clone()));
+    tex
 }
 
 /// Size of the icon square for a given button height.

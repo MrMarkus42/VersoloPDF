@@ -278,6 +278,8 @@ pub struct MrPdfApp {
     dialog: Option<Dialog>,
     status: Option<(String, f64)>,
     pending_open: VecDeque<PathBuf>,
+    /// Files handed over by later starts of MrPDF (see crate::instance).
+    inbox: Option<crate::instance::Inbox>,
     exit_confirmed: bool,
     search_query: String,
     search_case: bool,
@@ -371,6 +373,21 @@ impl MrPdfApp {
         Self::with_settings(&cc.egui_ctx, settings, files)
     }
 
+    /// Receives the files of later starts of MrPDF (one program window).
+    pub fn set_inbox(&mut self, ctx: &Context, inbox: crate::instance::Inbox) {
+        inbox.set_context(ctx);
+        self.inbox = Some(inbox);
+    }
+
+    /// Opens files handed over by a later start and brings the window to
+    /// the front.
+    fn check_inbox(&mut self, ctx: &Context) {
+        let Some(files) = self.inbox.as_ref().and_then(|i| i.take()) else { return };
+        self.pending_open.extend(files);
+        ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
+        ctx.send_viewport_cmd(ViewportCommand::Focus);
+    }
+
     /// Creates the application without persistent storage (used by tests).
     pub fn with_settings(ctx: &Context, settings: Settings, files: Vec<PathBuf>) -> Self {
         ctx.options_mut(|o| o.zoom_with_keyboard = false);
@@ -393,6 +410,7 @@ impl MrPdfApp {
             dialog: None,
             status: None,
             pending_open: files.into(),
+            inbox: None,
             exit_confirmed: false,
             search_query: String::new(),
             search_case: false,
@@ -922,6 +940,7 @@ impl eframe::App for MrPdfApp {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.apply_view_settings(&ctx);
+        self.check_inbox(&ctx);
         if let Some(path) = self.pending_open.pop_front() {
             self.open_path(&ctx, path, None);
         }

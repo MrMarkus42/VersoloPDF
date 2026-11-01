@@ -228,9 +228,9 @@ pub struct RecoveryEntry {
     pub saved: String,
 }
 
-/// Folder of the recovery copies in the user's data folder.
-pub fn default_recovery_dir() -> Option<PathBuf> {
-    let base = if cfg!(windows) {
+/// MrPDF's folder in the user's data folder.
+pub fn data_dir() -> Option<PathBuf> {
+    if cfg!(windows) {
         std::env::var_os("LOCALAPPDATA").map(PathBuf::from).map(|p| p.join("MrPDF"))
     } else if cfg!(target_os = "macos") {
         std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/Application Support/MrPDF"))
@@ -240,8 +240,12 @@ pub fn default_recovery_dir() -> Option<PathBuf> {
             .filter(|p| p.is_absolute())
             .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
             .map(|p| p.join("mrpdf"))
-    };
-    base.map(|p| p.join("recovery"))
+    }
+}
+
+/// Folder of the recovery copies in the user's data folder.
+pub fn default_recovery_dir() -> Option<PathBuf> {
+    data_dir().map(|p| p.join("recovery"))
 }
 
 fn safe_id(id: &str) -> Result<&str> {

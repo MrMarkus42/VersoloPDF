@@ -53,6 +53,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_Security",
     "Win32_Storage_Xps",
     "Win32_UI_Controls_Dialogs",
+    "Win32_UI_WindowsAndMessaging",
 ] }
 
 [dev-dependencies]
@@ -66,3 +67,8 @@ strip = "symbols"
 
 [profile.dev.package."*"]
 opt-level = 2
+
+# Prepares assets/mrpdf.png and assets/mrpdf.ico from the icon drawing.
+[[example]]
+name = "make_icon"
+path = "scripts/make_icon.rs"

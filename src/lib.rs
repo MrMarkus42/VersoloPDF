@@ -28,6 +28,7 @@ pub mod form_fill;
 pub mod forms;
 pub mod geometry;
 pub mod import;
+pub mod instance;
 pub mod marks;
 pub mod media;
 pub mod model;

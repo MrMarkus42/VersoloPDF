@@ -96,6 +96,18 @@ Overhaul of 2026-10-30. All icons are MrPDF's own drawings
 * Comment edits no longer re-read the size of every page after reloading:
   moving a comment in a 274 MB / 1476 page file went from 2.95 s to 0.26 s
   (timings with real files: `tests/real_files.rs`, ignored by default).
+* Application icon (2026-11-01): Mr. M' drawing `assets/mrpdf-icon-source.webp`
+  is prepared by `cargo run --release --example make_icon` into
+  `assets/mrpdf.png` (256 px, transparent corners) and `assets/mrpdf.ico`
+  (16–256 px). Used for the window and taskbar (`main.rs`), the logo inside
+  the program (`Icon::Logo`, drawn from the PNG with mipmaps) and the
+  program file (`build.rs` adds icon and version information with the MinGW
+  resource compiler).
+* One program window (2026-11-01): a second start hands its files to the
+  running MrPDF, which opens them as tabs and comes to the front; the second
+  start ends (`src/instance.rs`: local port 127.0.0.1 plus a random token in
+  `instance.txt` in MrPDF's data folder). `--new-window` starts a separate
+  window anyway.
 * Drawing goes through wgpu (DirectX on Windows) instead of OpenGL, which
   showed brief black flashes on Windows; without a usable driver MrPDF falls
   back to OpenGL, `--opengl` or `MRPDF_RENDERER=opengl` forces it.
