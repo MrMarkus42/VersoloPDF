@@ -105,9 +105,11 @@ Overhaul of 2026-10-30. All icons are MrPDF's own drawings
   resource compiler).
 * One program window (2026-11-01): a second start hands its files to the
   running MrPDF, which opens them as tabs and comes to the front; the second
-  start ends (`src/instance.rs`: local port 127.0.0.1 plus a random token in
-  `instance.txt` in MrPDF's data folder). `--new-window` starts a separate
-  window anyway.
+  start ends (`src/instance.rs`). Since 2026-11-02 through a named pipe
+  `\\.\pipe\MrPDF-<hash>` on Windows (remote clients rejected, default
+  security: other users may not write) and a Unix socket in the private
+  folder `ipc/` (mode 0700) of MrPDF's data folder on Linux and macOS; no
+  network port. `--new-window` starts a separate window anyway.
 * Drawing goes through wgpu (DirectX on Windows) instead of OpenGL, which
   showed brief black flashes on Windows; without a usable driver MrPDF falls
   back to OpenGL, `--opengl` or `MRPDF_RENDERER=opengl` forces it.
