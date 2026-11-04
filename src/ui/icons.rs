@@ -380,8 +380,6 @@ impl Palette {
 enum Badge {
     Plus,
     Cross,
-    Right,
-    Left,
     Pen,
 }
 
@@ -405,7 +403,13 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
     // Maps unit coordinates (0..1) into the icon square.
     let u = |x: f32, y: f32| pos2(o.x + x * s, o.y + y * s);
     let k = Palette::new(color);
-    let w = (s / 13.0).max(1.15);
+    // One fine stroke for everything (modern outline style).
+    let w = (s / 15.0).max(1.1);
+    // Areas in a topic colour: a light tint with an outline in the colour.
+    let tint = |c: Color32| c.gamma_multiply(0.16);
+    let edge = |c: Color32| Stroke::new(w, c);
+    // Small icons (16 px) leave out fine detail.
+    let small = s < 20.0;
     let st = Stroke::new(w, k.ink);
     let thin = Stroke::new((w * 0.75).max(1.0), k.ink);
     let bold = |c: Color32| Stroke::new(w * 1.5, c);
@@ -424,7 +428,7 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
         p.add(PathShape::closed_line(pts.iter().map(|&(x, y)| u(x, y)).collect(), stroke));
     };
     let rr = |x0: f32, y0: f32, x1: f32, y1: f32, fill: Color32, stroke: Stroke| {
-        p.rect(Rect::from_min_max(u(x0, y0), u(x1, y1)), s * 0.07, fill, stroke, StrokeKind::Inside);
+        p.rect(Rect::from_min_max(u(x0, y0), u(x1, y1)), s * 0.1, fill, stroke, StrokeKind::Inside);
     };
     let dashed = |x0: f32, y0: f32, x1: f32, y1: f32, stroke: Stroke| {
         let pts = [u(x0, y0), u(x1, y0), u(x1, y1), u(x0, y1), u(x0, y0)];
@@ -440,6 +444,9 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
     };
     let sheet = |x0: f32, y0: f32, x1: f32, y1: f32| rr(x0, y0, x1, y1, k.paper, st);
     let lines = |x0: f32, x1: f32, ys: &[f32]| {
+        if small {
+            return;
+        }
         for &y in ys {
             line((x0, y), (x1, y), Stroke::new(thin.width, k.soft));
         }
@@ -491,13 +498,6 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
                 let e = d * 0.8;
                 p.line_segment([center - vec2(e, e), center + vec2(e, e)], g);
                 p.line_segment([center - vec2(e, -e), center + vec2(e, -e)], g);
-            }
-            Badge::Right | Badge::Left => {
-                let sign = if matches!(b, Badge::Right) { 1.0 } else { -1.0 };
-                let tip = center + vec2(sign * d, 0.0);
-                p.line_segment([center - vec2(sign * d, 0.0), tip], g);
-                p.line_segment([tip, tip + vec2(-sign * d * 0.7, -d * 0.7)], g);
-                p.line_segment([tip, tip + vec2(-sign * d * 0.7, d * 0.7)], g);
             }
             Badge::Pen => {
                 p.line_segment(
@@ -576,16 +576,20 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
             badge(Badge::Plus, k.green);
         }
         Icon::Open => {
-            rr(0.06, 0.14, 0.42, 0.34, k.amber, Stroke::NONE);
-            rr(0.06, 0.22, 0.86, 0.84, k.amber, Stroke::NONE);
-            poly(&[(0.2, 0.42), (0.98, 0.42), (0.86, 0.86), (0.06, 0.86)], k.yellow, thin);
+            rr(0.06, 0.14, 0.42, 0.34, tint(k.amber), edge(k.amber));
+            rr(0.06, 0.22, 0.86, 0.84, tint(k.amber), edge(k.amber));
+            poly(
+                &[(0.2, 0.42), (0.98, 0.42), (0.86, 0.86), (0.06, 0.86)],
+                k.yellow.gamma_multiply(0.55),
+                edge(k.amber),
+            );
         }
         Icon::Save | Icon::SaveAs => {
-            rr(0.1, 0.1, 0.86, 0.88, k.blue, Stroke::NONE);
-            rr(0.26, 0.1, 0.7, 0.36, k.paper, Stroke::NONE);
-            rr(0.54, 0.14, 0.64, 0.32, k.blue, Stroke::NONE);
-            rr(0.22, 0.52, 0.74, 0.88, k.paper, Stroke::NONE);
-            lines(0.3, 0.66, &[0.64, 0.76]);
+            rr(0.1, 0.1, 0.88, 0.9, tint(k.blue), edge(k.blue));
+            rr(0.28, 0.1, 0.68, 0.36, k.paper, edge(k.blue));
+            line((0.56, 0.16), (0.56, 0.3), edge(k.blue));
+            rr(0.24, 0.54, 0.74, 0.9, k.paper, edge(k.blue));
+            lines(0.32, 0.66, &[0.66, 0.78]);
             if icon == Icon::SaveAs {
                 badge(Badge::Pen, k.amber);
             }
@@ -701,9 +705,9 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
             closed(&pts, bold(k.orange));
         }
         Icon::Stamp => {
-            rr(0.38, 0.08, 0.62, 0.46, k.ink, Stroke::NONE);
-            rr(0.16, 0.44, 0.84, 0.64, k.ink, Stroke::NONE);
-            rr(0.08, 0.74, 0.92, 0.9, k.orange, Stroke::NONE);
+            rr(0.38, 0.08, 0.62, 0.46, k.paper, st);
+            rr(0.16, 0.44, 0.84, 0.64, k.grey, st);
+            rr(0.08, 0.74, 0.92, 0.9, tint(k.orange), edge(k.orange));
         }
         Icon::RotateLeft | Icon::RotateRight => {
             if icon == Icon::RotateLeft {
@@ -728,20 +732,22 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
             lines(0.24, 0.54, &[0.36, 0.48]);
             badge(Badge::Plus, k.green);
         }
+        // A file going into the document: arrow from the left into a page.
         Icon::InsertFile => {
-            page(0.06, 0.04, 0.5, 0.66);
-            page(0.24, 0.18, 0.7, 0.9);
-            badge(Badge::Left, k.green);
+            page(0.34, 0.06, 0.9, 0.94);
+            lines(0.5, 0.78, &[0.38, 0.72]);
+            arrow((0.02, 0.56), (0.6, 0.56), k.green, w * 1.6);
         }
         Icon::Duplicate => {
             sheet(0.06, 0.04, 0.5, 0.62);
             sheet(0.22, 0.18, 0.66, 0.84);
             badge(Badge::Plus, k.green);
         }
+        // Pages taken out: arrow from inside the page to the right.
         Icon::ExtractPages => {
-            page(0.14, 0.06, 0.68, 0.9);
-            lines(0.24, 0.54, &[0.36, 0.48]);
-            badge(Badge::Right, k.blue);
+            page(0.08, 0.06, 0.62, 0.94);
+            lines(0.18, 0.5, &[0.36, 0.76]);
+            arrow((0.36, 0.56), (0.98, 0.56), k.blue, w * 1.6);
         }
         Icon::MoveUp => arrow((0.5, 0.9), (0.5, 0.08), k.blue, w * 1.7),
         Icon::MoveDown => arrow((0.5, 0.1), (0.5, 0.92), k.blue, w * 1.7),
@@ -767,8 +773,9 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
             }
         }
         Icon::Bookmarks => {
-            poly(&[(0.26, 0.06), (0.74, 0.06), (0.74, 0.92), (0.5, 0.72)], k.blue, Stroke::NONE);
-            poly(&[(0.26, 0.06), (0.5, 0.72), (0.26, 0.92)], k.blue, Stroke::NONE);
+            poly(&[(0.26, 0.06), (0.74, 0.06), (0.74, 0.92), (0.5, 0.72)], tint(k.blue), Stroke::NONE);
+            poly(&[(0.26, 0.06), (0.5, 0.72), (0.26, 0.92)], tint(k.blue), Stroke::NONE);
+            closed(&[(0.26, 0.06), (0.74, 0.06), (0.74, 0.92), (0.5, 0.72), (0.26, 0.92)], edge(k.blue));
         }
         Icon::Properties => {
             for (y, x) in [(0.24f32, 0.32f32), (0.5, 0.66), (0.76, 0.44)] {
@@ -782,8 +789,8 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
             line((0.5, 0.44), (0.5, 0.74), Stroke::new(w * 1.6, k.blue));
         }
         Icon::Help => {
-            p.circle_filled(u(0.5, 0.5), s * 0.43, k.blue);
-            text(0.5, 0.53, "?", 0.58, k.on);
+            p.circle(u(0.5, 0.5), s * 0.42, tint(k.blue), edge(k.blue));
+            text(0.5, 0.53, "?", 0.56, k.blue);
         }
         Icon::Close => {
             line((0.24, 0.24), (0.76, 0.76), bold(k.ink));
@@ -832,7 +839,7 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
             lines(0.46, 0.78, &[0.5, 0.62, 0.74]);
         }
         Icon::Paste => {
-            rr(0.1, 0.14, 0.7, 0.92, k.amber, st);
+            rr(0.1, 0.14, 0.7, 0.92, tint(k.amber), edge(k.amber));
             rr(0.26, 0.06, 0.54, 0.22, k.grey, st);
             sheet(0.4, 0.36, 0.92, 0.96);
             lines(0.5, 0.82, &[0.56, 0.68, 0.8]);
@@ -887,9 +894,9 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
                 ],
                 bold(k.ink),
             );
-            rr(0.18, 0.44, 0.82, 0.92, k.amber, st);
-            p.circle_filled(u(0.5, 0.64), s * 0.06, k.ink);
-            line((0.5, 0.66), (0.5, 0.78), Stroke::new(w * 1.2, k.ink));
+            rr(0.18, 0.44, 0.82, 0.92, tint(k.amber), edge(k.amber));
+            p.circle_filled(u(0.5, 0.64), s * 0.06, k.amber);
+            line((0.5, 0.66), (0.5, 0.78), Stroke::new(w * 1.2, k.amber));
         }
         Icon::Attachment => {
             path(
@@ -926,22 +933,22 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
                 let (s1, c1) = a.sin_cos();
                 line(
                     (0.5 + 0.24 * c1, 0.5 + 0.24 * s1),
-                    (0.5 + 0.43 * c1, 0.5 + 0.43 * s1),
-                    Stroke::new(w * 2.4, k.ink),
+                    (0.5 + 0.42 * c1, 0.5 + 0.42 * s1),
+                    Stroke::new(w * 2.0, k.ink),
                 );
             }
-            p.circle(u(0.5, 0.5), s * 0.28, k.grey, st);
-            p.circle(u(0.5, 0.5), s * 0.1, k.paper, st);
+            p.circle(u(0.5, 0.5), s * 0.28, k.paper, st);
+            p.circle(u(0.5, 0.5), s * 0.11, tint(k.blue), edge(k.blue));
         }
         Icon::Mail => {
             rr(0.06, 0.2, 0.94, 0.8, k.paper, st);
             path(&[(0.08, 0.24), (0.5, 0.56), (0.92, 0.24)], Stroke::new(w, k.blue));
         }
         Icon::Back | Icon::Forward => {
-            p.circle_filled(u(0.5, 0.5), s * 0.43, k.blue);
+            p.circle(u(0.5, 0.5), s * 0.42, tint(k.blue), edge(k.blue));
             let (a, b) =
                 if icon == Icon::Back { ((0.74, 0.5), (0.24, 0.5)) } else { ((0.26, 0.5), (0.76, 0.5)) };
-            arrow(a, b, k.on, w * 1.4);
+            arrow(a, b, k.blue, w * 1.4);
         }
         Icon::Link | Icon::LinkOff => {
             let b = Stroke::new(w * 1.5, k.blue);
@@ -984,10 +991,14 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
             rr(0.06, 0.32, 0.52, 0.76, k.blue, Stroke::NONE);
             text(0.29, 0.55, "W", 0.32, k.on);
         }
+        // Out of a tray (export) or into it (import).
         Icon::Export | Icon::Import => {
-            page(0.14, 0.06, 0.68, 0.9);
-            lines(0.24, 0.54, &[0.36, 0.48]);
-            badge(if icon == Icon::Export { Badge::Right } else { Badge::Left }, k.teal);
+            path(&[(0.1, 0.5), (0.1, 0.9), (0.9, 0.9), (0.9, 0.5)], st);
+            if icon == Icon::Export {
+                arrow((0.5, 0.74), (0.5, 0.06), k.teal, w * 1.6);
+            } else {
+                arrow((0.5, 0.06), (0.5, 0.76), k.teal, w * 1.6);
+            }
         }
         Icon::Redact => {
             page(0.14, 0.06, 0.86, 0.94);
@@ -1073,9 +1084,9 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
             line((0.6, 0.5), (0.86, 0.5), bold(k.green));
         }
         Icon::Accessibility => {
-            p.circle_filled(u(0.5, 0.5), s * 0.43, k.blue);
-            p.circle_filled(u(0.5, 0.25), s * 0.07, k.on);
-            let b = Stroke::new(w * 1.3, k.on);
+            p.circle(u(0.5, 0.5), s * 0.42, tint(k.blue), edge(k.blue));
+            p.circle_filled(u(0.5, 0.25), s * 0.07, k.blue);
+            let b = Stroke::new(w * 1.3, k.blue);
             line((0.26, 0.4), (0.74, 0.4), b);
             line((0.5, 0.4), (0.5, 0.58), b);
             path(&[(0.36, 0.8), (0.5, 0.56), (0.64, 0.8)], b);
@@ -1089,9 +1100,11 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
             for y in [0.46f32, 0.6, 0.74] {
                 line((0.14, y), (0.86, y), thin);
             }
-            p.add(Shape::ellipse_filled(u(0.5, 0.6), vec2(s * 0.22, s * 0.3), k.green));
-            p.circle_filled(u(0.5, 0.24), s * 0.12, k.ink);
-            line((0.5, 0.36), (0.5, 0.88), Stroke::new(thin.width, k.ring));
+            p.add(Shape::ellipse_filled(u(0.5, 0.6), vec2(s * 0.22, s * 0.3), k.paper));
+            p.add(Shape::ellipse_filled(u(0.5, 0.6), vec2(s * 0.22, s * 0.3), tint(k.green)));
+            p.add(Shape::ellipse_stroke(u(0.5, 0.6), vec2(s * 0.22, s * 0.3), edge(k.green)));
+            p.circle(u(0.5, 0.24), s * 0.11, tint(k.green), edge(k.green));
+            line((0.5, 0.36), (0.5, 0.88), Stroke::new(thin.width, k.green));
         }
         Icon::Console => {
             rr(0.06, 0.14, 0.94, 0.86, Color32::from_gray(36).gamma_multiply(color.a() as f32 / 255.0), st);
@@ -1100,10 +1113,10 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
         }
         Icon::Pointer => pointer(0.26, 0.06, 1.0),
         Icon::Camera => {
-            rr(0.06, 0.28, 0.94, 0.84, k.grey, st);
-            rr(0.34, 0.16, 0.62, 0.3, k.ink, Stroke::NONE);
-            p.circle(u(0.5, 0.56), s * 0.17, k.paper, st);
-            p.circle_filled(u(0.5, 0.56), s * 0.08, k.blue);
+            rr(0.34, 0.16, 0.62, 0.32, k.paper, st);
+            rr(0.06, 0.28, 0.94, 0.84, k.paper, st);
+            p.circle(u(0.5, 0.56), s * 0.18, tint(k.blue), edge(k.blue));
+            p.circle_filled(u(0.5, 0.56), s * 0.06, k.blue);
         }
         Icon::AreaHighlight => {
             rr(0.08, 0.24, 0.92, 0.76, k.yellow, Stroke::NONE);
@@ -1171,11 +1184,11 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
             p.rect(
                 Rect::from_min_max(u(0.06, 0.26), u(0.94, 0.74)),
                 s * 0.2,
-                k.purple,
-                Stroke::NONE,
+                tint(k.purple),
+                edge(k.purple),
                 StrokeKind::Inside,
             );
-            text(0.5, 0.5, "OK", 0.3, k.on);
+            text(0.5, 0.5, "OK", 0.3, k.purple);
         }
         Icon::CheckBox => {
             rr(0.14, 0.14, 0.86, 0.86, k.paper, st);
