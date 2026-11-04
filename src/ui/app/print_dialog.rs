@@ -452,7 +452,7 @@ impl MrPdfApp {
                     && count > 0
                 {
                     let area =
-                        doc_preview(ui, &mut self.preview[0], doc, 0x9e1, state.preview_sheet, vec2(330.0, 380.0));
+                        doc_preview(ui, &mut self.preview[0], doc, 0x9e1, state.preview_sheet, vec2(330.0, 380.0), super::preview::PreviewOpts::new(de));
                     // The printable area of the paper, so cut parts are visible.
                     let sheet_is_paper = doc
                         .geometry(state.preview_sheet)
@@ -469,7 +469,7 @@ impl MrPdfApp {
                         );
                         let pts = [r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom(), r.left_top()];
                         let stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(220, 60, 60));
-                        ui.painter().extend(egui::Shape::dashed_line(&pts, stroke, 4.0, 3.0));
+                        area.painter.extend(egui::Shape::dashed_line(&pts, stroke, 4.0, 3.0));
                     }
                 } else {
                     let (rect, _) = ui.allocate_exact_size(vec2(330.0, 380.0), egui::Sense::hover());

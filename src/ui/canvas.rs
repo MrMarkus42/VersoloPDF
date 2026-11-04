@@ -1432,7 +1432,10 @@ fn start_drag(
     let pdf = pos.pdf_at(start);
     let v = pos.view_at(start);
     let snapped = snap_point(tab, cx, v);
-    if let Some(i) = own_kind_at(tab, cx, pos.page, pdf, tol)
+    // While a polygon is being drawn, a press on an existing comment is
+    // another corner, not a move.
+    if tab.polygon.is_empty()
+        && let Some(i) = own_kind_at(tab, cx, pos.page, pdf, tol)
         && tab.annotations(pos.page).get(i).is_some_and(|a| a.kind.is_movable())
     {
         let annot = AnnotRef { page: pos.page, index: i };
@@ -1495,6 +1498,7 @@ fn start_drag(
                 Interaction::Shape { page: pos.page, start: snapped, current: snapped, points: vec![snapped] }
             }
             Gesture::Freehand => Interaction::Shape { page: pos.page, start: v, current: v, points: vec![v] },
+            Gesture::Vertices => Interaction::Vertex { page: pos.page, start: v, current: v },
             _ => Interaction::None,
         },
     }
@@ -1554,7 +1558,7 @@ fn continue_drag(
             }
         }
         Interaction::MoveAnnot { delta: d, .. } => *d += delta,
-        Interaction::Marquee { page, current, .. } => {
+        Interaction::Marquee { page, current, .. } | Interaction::Vertex { page, current, .. } => {
             if let Some(pos) = on_screen.iter().find(|p| p.page == *page) {
                 *current = pos.view_at(cur.clamp(pos.rect.min, pos.rect.max));
             }
@@ -1671,6 +1675,12 @@ fn finish_drag(tab: &mut DocTab, cx: &mut CanvasCtx, interaction: Interaction, o
                 })
             });
             cx.events.push(CanvasEvent::Reshape { annot, reshape, contents });
+        }
+        Interaction::Vertex { page, start, current } => {
+            if tab.polygon.is_empty() || tab.polygon_page != page {
+                add_vertex(tab, cx, on_screen, page, start);
+            }
+            add_vertex(tab, cx, on_screen, page, current);
         }
         Interaction::Marquee { page, start, current, add } => {
             let Some(pos) = on_screen.iter().find(|p| p.page == page) else { return };
@@ -1801,6 +1811,27 @@ fn finish_shape(
     }
 }
 
+/// One more corner for the polygon tools. A click on the last corner (a
+/// double click, however slow) finishes; for closed shapes a click on the
+/// first corner too.
+fn add_vertex(tab: &mut DocTab, cx: &mut CanvasCtx, on_screen: &[PageOnScreen], page: usize, view: PointF) {
+    if tab.polygon_page != page {
+        tab.polygon.clear();
+        tab.polygon_page = page;
+    }
+    let scale = tab.scale();
+    let closed = matches!(cx.tool, Tool::Polygon | Tool::Cloud | Tool::MeasureArea);
+    let need = if closed { 3 } else { 2 };
+    let near = |a: PointF| a.distance(view) * scale < 6.0;
+    let n = tab.polygon.len();
+    let on_last = n > 0 && near(tab.polygon[n - 1]);
+    if n >= need && (on_last || (closed && near(tab.polygon[0]))) {
+        finish_polygon(tab, cx, on_screen);
+    } else if !on_last {
+        tab.polygon.push(view);
+    }
+}
+
 fn finish_polygon(tab: &mut DocTab, cx: &mut CanvasCtx, on_screen: &[PageOnScreen]) {
     let page = tab.polygon_page;
     let mut view = std::mem::take(&mut tab.polygon);
@@ -1838,7 +1869,9 @@ fn handle_click(tab: &mut DocTab, cx: &mut CanvasCtx, on_screen: &[PageOnScreen]
     let view = pos.view_at(p);
     let tol = 4.0 / tab.scale();
     let tool = cx.tool;
-    if let Some(index) = own_kind_at(tab, cx, pos.page, pdf, tol) {
+    if tab.polygon.is_empty()
+        && let Some(index) = own_kind_at(tab, cx, pos.page, pdf, tol)
+    {
         tab.selected_annot = Some(AnnotRef { page: pos.page, index });
         return;
     }
@@ -1915,13 +1948,7 @@ fn handle_click(tab: &mut DocTab, cx: &mut CanvasCtx, on_screen: &[PageOnScreen]
             annot.icon = Some(cx.stamp_icon.to_string());
             cx.events.push(CanvasEvent::Create { page: pos.page, annot: Box::new(annot) });
         }
-        t if t.gesture() == Gesture::Vertices => {
-            if tab.polygon_page != pos.page {
-                tab.polygon.clear();
-                tab.polygon_page = pos.page;
-            }
-            tab.polygon.push(view);
-        }
+        t if t.gesture() == Gesture::Vertices => add_vertex(tab, cx, on_screen, pos.page, view),
         t if t.gesture() == Gesture::Rect
             && !matches!(t, Tool::Snapshot | Tool::Link | Tool::Redact | Tool::AreaHighlight) =>
         {

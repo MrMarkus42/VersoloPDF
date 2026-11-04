@@ -304,6 +304,9 @@ impl History {
     }
 }
 
+/// Source of [`Document::instance`].
+static NEXT_INSTANCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
 pub struct Document {
     pdf: PdfDocument<'static>,
     /// Serialised state; stale while `engine_dirty` is set.
@@ -315,6 +318,7 @@ pub struct Document {
     geometry: Vec<PageGeometry>,
     history: History,
     revision: u64,
+    instance: u64,
     /// Revision of the last change that may affect every page; changes of
     /// single pages (comments) are kept in page_revs so the other pages
     /// keep their rendered pictures.
@@ -468,6 +472,7 @@ impl Document {
             geometry: Vec::new(),
             history: History::default(),
             revision: 0,
+            instance: NEXT_INSTANCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             structure_rev: 0,
             page_revs: HashMap::new(),
             local_page: None,
@@ -604,6 +609,12 @@ impl Document {
     /// Increases with every change; caches compare against it.
     pub fn revision(&self) -> u64 {
         self.revision
+    }
+
+    /// Different for every document loaded in this process, so caches can
+    /// tell a re-created document (same revision) from the old one.
+    pub fn instance(&self) -> u64 {
+        self.instance
     }
 
     /// Revision of the last change that affects how page looks (for

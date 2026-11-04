@@ -359,7 +359,6 @@ impl MrPdfApp {
     /// "Formulardaten per E-Mail versenden": XFDF in the temporary folder,
     /// then the mail program.
     fn email_form_data(&mut self, ctx: &Context) {
-        let de = self.fc_de();
         let Some(tab) = self.tab() else { return };
         let stem = tab.doc.display_name().trim_end_matches(".pdf").trim_end_matches(".PDF").to_string();
         let dir = std::env::temp_dir().join("mrpdf-formdata");
@@ -372,16 +371,7 @@ impl MrPdfApp {
             return;
         }
         let subject = super::features::mail_subject(&self.settings.email_subject, &format!("{stem}.xfdf"));
-        ctx.open_url(egui::OpenUrl::new_tab(format!("mailto:?subject={subject}")));
-        let text = if de {
-            format!(
-                "Das E-Mail-Programm wurde geöffnet. Bitte hängen Sie die Formulardaten an:\n{}",
-                path.display()
-            )
-        } else {
-            format!("Your e-mail program was opened. Please attach the form data:\n{}", path.display())
-        };
-        self.info(Cmd::Form(FormCmd::EmailFormData).label(self.settings.language), text);
+        self.mail(ctx, Cmd::Form(FormCmd::EmailFormData), &subject, vec![path]);
     }
 
     fn open_fill_forms(&mut self) {

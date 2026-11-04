@@ -192,6 +192,31 @@ fn font_menu(ui: &mut Ui, de: bool, font: &mut FontSpec) {
     });
 }
 
+/// Dashed guides for the header and footer margins.
+fn margin_guides(area: &super::preview::PreviewArea, margins: &[f32; 4]) {
+    let r = area.rect;
+    let s = area.scale;
+    let guide = Stroke::new(1.0, Color32::from_rgb(40, 90, 220));
+    let xs = [r.left() + margins[0] * s, r.right() - margins[1] * s];
+    let ys = [r.top() + margins[2] * s, r.bottom() - margins[3] * s];
+    for x in xs {
+        area.painter.add(egui::Shape::dashed_line(
+            &[egui::pos2(x, r.top()), egui::pos2(x, r.bottom())],
+            guide,
+            4.0,
+            3.0,
+        ));
+    }
+    for y in ys {
+        area.painter.add(egui::Shape::dashed_line(
+            &[egui::pos2(r.left(), y), egui::pos2(r.right(), y)],
+            guide,
+            4.0,
+            3.0,
+        ));
+    }
+}
+
 const MACROS: [(&str, &str, &str); 6] = [
     ("%[Page]", "Seitenzahl", "Page number"),
     ("%[Pages]", "Seitenanzahl", "Page count"),
@@ -961,33 +986,43 @@ impl MrPdfApp {
                 self.dialog_doc = Some((key, d));
             }
         }
-        if let Some((_, d)) = &self.dialog_doc
-            && let Some(area) = doc_preview(ui, &mut self.preview[0], d, 0x3a7, 0, size)
-            && let Source::HeaderFooter { margins, .. } = &def.source
-        {
-            // Dashed guides for the margins.
-            let r = area.rect;
-            let s = area.scale;
-            let guide = Stroke::new(1.0, Color32::from_rgb(40, 90, 220));
-            let xs = [r.left() + margins[0] * s, r.right() - margins[1] * s];
-            let ys = [r.top() + margins[2] * s, r.bottom() - margins[3] * s];
-            for x in xs {
-                ui.painter().add(egui::Shape::dashed_line(
-                    &[egui::pos2(x, r.top()), egui::pos2(x, r.bottom())],
-                    guide,
-                    4.0,
+        let de = self.md_de();
+        let opts = super::preview::PreviewOpts::new(de);
+        let Some((_, d)) = &self.dialog_doc else { return };
+        let Source::HeaderFooter { margins, .. } = &def.source else {
+            doc_preview(ui, &mut self.preview[0], d, 0x3a7, 0, size, opts);
+            return;
+        };
+        // Headers and footers are small on a whole page: the top and the
+        // bottom of the page side by side, as wide as each half.
+        let half = vec2((size.x - 8.0) / 2.0, size.y);
+        let [top, bottom] = &mut self.preview;
+        ui.horizontal(|ui| {
+            for (cache, focus, name) in
+                [(top, 0.0, tr(de, "Kopfzeile", "Header")), (bottom, 1.0, tr(de, "Fußzeile", "Footer"))]
+            {
+                let Some(area) = doc_preview(ui, cache, d, 0x3a7, 0, half, opts.focus(focus)) else {
+                    continue;
+                };
+                margin_guides(&area, margins);
+                // Name of the part on a small label in the corner.
+                let bg = area.response.rect;
+                let font = egui::FontId::proportional(12.0);
+                let galley = ui.painter().layout_no_wrap(name.to_string(), font, Color32::from_gray(30));
+                let r = egui::Rect::from_min_size(
+                    bg.left_top() + vec2(4.0, 4.0),
+                    galley.size() + vec2(10.0, 4.0),
+                );
+                area.painter.rect(
+                    r,
                     3.0,
-                ));
+                    Color32::from_white_alpha(215),
+                    Stroke::new(1.0, Color32::from_gray(110)),
+                    egui::StrokeKind::Inside,
+                );
+                area.painter.galley(r.min + vec2(5.0, 2.0), galley, Color32::from_gray(30));
             }
-            for y in ys {
-                ui.painter().add(egui::Shape::dashed_line(
-                    &[egui::pos2(r.left(), y), egui::pos2(r.right(), y)],
-                    guide,
-                    4.0,
-                    3.0,
-                ));
-            }
-        }
+        });
     }
 
     fn bates_files(&mut self, ctx: &Context, job: &BatesJob) {

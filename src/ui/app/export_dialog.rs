@@ -244,7 +244,15 @@ impl MrPdfApp {
                 ui.label(RichText::new(o.format.label()).weak());
                 if let Some(tab) = self.tabs.get(self.active) {
                     let page = state.range.resolve(n, cur).and_then(|p| p.first().copied()).unwrap_or(cur);
-                    doc_preview(ui, &mut self.preview[0], &tab.doc, tab.id, page, vec2(280.0, 330.0));
+                    doc_preview(
+                        ui,
+                        &mut self.preview[0],
+                        &tab.doc,
+                        tab.id,
+                        page,
+                        vec2(280.0, 330.0),
+                        super::preview::PreviewOpts::new(de),
+                    );
                     if let Some(geo) = tab.doc.geometry(page) {
                         let (w, h) = o.pixel_size(geo.view_size());
                         ui.label(RichText::new(format!("{w} x {h} px")).small());

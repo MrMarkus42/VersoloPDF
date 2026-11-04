@@ -1257,7 +1257,15 @@ impl MrPdfApp {
                 }
                 ui.label(RichText::new(tr(de, "Vorschau: 1 von 1", "Preview: 1 of 1")).weak());
                 if let Some((_, doc)) = &self.dialog_doc {
-                    doc_preview(ui, &mut self.preview[0], doc, 0xc1b, 0, vec2(400.0, 300.0));
+                    doc_preview(
+                        ui,
+                        &mut self.preview[0],
+                        doc,
+                        0xc1b,
+                        0,
+                        vec2(400.0, 300.0),
+                        super::preview::PreviewOpts::new(de),
+                    );
                 }
                 if !new_doc {
                     target.ui(ui, de, n, cur);
@@ -1757,7 +1765,7 @@ impl MrPdfApp {
                         *preview_target = sel[0];
                     }
                     *preview_target = (*preview_target).min(n.saturating_sub(1));
-                    self.page_preview(ui, 0, *preview_target, vec2(ui.available_width(), 300.0));
+                    self.page_preview(ui, 0, *preview_target, vec2(ui.available_width(), 300.0), false);
                     page_strip(ui, preview_target, n);
                     targets.ui_titled(
                         ui,
@@ -1821,6 +1829,7 @@ impl MrPdfApp {
                             0x5ce,
                             (*preview_source).min(source_pages.saturating_sub(1)),
                             vec2(ui.available_width(), 300.0),
+                            super::preview::PreviewOpts::new(de),
                         );
                         page_strip(ui, preview_source, source_pages);
                     } else {

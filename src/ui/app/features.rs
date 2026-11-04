@@ -93,37 +93,62 @@ impl MrPdfApp {
         }
     }
 
+    /// "Per E-Mail senden": a new message in the default e-mail program
+    /// with the document attached (its current state).
     fn send_email(&mut self, ctx: &Context) {
-        let Some(tab) = self.active_tab() else { return };
+        let Some(tab) = self.tabs.get_mut(self.active) else { return };
         let name = tab.doc.display_name().to_string();
-        let path = tab.doc.path().map(|p| p.display().to_string()).unwrap_or_default();
-        let subject = mail_subject(&self.settings.email_subject, &name);
-        ctx.open_url(egui::OpenUrl::new_tab(format!("mailto:?subject={subject}")));
-        let text = if self.german() {
-            format!("Das E-Mail-Programm wurde geöffnet. Bitte hängen Sie die Datei an:\n{path}")
-        } else {
-            format!("Your e-mail program was opened. Please attach the file:\n{path}")
+        let file = match mail_file(tab) {
+            Ok(f) => f,
+            Err(err) => {
+                self.show_error(&err);
+                return;
+            }
         };
-        self.info(Cmd::Email.label(self.settings.language), text);
+        let subject = mail_subject(&self.settings.email_subject, &name);
+        self.mail(ctx, Cmd::Email, &subject, vec![file]);
     }
 
-    /// "Alle Dokumente per E-Mail senden": the mail program with a list of
-    /// all saved documents to attach.
+    /// "Alle Dokumente per E-Mail senden": one message with all open
+    /// documents attached.
     fn send_email_all(&mut self, ctx: &Context) {
-        let paths: Vec<String> =
-            self.tabs.iter().filter_map(|t| t.doc.path()).map(|p| p.display().to_string()).collect();
-        if paths.is_empty() {
+        let mut files = Vec::new();
+        for tab in &mut self.tabs {
+            match mail_file(tab) {
+                Ok(f) => files.push(f),
+                Err(err) => {
+                    self.show_error(&err);
+                    return;
+                }
+            }
+        }
+        if files.is_empty() {
             return;
         }
-        let subject = if self.german() { "PDF-Dokumente" } else { "PDF_documents" };
-        ctx.open_url(egui::OpenUrl::new_tab(format!("mailto:?subject={}", subject.replace(' ', "%20"))));
-        let list = paths.join("\n");
-        let text = if self.german() {
-            format!("Das E-Mail-Programm wurde geöffnet. Bitte hängen Sie diese Dateien an:\n{list}")
+        let subject = if self.german() { "PDF-Dokumente" } else { "PDF documents" };
+        self.mail(ctx, Cmd::EmailAll, subject, files);
+    }
+
+    /// Hands the message to the mail program and tells the user what to
+    /// expect.
+    pub(super) fn mail(&mut self, ctx: &Context, cmd: Cmd, subject: &str, files: Vec<std::path::PathBuf>) {
+        let list = files.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join("\n");
+        let de = self.german();
+        if crate::mail::compose(subject, files) {
+            let text = if de {
+                "Das E-Mail-Programm wird mit einer neuen Nachricht geöffnet, die Datei ist angehängt."
+            } else {
+                "Your e-mail program opens a new message with the file attached."
+            };
+            self.set_status(ctx, text);
         } else {
-            format!("Your e-mail program was opened. Please attach these files:\n{list}")
-        };
-        self.info(Cmd::EmailAll.label(self.settings.language), text);
+            let text = if de {
+                format!("Das E-Mail-Programm wurde geöffnet. Bitte hängen Sie an:\n{list}")
+            } else {
+                format!("Your e-mail program was opened. Please attach:\n{list}")
+            };
+            self.info(cmd.label(self.settings.language), text);
+        }
     }
 
     /// Canvas events of the newer tools.
@@ -315,27 +340,40 @@ pub(super) fn reveal_in_file_manager(path: &std::path::Path) {
     }
 }
 
-/// Subject of "Per E-Mail senden": `pattern` with %[FileName] replaced,
-/// percent-encoded for a mailto address.
+/// Subject of "Per E-Mail senden": `pattern` with %[FileName] replaced
+/// (plain text, at most 200 characters, no control characters).
 pub(super) fn mail_subject(pattern: &str, file_name: &str) -> String {
-    let text = pattern.replace("%[FileName]", file_name);
-    let mut out = String::new();
-    for b in text.chars().filter(|c| !c.is_control()).take(200).collect::<String>().bytes() {
-        if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
-            out.push(b as char);
-        } else {
-            out.push_str(&format!("%{b:02X}"));
-        }
+    pattern.replace("%[FileName]", file_name).chars().filter(|c| !c.is_control()).take(200).collect()
+}
+
+/// The file to attach for a document: the file itself when it is saved
+/// and unchanged, else a copy of the current state in the temporary folder
+/// (named like the document).
+fn mail_file(tab: &mut crate::ui::tab::DocTab) -> crate::Result<std::path::PathBuf> {
+    if let Some(p) = tab.doc.path()
+        && !tab.doc.is_modified()
+    {
+        return Ok(p.to_path_buf());
     }
-    out
+    let dir = std::env::temp_dir().join("mrpdf-mail").join(tab.id.to_string());
+    let mut name = tab.doc.display_name().replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_");
+    if !name.to_lowercase().ends_with(".pdf") {
+        name.push_str(".pdf");
+    }
+    let path = dir.join(name);
+    let bytes = tab.doc.to_bytes()?;
+    std::fs::create_dir_all(&dir)
+        .and_then(|()| std::fs::write(&path, bytes))
+        .map_err(|e| crate::Error::Io { path: path.clone(), source: e })?;
+    Ok(path)
 }
 
 #[cfg(test)]
 mod tests {
     #[test]
     fn mail_subject_pattern() {
-        assert_eq!(super::mail_subject("%[FileName]", "a b.pdf"), "a%20b.pdf");
-        assert_eq!(super::mail_subject("Datei: %[FileName]", "ä"), "Datei%3A%20%C3%A4");
-        assert_eq!(super::mail_subject("x&y=\n", "n"), "x%26y%3D");
+        assert_eq!(super::mail_subject("%[FileName]", "a b.pdf"), "a b.pdf");
+        assert_eq!(super::mail_subject("Datei: %[FileName]", "ä"), "Datei: ä");
+        assert_eq!(super::mail_subject("x&y=\n", "n"), "x&y=");
     }
 }

@@ -368,7 +368,15 @@ impl MrPdfApp {
                                 }
                             }
                             if let Some((_, d)) = &self.dialog_doc {
-                                doc_preview(ui, &mut self.preview[0], d, 0x40b, 0, vec2(380.0, 420.0));
+                                doc_preview(
+                                    ui,
+                                    &mut self.preview[0],
+                                    d,
+                                    0x40b,
+                                    0,
+                                    vec2(380.0, 420.0),
+                                    super::preview::PreviewOpts::new(de),
+                                );
                             }
                             let first = chunk.first().map_or(0, |p| p + 1);
                             let last = chunk.last().map_or(0, |p| p + 1);
@@ -707,9 +715,9 @@ impl MrPdfApp {
                             .wrap_mode(egui::TextWrapMode::Extend),
                         );
                         *page = (*page).min(n.saturating_sub(1));
-                        if let Some(area) = self.page_preview(ui, 0, *page, vec2(380.0, 440.0)) {
+                        if let Some(area) = self.page_preview(ui, 0, *page, vec2(380.0, 440.0), true) {
                             let rect = area.rect;
-                            let painter = ui.painter();
+                            let painter = &area.painter;
                             for (i, line) in lines.iter().enumerate() {
                                 let color = if *selected == Some(i) {
                                     Color32::from_rgb(230, 60, 40)
@@ -989,12 +997,20 @@ impl MrPdfApp {
                                 }
                             }
                             if let Some((_, d)) = &self.dialog_doc {
-                                doc_preview(ui, &mut self.preview[0], d, 0x0e1, 0, vec2(380.0, 470.0));
+                                doc_preview(
+                                    ui,
+                                    &mut self.preview[0],
+                                    d,
+                                    0x0e1,
+                                    0,
+                                    vec2(380.0, 470.0),
+                                    super::preview::PreviewOpts::new(de),
+                                );
                                 shown = true;
                             }
                         }
                         if !shown {
-                            self.page_preview(ui, 0, *page, vec2(380.0, 470.0));
+                            self.page_preview(ui, 0, *page, vec2(380.0, 470.0), false);
                         }
                         page_strip(ui, page, n);
                     });

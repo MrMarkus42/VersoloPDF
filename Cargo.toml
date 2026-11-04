@@ -54,8 +54,11 @@ windows-sys = { version = "0.61", features = [
     "Win32_Storage_FileSystem",
     "Win32_Storage_Xps",
     "Win32_System_IO",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Mapi",
     "Win32_System_Pipes",
     "Win32_UI_Controls_Dialogs",
+    "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
 

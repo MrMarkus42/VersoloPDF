@@ -29,6 +29,7 @@ pub mod forms;
 pub mod geometry;
 pub mod import;
 pub mod instance;
+pub mod mail;
 pub mod marks;
 pub mod media;
 pub mod model;

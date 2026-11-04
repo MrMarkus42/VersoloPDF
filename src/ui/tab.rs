@@ -96,6 +96,13 @@ pub enum Interaction {
         /// Shift held: add to the selection.
         add: bool,
     },
+    /// Polygon tools: a click that moved a little (or a drag) still sets
+    /// points: `start` if no point is set yet, then `current` (view space).
+    Vertex {
+        page: usize,
+        start: PointF,
+        current: PointF,
+    },
     /// Eraser: annotations touched so far.
     Erase {
         page: usize,

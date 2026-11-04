@@ -47,11 +47,13 @@ const TABS: [&str; 12] = [
 ];
 
 /// Buttons that act outside MrPDF or would end the test.
-const NOT_CLICKED: [&str; 18] = [
+const NOT_CLICKED: [&str; 20] = [
     "Drucken",
     "Alle drucken",
     "E-Mail",
     "Per E-Mail",
+    "Alle Dokumente per E-Mail",
+    "Formulardaten per E-Mail",
     "Ordner öffnen",
     "Handbuch",
     "Support",
@@ -460,6 +462,255 @@ fn to_screen(h: &Harness<'_, MrPdfApp>, x: f32, y: f32) -> Pos2 {
 fn first_rect(h: &mut Harness<'_, MrPdfApp>) -> Option<RectF> {
     let tab = h.state_mut().active_tab_mut()?;
     tab.annotations(0).first().map(|a| a.rect.normalized())
+}
+
+/// Polygon tools ("Wolke", "Vieleck", "Streckenzug") drawn the way people
+/// click: a slow double click at the end, clicks that slip by a few pixels,
+/// a click back on the first corner.
+#[test]
+#[ignore = "long; run explicitly"]
+fn polygon_gestures() {
+    use mrpdf::ui::app::commands::Cmd;
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let corners = [pos2(450.0, 600.0), pos2(650.0, 600.0), pos2(550.0, 710.0)];
+    let mut failed = Vec::new();
+    let mut n = 0;
+    for tool in [Tool::Cloud, Tool::Polygon, Tool::Polyline] {
+        for way in ["langsamer Doppelklick", "verrutschte Klicks", "Klick auf ersten Punkt"] {
+            if way == "Klick auf ersten Punkt" && tool == Tool::Polyline {
+                continue;
+            }
+            n += 1;
+            let file = dir.path().join(format!("P{n}.pdf"));
+            std::fs::write(&file, common::text_pdf(1)).unwrap();
+            let mut h = harness(file);
+            let ctx = h.ctx.clone();
+            h.state_mut().run(&ctx, Cmd::Tool(tool));
+            h.run_steps(3);
+            for p in corners {
+                if way == "verrutschte Klicks" {
+                    drag(&mut h, p, p + egui::vec2(9.0, 7.0));
+                } else {
+                    click(&mut h, p);
+                }
+                h.run_steps(30);
+            }
+            match way {
+                "Klick auf ersten Punkt" => click(&mut h, corners[0] + egui::vec2(2.0, 1.0)),
+                _ => {
+                    // Second click of a slow double click on the last corner.
+                    let last = if way == "verrutschte Klicks" {
+                        corners[2] + egui::vec2(9.0, 7.0)
+                    } else {
+                        corners[2]
+                    };
+                    click(&mut h, last);
+                }
+            }
+            h.run_steps(5);
+            let count = h.state_mut().active_tab_mut().unwrap().annotations(0).len();
+            let ok = count == 1;
+            println!("{tool:?} / {way}: {count} Anmerkung(en)");
+            if let Ok(img) = h.render() {
+                let _ = img.save(out_dir().join(format!("polygon-{n}.png")));
+            }
+            if !ok {
+                failed.push(format!("{tool:?} / {way}"));
+            }
+        }
+    }
+    assert!(failed.is_empty(), "nicht gezeichnet: {failed:?}");
+}
+
+/// Hash of the pixels in `r` (screen points).
+fn region_hash(h: &mut Harness<'_, MrPdfApp>, r: Rect) -> u64 {
+    use std::hash::{Hash, Hasher};
+    h.event(egui::Event::PointerGone);
+    h.run_steps(3);
+    let Ok(img) = h.render() else { return 0 };
+    let ppp = img.width() as f32 / h.ctx.content_rect().width();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    let (x0, x1) = ((r.min.x * ppp) as u32, ((r.max.x * ppp) as u32).min(img.width()));
+    let (y0, y1) = ((r.min.y * ppp) as u32, ((r.max.y * ppp) as u32).min(img.height()));
+    for y in y0..y1 {
+        for x in x0..x1 {
+            img.get_pixel(x, y).0.hash(&mut hasher);
+        }
+    }
+    hasher.finish()
+}
+
+/// Screen area of the dialog preview: below the "Vorschau …" heading.
+fn preview_rect(h: &Harness<'_, MrPdfApp>) -> Rect {
+    let text = |n: &egui_kittest::Node<'_>| {
+        let a = n.accesskit_node();
+        a.label().or_else(|| a.value()).unwrap_or_default().to_string()
+    };
+    let label = h
+        .get_all_by_role(Role::Label)
+        .find(|n| text(n).starts_with("Vorschau"))
+        .map(|n| n.rect())
+        .unwrap_or_else(|| {
+            let all: Vec<String> = h.get_all_by_role(Role::Label).map(|n| text(&n)).collect();
+            panic!("Vorschau-Überschrift fehlt; Beschriftungen: {all:?}")
+        });
+    Rect::from_min_size(pos2(label.min.x, label.max.y + 6.0), egui::vec2(760.0, 120.0))
+}
+
+/// Dialog previews follow the settings and can be zoomed: background
+/// colour, header text, mouse wheel, double click. Screenshots in
+/// target/mouse/preview-*.png.
+#[test]
+#[ignore = "long; run explicitly"]
+fn dialog_previews() {
+    use mrpdf::ui::app::commands::Cmd;
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let mut failed = Vec::new();
+    let shot = |h: &mut Harness<'_, MrPdfApp>, name: &str| {
+        if let Ok(img) = h.render() {
+            let _ = img.save(out_dir().join(format!("preview-{name}.png")));
+        }
+    };
+
+    // Header and footer: typed text appears in the preview.
+    let file = dir.path().join("K.pdf");
+    std::fs::write(&file, common::text_pdf(2)).unwrap();
+    let mut h = harness(file);
+    let ctx = h.ctx.clone();
+    h.state_mut().run(&ctx, Cmd::HeaderFooter);
+    h.run_steps(5);
+    let area = preview_rect(&h);
+    let before = region_hash(&mut h, area);
+    // The first text field of the dialog (not "Schnellstart" at the top).
+    let field = h
+        .get_all_by_role(Role::MultilineTextInput)
+        .chain(h.get_all_by_role(Role::TextInput))
+        .map(|n| n.rect().center())
+        .filter(|p| p.y > 100.0 && p.y < 780.0)
+        .min_by(|a, b| a.y.total_cmp(&b.y).then(a.x.total_cmp(&b.x)));
+    if let Some(f) = field {
+        click(&mut h, f);
+        input(&mut h, Event::Text("Kopfzeile Maustest".into()));
+        h.run_steps(8);
+    }
+    shot(&mut h, "header");
+    let after = region_hash(&mut h, area);
+    println!("Kopf-/Fußzeile: Textfeld {field:?}, Vorschau geändert: {}", before != after);
+    if field.is_none() || before == after {
+        failed.push("Kopf-/Fußzeile: Vorschau folgt dem Text nicht");
+    }
+    // Zoom: wheel over the preview, then double click back to the page.
+    let centre = area.min + egui::vec2(120.0, 60.0);
+    input(&mut h, Event::PointerMoved(centre));
+    h.step();
+    input(
+        &mut h,
+        Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, 240.0),
+            modifiers: Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        },
+    );
+    // egui spreads the wheel over several frames.
+    h.run_steps(60);
+    shot(&mut h, "zoomed");
+    let zoomed = region_hash(&mut h, area);
+    println!("Zoom: Vorschau geändert: {}", zoomed != after);
+    if zoomed == after {
+        failed.push("Vorschau: Mausrad zoomt nicht");
+    }
+    input(&mut h, Event::PointerMoved(centre));
+    h.step();
+    // Both clicks in one frame: a test step lasts a quarter second, longer
+    // than egui allows between the clicks of a double click.
+    for _ in 0..2 {
+        input(&mut h, button(centre, true));
+        input(&mut h, button(centre, false));
+    }
+    h.step();
+    h.run_steps(8);
+    shot(&mut h, "dblclick");
+    let back = region_hash(&mut h, area);
+    println!("Doppelklick: wieder eingepasst: {}", back == after);
+    if back != after {
+        failed.push("Vorschau: Doppelklick passt nicht wieder ein");
+    }
+    drop(h);
+
+    // Watermark: typed text appears in the preview.
+    let file = dir.path().join("W.pdf");
+    std::fs::write(&file, common::text_pdf(1)).unwrap();
+    let mut h = harness(file);
+    let ctx = h.ctx.clone();
+    h.state_mut().run(&ctx, Cmd::Watermark);
+    h.run_steps(5);
+    let area = preview_rect(&h);
+    let before = region_hash(&mut h, area);
+    let field = h
+        .get_all_by_role(Role::MultilineTextInput)
+        .chain(h.get_all_by_role(Role::TextInput))
+        .map(|n| n.rect().center())
+        .filter(|p| p.y > 100.0 && p.y < 780.0)
+        .min_by(|a, b| a.y.total_cmp(&b.y).then(a.x.total_cmp(&b.x)));
+    if let Some(f) = field {
+        click(&mut h, f);
+        input(&mut h, Event::Text("ENTWURF".into()));
+        h.run_steps(8);
+    }
+    shot(&mut h, "watermark");
+    let after = region_hash(&mut h, area);
+    println!("Wasserzeichen: Vorschau geändert: {}", before != after);
+    if before == after {
+        failed.push("Wasserzeichen: Vorschau folgt dem Text nicht");
+    }
+    drop(h);
+
+    // Background colour: the picked colour appears in the preview.
+    let file = dir.path().join("B.pdf");
+    std::fs::write(&file, common::text_pdf(1)).unwrap();
+    let mut h = harness(file);
+    let ctx = h.ctx.clone();
+    h.state_mut().run(&ctx, Cmd::Background);
+    h.run_steps(5);
+    let area = preview_rect(&h);
+    let before = region_hash(&mut h, area);
+    // The colour button sits right of the "Farbe:" radio button.
+    let radio = h.get_all_by_label("Farbe:").next().map(|n| n.rect()).expect("Farbe:");
+    let button = h
+        .get_all_by_role(Role::Button)
+        .map(|n| n.rect())
+        .filter(|r| (r.center().y - radio.center().y).abs() < 8.0 && r.min.x > radio.max.x - 2.0)
+        .min_by(|a, b| a.min.x.total_cmp(&b.min.x));
+    let at = button.map_or(radio.right_center() + egui::vec2(20.0, 0.0), |r| r.center());
+    click(&mut h, at);
+    h.run_steps(5);
+    // Into the saturation/value square of the picker, below the button.
+    click(&mut h, at + egui::vec2(120.0, 200.0));
+    h.run_steps(5);
+    let rev = h.state_mut().active_tab_mut().unwrap().doc.revision();
+    // A click outside closes the picker.
+    click(&mut h, pos2(600.0, 640.0));
+    h.run_steps(5);
+    shot(&mut h, "background");
+    let after = region_hash(&mut h, area);
+    println!("Hintergrund: Vorschau geändert: {}", before != after);
+    if before == after {
+        failed.push("Hintergrund: Vorschau folgt der Farbe nicht");
+    }
+    let ok = h.get_all_by_label("OK").last().map(|n| n.rect().center());
+    if let Some(ok) = ok {
+        click(&mut h, ok);
+    }
+    h.run_steps(8);
+    let changed = h.state_mut().active_tab_mut().unwrap().doc.revision() != rev;
+    println!("Hintergrund: Dokument geändert: {changed}");
+    if !changed {
+        failed.push("Hintergrund: OK ändert das Dokument nicht");
+    }
+    assert!(failed.is_empty(), "{failed:?}");
 }
 
 /// The tools that need text under the mouse: "Textkorrektur" (select,

@@ -188,6 +188,7 @@ impl MrPdfApp {
                                         tab.id,
                                         tab.current_page,
                                         egui::vec2(96.0, 128.0),
+                                        super::preview::PreviewOpts::new(true).fixed(),
                                     );
                                 }
                                 ui.vertical(|ui| {

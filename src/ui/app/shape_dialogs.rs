@@ -437,7 +437,7 @@ impl MrPdfApp {
                         } else {
                             form.margins
                         };
-                        if let Some(area) = self.page_preview(ui, 0, *page, vec2(360.0, 460.0)) {
+                        if let Some(area) = self.page_preview(ui, 0, *page, vec2(360.0, 460.0), true) {
                             let r = area.rect;
                             let s = area.scale;
                             let crop = Rect::from_min_max(
@@ -445,7 +445,7 @@ impl MrPdfApp {
                                 r.max - vec2(margins[1] * s, margins[3] * s),
                             );
                             let shade = Color32::from_black_alpha(90);
-                            let painter = ui.painter();
+                            let painter = &area.painter;
                             for part in [
                                 Rect::from_min_max(r.min, egui::pos2(r.max.x, crop.min.y)),
                                 Rect::from_min_max(egui::pos2(r.min.x, crop.max.y), r.max),
@@ -767,7 +767,15 @@ impl MrPdfApp {
                                 ))
                                 .weak(),
                             );
-                            doc_preview(ui, &mut self.preview[0], d, 0x5e2, 0, vec2(360.0, 440.0));
+                            doc_preview(
+                                ui,
+                                &mut self.preview[0],
+                                d,
+                                0x5e2,
+                                0,
+                                vec2(360.0, 440.0),
+                                super::preview::PreviewOpts::new(de),
+                            );
                         }
                         page_strip(ui, page, n);
                     });
