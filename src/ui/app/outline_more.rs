@@ -174,8 +174,9 @@ impl MrPdfApp {
                     ui.end_row();
                 });
                 hint(ui, if de { "Gilt für alle Lesezeichen." } else { "Applies to all bookmarks." });
-                let (ok, cancel) = buttons(ui, t.ok, t.cancel);
-                if ok && !(prefix.is_empty() && suffix.is_empty()) {
+                let filled = !(prefix.is_empty() && suffix.is_empty());
+                let (ok, cancel) = super::dialogs::buttons_if(ui, t.ok, t.cancel, filled);
+                if ok {
                     let (p, s) = (prefix.clone(), suffix.clone());
                     action = Some(Box::new(move |app, ctx| {
                         let result = app.tab().map(|t| t.doc.map_bookmark_titles(|x| format!("{p}{x}{s}")));

@@ -392,8 +392,8 @@ impl MrPdfApp {
                     .weak()
                     .small(),
                 );
-                let (ok, cancel) = buttons(ui, t.ok, t.cancel);
-                if ok && !query.trim().is_empty() {
+                let (ok, cancel) = super::dialogs::buttons_if(ui, t.ok, t.cancel, !query.trim().is_empty());
+                if ok {
                     let query = query.clone();
                     let opts =
                         crate::model::SearchOptions { match_case: *match_case, whole_word: *whole_word };

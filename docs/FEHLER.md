@@ -9,7 +9,24 @@ Einstufung: **A** stürzt ab / Daten in Gefahr · **B** falsch oder unbedienbar 
 
 | Nr | Stufe | Fund | Lösung | Stand |
 |---|---|---|---|---|
+| F9 | B | Formen und Textfelder ließen sich nur verschieben, nicht in der Größe ändern; bei Linien, Pfeilen, Polygonen und Messungen ließen sich die Punkte nicht einzeln verschieben. Beim Maus-Rundgang gefunden | Eine ausgewählte Anmerkung zeigt Griffe: acht Quadrate am Rahmen (Rechteck, Oval, Wolke, Textfeld, Schreibmaschine, Beschreibung, Stempel, Stift) bzw. Kreise an jedem Punkt (Linie, Pfeil, Polylinie, Polygon, Messungen). Ziehen an einem Griff ändert Größe bzw. Punkt; Messwerte werden neu berechnet. Rückgängig geht in einem Schritt | behoben 2026-11-04 |
+| F10 | D | „Suchen und schwärzen“, „Lesezeichen umbenennen/hinzufügen“ und „Text zu Lesezeichen hinzufügen“: OK mit leerem Feld tat stillschweigend nichts | OK ist grau, solange nichts eingegeben ist (auch bei „Verweis erstellen“ und „Herunterladen“ mit ungültiger Adresse) | behoben 2026-11-04 |
 | F8 | B | Drucken mit „Keine Größenanpassung“: Die Seite wurde an die Ecke des **bedruckbaren Bereichs** gelegt statt an die Papierecke, also um den Druckerrand nach rechts und unten verschoben; rechts und unten fehlte etwas, selbst bei A4 auf A4. Bei Letter auf A4 (6 mm breiter) fehlte deutlich mehr. Die Vorschau zeigte das nicht erkennbar (die abgeschnittene Kante sah aus wie ein Seitenrand). Gemeldet von Mr. M | Seiten sitzen an der Papierecke (bzw. mittig); nur der unbedruckbare Druckerrand fällt weg. Die Vorschau zeichnet den bedruckbaren Bereich gestrichelt ein. Ragt eine Seite über das Papier hinaus, warnt der Dialog („Seite 1 ist größer als das Papier … es fehlen bis zu 6 mm in der Breite“) und bietet „Auf Druckbereich reduzieren“ an | behoben 2026-11-04; von Mr. M mit echtem Windows-Drucker bestätigt |
+
+## Maus-Prüfung vom 2026-11-04
+
+Jeder Knopf aller zwölf Menüreiter wurde mit der Maus angeklickt, jeder
+Eintrag jedes Aufklappmenüs ebenso, jedes Mal in einem frischen Fenster
+(`tests/mouse.rs`, 428 Klickfolgen). Dialoge wurden mit OK bestätigt,
+Werkzeuge auf der Seite benutzt. Für jede Anmerkungsart zusätzlich:
+anlegen, anklicken, verschieben, Größe/Punkt ändern, Entf, Strg+Z; für
+Textkorrektur und „Inhalt hervorheben“ Text markieren bzw. anklicken.
+
+Ergebnis: keine Abstürze, keine Fehlermeldungen; Funde F9 und F10. Alle
+Klicks „ohne sichtbare Wirkung“ ließen sich erklären (Zustand schon
+eingestellt, Dokument ohne Felder/Verweise, Dateiauswahl des Systems).
+Nicht geklickt: Drucken, E-Mail, Weblinks, Dateizuordnung, Vorlesen,
+Umbenennen/Verschieben/Papierkorb, Beenden.
 
 ## Prüfung vom 2026-11-04
 
@@ -53,6 +70,11 @@ Keine offenen Punkte aus dieser Prüfung.
   einen kleinen Bildschirm. Auf Linux ohne Desktop vorher
   `DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent/bus` setzen, sonst wartet
   der Datei-Dialog des Systems auf eine Eingabe.
+* `bash scripts/mouse.sh [Reiter,Reiter]` – Maus-Rundgang im Hintergrund
+  (Log `/tmp/mouse.log`, Bericht `target/mouse/report.md` und
+  `handling.md`); einzeln: `cargo test --release --test mouse <Name> --
+  --ignored --nocapture` mit `mouse_tour`, `annotation_handling`,
+  `text_tools`.
 * `MRPDF_TESTFILES=<Ordner> cargo test --release --test real_files -- --ignored --nocapture`
   – Messungen und Rundläufe mit echten Dateien.
 * `MRPDF_TESTFILES=<Ordner> cargo test --release --test robustness -- --include-ignored`

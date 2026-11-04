@@ -74,13 +74,18 @@ fn title_bar(ui: &mut Ui, bar: egui::Rect, title: &str) -> (Option<egui::Vec2>, 
 }
 
 pub(super) fn buttons(ui: &mut Ui, ok: &str, cancel: &str) -> (bool, bool) {
+    buttons_if(ui, ok, cancel, true)
+}
+
+/// Like [`buttons`], with OK (and Enter) only active while `enabled`.
+pub(super) fn buttons_if(ui: &mut Ui, ok: &str, cancel: &str, enabled: bool) -> (bool, bool) {
     let mut result = (false, false);
     ui.add_space(8.0);
     ui.horizontal(|ui| {
-        result.0 = ui.button(RichText::new(ok).strong()).clicked();
+        result.0 = ui.add_enabled(enabled, egui::Button::new(RichText::new(ok).strong())).clicked();
         result.1 = ui.button(cancel).clicked();
     });
-    let enter = ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift);
+    let enter = enabled && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift);
     let esc = ui.input(|i| i.key_pressed(egui::Key::Escape));
     (result.0 || enter, result.1 || esc)
 }
@@ -283,8 +288,8 @@ impl MrPdfApp {
                             if !valid {
                                 ui.colored_label(egui::Color32::from_rgb(200, 40, 40), t.link_blocked);
                             }
-                            let (ok, cancel) = buttons(ui, t.ok, t.cancel);
-                            if ok && valid {
+                            let (ok, cancel) = buttons_if(ui, t.ok, t.cancel, valid);
+                            if ok {
                                 let spec = if *to_page {
                                     crate::pdf_edit::LinkSpec::Page(target_page.saturating_sub(1) as usize)
                                 } else {
@@ -514,8 +519,8 @@ impl MrPdfApp {
                                     RichText::new(format!("{} {}", t.bookmark_target, *page + 1)).weak(),
                                 );
                             }
-                            let (ok, cancel) = buttons(ui, t.ok, t.cancel);
-                            if ok && !title.trim().is_empty() {
+                            let (ok, cancel) = buttons_if(ui, t.ok, t.cancel, !title.trim().is_empty());
+                            if ok {
                                 let title = title.trim().to_string();
                                 let (parent, path, page) = (parent.clone(), path.clone(), *page);
                                 action = Some(Box::new(move |app, ctx| match (parent, path) {
@@ -659,8 +664,8 @@ impl MrPdfApp {
                                     },
                                 );
                             }
-                            let (ok, cancel) = buttons(ui, t.ok, t.cancel);
-                            if ok && valid {
+                            let (ok, cancel) = buttons_if(ui, t.ok, t.cancel, valid);
+                            if ok {
                                 action = Some(Box::new(move |app, ctx| app.start_download(ctx, address)));
                                 outcome = Outcome::Close;
                             } else if cancel {

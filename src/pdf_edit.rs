@@ -77,6 +77,18 @@ pub struct AnnotUpdate {
     pub font_size: Option<f32>,
     /// Displacement in PDF space.
     pub translate: Option<(f32, f32)>,
+    /// New size or a moved point (handles of a selected comment).
+    pub reshape: Option<Reshape>,
+}
+
+/// Changing the shape of a comment with its handles.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Reshape {
+    /// New bounding box; all points are scaled from the old one into it.
+    Rect(RectF),
+    /// One point moved: an end of a line (0, 1) or a vertex of a polygon or
+    /// polyline.
+    Point { index: usize, to: PointF },
 }
 
 impl AnnotUpdate {
@@ -101,6 +113,11 @@ pub struct AnnotDetails {
     pub subject: String,
     /// True if MrPDF can regenerate the appearance of this annotation.
     pub restylable: bool,
+    /// Ends of a line, vertices of a polygon or polyline (PDF space).
+    pub points: Vec<PointF>,
+    /// A measurement ("Entfernung", "Umfang", "Fläche"): the text is the
+    /// measured value.
+    pub measure: bool,
 }
 
 /// Runs a closure that works on untrusted PDF structures and converts a
@@ -776,6 +793,14 @@ pub fn annotation_details(
             font_size: font_size_from_da(&da).unwrap_or(12.0),
             subject: string(dict, b"Subj").unwrap_or_default(),
             restylable: kind.is_some_and(can_regenerate),
+            points: match kind {
+                Some(AnnotKind::Line) => read_points(&numbers(dict.get(b"L").ok())),
+                Some(AnnotKind::Polygon | AnnotKind::Polyline) => {
+                    read_points(&numbers(dict.get(b"Vertices").ok()))
+                }
+                _ => Vec::new(),
+            },
+            measure: name(dict, b"IT").is_some_and(|it| it.ends_with("Dimension")),
         })
     })
 }
@@ -847,15 +872,29 @@ pub fn update_annotation(
             if let Some((dx, dy)) = update.translate {
                 translate_annotation(d, dx, dy);
             }
+            if let Some(reshape) = update.reshape {
+                reshape_annotation(d, reshape);
+            }
             d.set("M", Object::string_literal(now));
         }
 
         let dict = edit.object(annot_id)?.as_dict()?.clone();
         let kind = name(&dict, b"Subtype").map(|s| kind_from_subtype(&s));
-        let text_changed = update.contents.is_some() && kind == Some(AnnotKind::FreeText);
-        if (update.changes_style() || text_changed)
-            && let Some(input) = ap_input_from_dict(&dict)
+        let text_changed = update.contents.is_some() && matches!(kind, Some(AnnotKind::FreeText))
+            || update.contents.is_some() && name(&dict, b"IT").is_some_and(|it| it.ends_with("Dimension"));
+        if (update.changes_style() || text_changed || update.reshape.is_some())
+            && let Some(mut input) = ap_input_from_dict(&dict)
         {
+            // Lines and drawings: the box follows the new geometry.
+            if update.reshape.is_some()
+                && matches!(
+                    kind,
+                    Some(AnnotKind::Line | AnnotKind::Ink | AnnotKind::Polygon | AnnotKind::Polyline)
+                )
+            {
+                input.rect = appearance::required_rect(&input);
+                edit.dict_mut(annot_id)?.set("Rect", rect_array(&input.rect));
+            }
             set_appearance(&mut edit, annot_id, &input)?;
         }
         edit.finish()
@@ -882,6 +921,54 @@ fn translate_annotation(d: &mut Dictionary, dx: f32, dy: f32) {
     if let Ok(Object::Array(strokes)) = d.get_mut(b"InkList") {
         for stroke in strokes {
             shift_pairs(stroke);
+        }
+    }
+}
+
+/// Applies a new size or a moved point to an annotation dictionary.
+fn reshape_annotation(d: &mut Dictionary, reshape: Reshape) {
+    match reshape {
+        Reshape::Rect(new) => {
+            let new = new.normalized();
+            let Some(old) = read_rect(d) else { return };
+            if old.width() < 0.01 || old.height() < 0.01 || new.width() < 1.0 || new.height() < 1.0 {
+                return;
+            }
+            let (sx, sy) = (new.width() / old.width(), new.height() / old.height());
+            let map = |obj: &mut Object| {
+                if let Object::Array(items) = obj {
+                    for (i, item) in items.iter_mut().enumerate() {
+                        if let Some(v) = number(item) {
+                            *item = real(if i % 2 == 0 {
+                                new.x0 + (v - old.x0) * sx
+                            } else {
+                                new.y0 + (v - old.y0) * sy
+                            });
+                        }
+                    }
+                }
+            };
+            for key in [&b"QuadPoints"[..], b"L", b"Vertices", b"CL"] {
+                if let Ok(obj) = d.get_mut(key) {
+                    map(obj);
+                }
+            }
+            if let Ok(Object::Array(strokes)) = d.get_mut(b"InkList") {
+                for stroke in strokes {
+                    map(stroke);
+                }
+            }
+            d.set("Rect", rect_array(&new));
+        }
+        Reshape::Point { index, to } => {
+            for key in [&b"L"[..], b"Vertices"] {
+                if let Ok(Object::Array(items)) = d.get_mut(key)
+                    && index * 2 + 1 < items.len()
+                {
+                    items[index * 2] = real(to.x);
+                    items[index * 2 + 1] = real(to.y);
+                }
+            }
         }
     }
 }

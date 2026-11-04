@@ -624,6 +624,12 @@ impl MrPdfApp {
                     tab.doc.move_annotations(annot.page, &indices, dx, dy)
                 });
             }
+            CanvasEvent::Reshape { annot, reshape, contents } => {
+                self.edit(ctx, |tab| {
+                    let update = AnnotUpdate { reshape: Some(reshape), contents, ..AnnotUpdate::default() };
+                    tab.doc.update_annotation(annot.page, annot.index, &update)
+                });
+            }
             CanvasEvent::OpenUri(uri) => {
                 use crate::ui::settings::{LinkPolicy, url_host};
                 let trusted = url_host(&uri).is_some_and(|h| self.settings.trusted_hosts.contains(&h));

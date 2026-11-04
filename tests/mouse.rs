@@ -1,0 +1,699 @@
+//! Mouse tour: clicks every button of every ribbon tab (and every entry of
+//! the drop-down menus they open) with the mouse, in a fresh window with a
+//! sample document each time, and checks what happens:
+//!
+//! * a tool: it is used on the page (drag, click or vertices) and a new
+//!   comment must appear (text asked for is typed in),
+//! * a dialog: OK is clicked and no error may follow,
+//! * otherwise the effect on the document is noted.
+//!
+//! Buttons acting outside MrPDF (printing, e-mail, files, web pages) are
+//! not clicked. The report goes to `target/mouse/report.md`.
+//!
+//! Run: `MRPDF_MOUSE_TABS=Start,Anmerkungen cargo test --release --test mouse
+//! -- --ignored --nocapture` (all tabs without the variable).
+
+mod common;
+
+use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::path::PathBuf;
+
+use egui::accesskit::Role;
+use egui::{Event, Key, Modifiers, PointerButton, Pos2, Rect, pos2};
+use egui_kittest::Harness;
+use egui_kittest::kittest::{NodeT, Queryable};
+use mrpdf::geometry::RectF;
+use mrpdf::model::{AnnotKind, AnnotStyle, Rgba};
+use mrpdf::pdf_edit::NewAnnotation;
+use mrpdf::ui::MrPdfApp;
+use mrpdf::ui::app::Dialog;
+use mrpdf::ui::i18n::Language;
+use mrpdf::ui::settings::Settings;
+use mrpdf::ui::tools::{Gesture, Tool};
+
+const TABS: [&str; 12] = [
+    "Start",
+    "Ansicht",
+    "Anmerkungen",
+    "Schützen",
+    "Formular",
+    "Dokumentaufbau",
+    "Umwandeln",
+    "Teilen",
+    "Überprüfen",
+    "Barrierefreiheit",
+    "Lesezeichen",
+    "Hilfe",
+];
+
+/// Buttons that act outside MrPDF or would end the test.
+const NOT_CLICKED: [&str; 18] = [
+    "Drucken",
+    "Alle drucken",
+    "E-Mail",
+    "Per E-Mail",
+    "Ordner öffnen",
+    "Handbuch",
+    "Support",
+    "Problem melden",
+    "Nach Updates suchen",
+    "Nach neuer Version suchen",
+    "Startseite",
+    "Homepage",
+    "Dateizuordnung",
+    "Vorlesen",
+    "Beenden",
+    "Umbenennen",
+    "Verschieben in",
+    "In den Papierkorb",
+];
+
+fn out_dir() -> PathBuf {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/mouse");
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+fn harness(file: PathBuf) -> Harness<'static, MrPdfApp> {
+    let settings = Settings {
+        language: Language::German,
+        author: "Tester".into(),
+        backstage_at_start: false,
+        ..Settings::default()
+    };
+    let mut h =
+        Harness::builder().with_size(egui::vec2(1280.0, 820.0)).with_max_steps(64).wgpu().build_eframe(
+            move |cc| {
+                let mut app = MrPdfApp::with_settings(&cc.egui_ctx, settings, vec![file]);
+                app.set_recovery_dir(None);
+                app
+            },
+        );
+    h.run_steps(6);
+    h
+}
+
+fn input(h: &mut Harness<'_, MrPdfApp>, e: Event) {
+    h.input_mut().events.push(e);
+}
+
+fn button(pos: Pos2, pressed: bool) -> Event {
+    Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE }
+}
+
+fn click(h: &mut Harness<'_, MrPdfApp>, at: Pos2) {
+    input(h, Event::PointerMoved(at));
+    h.step();
+    input(h, button(at, true));
+    h.step();
+    input(h, button(at, false));
+    h.run_steps(5);
+}
+
+fn drag(h: &mut Harness<'_, MrPdfApp>, from: Pos2, to: Pos2) {
+    input(h, Event::PointerMoved(from));
+    h.step();
+    input(h, button(from, true));
+    h.step();
+    for i in 1..=8 {
+        input(h, Event::PointerMoved(from + (to - from) * (i as f32 / 8.0)));
+        h.step();
+    }
+    input(h, button(to, false));
+    h.run_steps(5);
+}
+
+fn key(h: &mut Harness<'_, MrPdfApp>, k: Key) {
+    h.key_press(k);
+    h.run_steps(3);
+}
+
+/// Enabled buttons with a name; with `ribbon` only those in the ribbon.
+fn all_buttons(h: &Harness<'_, MrPdfApp>, ribbon: bool) -> Vec<(String, Rect)> {
+    h.get_all_by_role(Role::Button)
+        .filter(|n| !n.accesskit_node().is_disabled())
+        .filter_map(|n| {
+            let label = n.accesskit_node().label()?.trim().to_string();
+            let r = n.rect();
+            let in_ribbon = r.min.y > 55.0 && r.max.y < 165.0;
+            (!label.is_empty() && (!ribbon || in_ribbon)).then_some((label, r))
+        })
+        .collect()
+}
+
+fn buttons(h: &Harness<'_, MrPdfApp>) -> Vec<(String, Rect)> {
+    all_buttons(h, true)
+}
+
+/// Buttons that are new compared with `before` (the entries of a menu that
+/// just opened).
+fn new_buttons(h: &Harness<'_, MrPdfApp>, before: &[(String, Rect)]) -> Vec<(String, Rect)> {
+    all_buttons(h, false)
+        .into_iter()
+        .filter(|(l, r)| !before.iter().any(|(bl, br)| bl == l && br.center().distance(r.center()) < 2.0))
+        .collect()
+}
+
+/// State used to see what a click did.
+#[derive(Clone, PartialEq)]
+struct Snap {
+    revision: u64,
+    pages: usize,
+    comments: usize,
+    tool: Tool,
+    zoom: String,
+    /// Hash of the window below the ribbon (pages, panels, status bar).
+    picture: u64,
+}
+
+/// Hash of the rendered window below the ribbon, pointer moved away so no
+/// hover effect or tooltip counts as a change.
+fn picture(h: &mut Harness<'_, MrPdfApp>) -> u64 {
+    use std::hash::{Hash, Hasher};
+    h.event(egui::Event::PointerGone);
+    h.run_steps(3);
+    let Ok(img) = h.render() else { return 0 };
+    let ppp = img.width() as f32 / h.ctx.content_rect().width();
+    let top = (170.0 * ppp) as usize * img.width() as usize * 4;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    img.as_raw()[top.min(img.as_raw().len())..].hash(&mut hasher);
+    hasher.finish()
+}
+
+fn snap(h: &mut Harness<'_, MrPdfApp>) -> Snap {
+    let picture = picture(h);
+    let tool = h.state().tool();
+    let tab = h.state_mut().active_tab_mut();
+    let (revision, pages, comments, zoom) = match tab {
+        Some(t) => {
+            let comments = (0..t.doc.page_count()).map(|p| t.annotations(p).len()).sum();
+            (t.doc.revision(), t.doc.page_count(), comments, format!("{:.3}", t.zoom))
+        }
+        None => (0, 0, 0, String::new()),
+    };
+    Snap { revision, pages, comments, tool, zoom, picture }
+}
+
+fn dialog_name(h: &Harness<'_, MrPdfApp>) -> Option<String> {
+    let d = h.state().dialog()?;
+    let text = format!("{d:?}");
+    Some(text.split([' ', '{', '(']).next().unwrap_or("").to_string())
+}
+
+fn error_text(h: &Harness<'_, MrPdfApp>) -> Option<String> {
+    match h.state().dialog() {
+        Some(Dialog::Message { title, text }) if title == "Fehler" => Some(text.replace('\n', " ")),
+        _ => None,
+    }
+}
+
+/// Uses the active tool on the page; returns a description.
+fn use_tool(h: &mut Harness<'_, MrPdfApp>, tool: Tool) -> String {
+    let before = snap(h);
+    match tool.gesture() {
+        // Over the first text line of the sample page.
+        Gesture::TextMarkup => drag(h, pos2(352.0, 392.0), pos2(612.0, 392.0)),
+        Gesture::Rect | Gesture::Line | Gesture::Freehand => drag(h, pos2(450.0, 600.0), pos2(650.0, 700.0)),
+        Gesture::Click => click(h, pos2(700.0, 650.0)),
+        Gesture::Vertices => {
+            for p in [pos2(450.0, 600.0), pos2(650.0, 600.0), pos2(550.0, 710.0)] {
+                click(h, p);
+            }
+            key(h, Key::Enter);
+        }
+        Gesture::None => return "Werkzeug ohne Zeichnen".into(),
+    }
+    // Text asked for: type it and confirm.
+    if matches!(h.state().dialog(), Some(Dialog::TextInput { .. })) {
+        input(h, Event::Text("Maustest".into()));
+        h.run_steps(2);
+        if let Some(ok) = h.query_all_by_label("OK").last() {
+            ok.click();
+        }
+        h.run_steps(5);
+    }
+    let after = snap(h);
+    if let Some(e) = error_text(h) {
+        return format!("**Fehler beim Zeichnen**: {e}");
+    }
+    if after.comments > before.comments {
+        "zeichnet ok".into()
+    } else if after.revision != before.revision {
+        "Dokument geändert".into()
+    } else if let Some(d) = dialog_name(h) {
+        format!("öffnet {d}")
+    } else {
+        "**nichts entstanden**".into()
+    }
+}
+
+/// What a click on `target` did; may continue with OK or a tool use.
+fn outcome(h: &mut Harness<'_, MrPdfApp>, before: &Snap, shots: &str) -> String {
+    if let Some(e) = error_text(h) {
+        return format!("**Fehlermeldung**: {e}");
+    }
+    if let Some(d) = dialog_name(h) {
+        if let Ok(img) = h.render() {
+            let _ = img.save(out_dir().join(format!("{shots}-dialog.png")));
+        }
+        if d == "Print" {
+            return "Dialog Print (Drucken nicht geklickt)".into();
+        }
+        let oks: Vec<Rect> = h
+            .get_all_by_role(Role::Button)
+            .filter(|n| n.accesskit_node().label().as_deref() == Some("OK"))
+            .map(|n| (n.rect(), n.accesskit_node().is_disabled()))
+            .filter(|(_, disabled)| !disabled)
+            .map(|(r, _)| r)
+            .collect();
+        let Some(ok) = oks.last().copied() else { return format!("Dialog {d} (kein OK frei)") };
+        let mid = snap(h);
+        click(h, ok.center());
+        h.run_steps(5);
+        let after = snap(h);
+        if let Some(e) = error_text(h) {
+            return format!("Dialog {d} → OK → **Fehlermeldung**: {e}");
+        }
+        let still = dialog_name(h);
+        let effect = if after.revision != mid.revision {
+            "Dokument geändert"
+        } else if still.as_deref() == Some(d.as_str()) {
+            "**Dialog bleibt offen**"
+        } else {
+            "ohne Änderung"
+        };
+        return format!("Dialog {d} → OK → {effect}");
+    }
+    let now = snap(h);
+    if now.tool != before.tool {
+        let tool = now.tool;
+        // Tools whose result is not a comment.
+        match tool {
+            Tool::Snapshot
+            | Tool::SelectText
+            | Tool::SelectAnnot
+            | Tool::SelectFields
+            | Tool::EditText
+            | Tool::EditObjects
+            | Tool::Hand
+            | Tool::Loupe
+            | Tool::DynamicZoom
+            | Tool::Eraser => {
+                return format!("Werkzeug {tool:?} gewählt");
+            }
+            Tool::Zoom => {
+                click(h, pos2(640.0, 450.0));
+                let changed = snap(h).zoom != now.zoom;
+                return format!(
+                    "Werkzeug Zoom: {}",
+                    if changed { "vergrößert" } else { "**vergrößert nicht**" }
+                );
+            }
+            _ => {}
+        }
+        let used = use_tool(h, tool);
+        if let Ok(img) = h.render() {
+            let _ = img.save(out_dir().join(format!("{shots}-tool.png")));
+        }
+        return format!("Werkzeug {tool:?}: {used}");
+    }
+    if now.revision != before.revision {
+        format!(
+            "Dokument geändert (Seiten {} → {}, Kommentare {} → {})",
+            before.pages, now.pages, before.comments, now.comments
+        )
+    } else if now.zoom != before.zoom {
+        "Ansicht geändert".into()
+    } else if now.picture != before.picture {
+        "Anzeige geändert".into()
+    } else {
+        "keine sichtbare Wirkung".into()
+    }
+}
+
+fn skipped(label: &str) -> bool {
+    NOT_CLICKED.iter().any(|s| label.starts_with(s))
+}
+
+/// A fresh window with the sample; a selected comment for the comment
+/// commands.
+fn fresh(dir: &std::path::Path, n: usize) -> Harness<'static, MrPdfApp> {
+    let file = dir.join(format!("Beispiel{n}.pdf"));
+    std::fs::write(&file, common::text_pdf(3)).unwrap();
+    let mut h = harness(file);
+    let tab = h.state_mut().active_tab_mut().expect("document open");
+    let style = AnnotStyle { color: Rgba::RED, width: 2.0, author: "Tester".into(), ..AnnotStyle::default() };
+    let mut square = NewAnnotation::new(AnnotKind::Square, style);
+    square.rect = RectF::new(100.0, 100.0, 200.0, 180.0);
+    tab.doc.add_annotation(0, &square).unwrap();
+    h.run_steps(3);
+    h
+}
+
+fn open_tab(h: &mut Harness<'_, MrPdfApp>, tab: &str) {
+    if let Some(n) = h.get_all_by_label(tab).next() {
+        n.click();
+    }
+    h.run_steps(4);
+}
+
+#[test]
+#[ignore = "long; run explicitly"]
+fn mouse_tour() {
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let wanted: Vec<String> = std::env::var("MRPDF_MOUSE_TABS")
+        .map(|v| v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
+        .unwrap_or_default();
+    let mut lines =
+        vec!["| Reiter | Knopf | Eintrag | Ergebnis |".to_string(), "|---|---|---|---|".to_string()];
+    let mut problems = 0;
+    let mut n = 0;
+    for tab in TABS.iter().filter(|t| wanted.is_empty() || wanted.iter().any(|w| w == *t)) {
+        let mut h = fresh(dir.path(), n);
+        open_tab(&mut h, tab);
+        let list = buttons(&h);
+        drop(h);
+        for (i, (label, _)) in list.iter().enumerate() {
+            if skipped(label) {
+                lines.push(format!("| {tab} | {label} | | nicht geklickt (wirkt außerhalb) |"));
+                continue;
+            }
+            // The button itself.
+            n += 1;
+            let mut h = fresh(dir.path(), n);
+            open_tab(&mut h, tab);
+            let Some((_, rect)) = buttons(&h).get(i).cloned() else { continue };
+            let before = snap(&mut h);
+            let base = all_buttons(&h, false);
+            let shots = format!("{}-{i:02}", tab.to_lowercase());
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                click(&mut h, rect.center());
+                let menu = new_buttons(&h, &base);
+                let opened_menu =
+                    egui::Popup::is_any_open(&h.ctx) && !menu.is_empty() && h.state().dialog().is_none();
+                if opened_menu {
+                    if let Ok(img) = h.render() {
+                        let _ = img.save(out_dir().join(format!("{shots}-menu.png")));
+                    }
+                    (format!("Menü mit {} Einträgen", menu.len()), menu.into_iter().map(|(l, _)| l).collect())
+                } else {
+                    (outcome(&mut h, &before, &shots), Vec::new())
+                }
+            }));
+            let (text, entries) = match result {
+                Ok(r) => r,
+                Err(_) => ("**ABSTURZ**".to_string(), Vec::new()),
+            };
+            if text.contains("**") {
+                problems += 1;
+            }
+            println!("{tab} / {label}: {text}");
+            lines.push(format!("| {tab} | {label} | | {} |", text.replace('|', "/")));
+            // Every entry of the drop-down menu.
+            for (j, entry) in entries.iter().enumerate() {
+                if skipped(entry) {
+                    lines.push(format!("| {tab} | {label} | {entry} | nicht geklickt (wirkt außerhalb) |"));
+                    continue;
+                }
+                n += 1;
+                let mut h = fresh(dir.path(), n);
+                open_tab(&mut h, tab);
+                let Some((_, rect)) = buttons(&h).get(i).cloned() else { continue };
+                let base = all_buttons(&h, false);
+                // Picture before the menu opens; the open menu covers the page.
+                let pic = picture(&mut h);
+                click(&mut h, rect.center());
+                let Some((_, item)) = new_buttons(&h, &base).get(j).cloned() else {
+                    lines.push(format!("| {tab} | {label} | {entry} | Eintrag nicht wiedergefunden |"));
+                    continue;
+                };
+                let before = Snap { picture: pic, ..snap(&mut h) };
+                let shots = format!("{}-{i:02}-{j:02}", tab.to_lowercase());
+                let result = catch_unwind(AssertUnwindSafe(|| {
+                    click(&mut h, item.center());
+                    outcome(&mut h, &before, &shots)
+                }));
+                let text = result.unwrap_or_else(|_| "**ABSTURZ**".to_string());
+                if text.contains("**") {
+                    problems += 1;
+                }
+                println!("{tab} / {label} / {entry}: {text}");
+                lines.push(format!("| {tab} | {label} | {entry} | {} |", text.replace('|', "/")));
+            }
+        }
+    }
+    let head = format!("# Maus-Rundgang\n\n{n} Klickfolgen, {problems} auffällig (fett markiert).\n\n");
+    std::fs::write(out_dir().join("report.md"), head + &lines.join("\n") + "\n").unwrap();
+    println!("Klickfolgen: {n}, auffällig: {problems}");
+}
+
+/// Screen position of a PDF point of page 0.
+fn to_screen(h: &Harness<'_, MrPdfApp>, x: f32, y: f32) -> Pos2 {
+    let tab = h.state().active_tab().unwrap();
+    let slot = tab.layout.slots.iter().find(|s| s.page == 0).unwrap();
+    let g = tab.display_geometry(0).unwrap();
+    let v = g.pdf_to_view(mrpdf::geometry::PointF::new(x, y));
+    slot.rect.min + tab.canvas_origin.to_vec2() + egui::vec2(v.x, v.y) * tab.scale()
+}
+
+fn first_rect(h: &mut Harness<'_, MrPdfApp>) -> Option<RectF> {
+    let tab = h.state_mut().active_tab_mut()?;
+    tab.annotations(0).first().map(|a| a.rect.normalized())
+}
+
+/// The tools that need text under the mouse: "Textkorrektur" (select,
+/// then Entf strikes out, typing replaces) and "Inhalt hervorheben" (click
+/// on text).
+#[test]
+#[ignore = "long; run explicitly"]
+fn text_tools() {
+    use mrpdf::ui::app::commands::Cmd;
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let count = |h: &mut Harness<'_, MrPdfApp>| h.state_mut().active_tab_mut().unwrap().annotations(0).len();
+    let line = (pos2(352.0, 392.0), pos2(612.0, 392.0));
+    let cases: [(&str, Tool, Option<Event>); 3] = [
+        (
+            "Textkorrektur + Entf",
+            Tool::TextCorrection,
+            Some(Event::Key {
+                key: Key::Delete,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Modifiers::NONE,
+            }),
+        ),
+        ("Textkorrektur + Tippen", Tool::TextCorrection, Some(Event::Text("Neu".into()))),
+        ("Inhalt hervorheben", Tool::ContentHighlight, None),
+    ];
+    let mut failed = Vec::new();
+    for (n, (name, tool, then)) in cases.into_iter().enumerate() {
+        let file = dir.path().join(format!("T{n}.pdf"));
+        std::fs::write(&file, common::text_pdf(1)).unwrap();
+        let mut h = harness(file);
+        let ctx = h.ctx.clone();
+        h.state_mut().run(&ctx, Cmd::Tool(tool));
+        h.run_steps(3);
+        let before = count(&mut h);
+        match then {
+            Some(e) => {
+                drag(&mut h, line.0, line.1);
+                input(&mut h, e);
+                h.run_steps(5);
+                // Typing opens the replacement text, prefilled: confirm it.
+                if matches!(h.state().dialog(), Some(Dialog::TextInput { .. })) {
+                    if let Some(ok) = h.query_all_by_label("OK").last() {
+                        ok.click();
+                    }
+                    h.run_steps(5);
+                }
+            }
+            None => click(&mut h, pos2(450.0, 392.0)),
+        }
+        let after = count(&mut h);
+        let kinds: Vec<String> = h
+            .state_mut()
+            .active_tab_mut()
+            .unwrap()
+            .annotations(0)
+            .iter()
+            .map(|a| format!("{:?}", a.kind))
+            .collect();
+        println!("{name}: {before} → {after} {kinds:?}");
+        if let Ok(img) = h.render() {
+            let _ = img.save(out_dir().join(format!("text-{n}.png")));
+        }
+        if after <= before {
+            failed.push(name);
+        }
+    }
+    assert!(failed.is_empty(), "nichts entstanden: {failed:?}");
+}
+
+/// For every comment tool: create, select by click, move, resize at the
+/// corner handle, delete with Entf, undo. Report in target/mouse/handling.md.
+#[test]
+#[ignore = "long; run explicitly"]
+fn annotation_handling() {
+    use mrpdf::ui::app::commands::Cmd;
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let tools = [
+        Tool::Typewriter,
+        Tool::TextBox,
+        Tool::Callout,
+        Tool::Note,
+        Tool::Highlight,
+        Tool::AreaHighlight,
+        Tool::Underline,
+        Tool::StrikeOut,
+        Tool::Squiggly,
+        Tool::Caret,
+        Tool::Replace,
+        Tool::Line,
+        Tool::Arrow,
+        Tool::Ellipse,
+        Tool::Rectangle,
+        Tool::Cloud,
+        Tool::Polyline,
+        Tool::Polygon,
+        Tool::Pencil,
+        Tool::Stamp,
+        Tool::MeasureDistance,
+        Tool::MeasurePerimeter,
+        Tool::MeasureArea,
+    ];
+    let mut lines = vec![
+        "| Werkzeug | anlegen | anklicken | verschieben | Größe ändern | Entf | Strg+Z |".to_string(),
+        "|---|---|---|---|---|---|---|".to_string(),
+    ];
+    for (n, tool) in tools.iter().enumerate() {
+        let file = dir.path().join(format!("H{n}.pdf"));
+        std::fs::write(&file, common::text_pdf(1)).unwrap();
+        let mut h = harness(file);
+        let ctx = h.ctx.clone();
+        h.state_mut().run(&ctx, Cmd::Tool(*tool));
+        h.run_steps(3);
+        let created = use_tool(&mut h, *tool);
+        let Some(r0) = first_rect(&mut h) else {
+            lines.push(format!("| {tool:?} | **{created}** | | | | | |"));
+            continue;
+        };
+        let ok = |b: bool| if b { "ok" } else { "**nein**" };
+        // Select: "Anmerkungen bearbeiten", click on the comment's centre,
+        // then on its left edge (unfilled shapes are hit at their outline).
+        h.state_mut().run(&ctx, Cmd::Tool(Tool::SelectAnnot));
+        h.run_steps(3);
+        let centre = to_screen(&h, (r0.x0 + r0.x1) / 2.0, (r0.y0 + r0.y1) / 2.0);
+        let edge = to_screen(&h, r0.x0 + 1.0, (r0.y0 + r0.y1) / 2.0);
+        let mut grip = centre;
+        for p in [centre, edge] {
+            click(&mut h, p);
+            if h.state().active_tab().unwrap().selected_annot.is_some() {
+                grip = p;
+                break;
+            }
+        }
+        let selected = h.state().active_tab().unwrap().selected_annot.is_some();
+        // Move by 40/30 screen points.
+        drag(&mut h, grip, grip + egui::vec2(40.0, 30.0));
+        let r1 = first_rect(&mut h).unwrap_or(r0);
+        let moved = (r1.x0 - r0.x0).abs() > 10.0 && (r1.y0 - r0.y0).abs() > 10.0;
+        // Handles: the lower right corner of comments with an area, the
+        // first point of lines and polygons; none for text markup and notes.
+        let p = to_screen(&h, (r1.x0 + r1.x1) / 2.0, (r1.y0 + r1.y1) / 2.0);
+        // Select again where the comment is now (centre, else its edge).
+        click(&mut h, p);
+        if h.state().active_tab().unwrap().selected_annot.is_none() {
+            let e = to_screen(&h, r1.x0 + 1.0, (r1.y0 + r1.y1) / 2.0);
+            click(&mut h, e);
+        }
+        let kind = h.state_mut().active_tab_mut().unwrap().annotations(0)[0].kind;
+        let text_before = h.state_mut().active_tab_mut().unwrap().annotations(0)[0].contents.clone();
+        let points =
+            h.state_mut().active_tab_mut().unwrap().selected_details().map(|d| d.points).unwrap_or_default();
+        let size_text = match kind {
+            AnnotKind::Square
+            | AnnotKind::Circle
+            | AnnotKind::FreeText
+            | AnnotKind::Stamp
+            | AnnotKind::Ink => {
+                let corner = to_screen(&h, r1.x1, r1.y0);
+                drag(&mut h, corner, corner + egui::vec2(50.0, 40.0));
+                let r2 = first_rect(&mut h).unwrap_or(r1);
+                if r2.width() > r1.width() + 10.0
+                    && r2.height() > r1.height() + 10.0
+                    && (r2.x0 - r1.x0).abs() < 2.0
+                {
+                    "ok (Ecke)".to_string()
+                } else {
+                    format!("**nein** {r1:?} → {r2:?}")
+                }
+            }
+            AnnotKind::Line | AnnotKind::Polygon | AnnotKind::Polyline => match points.first() {
+                Some(p0) => {
+                    let at = to_screen(&h, p0.x, p0.y);
+                    drag(&mut h, at, at + egui::vec2(-40.0, 30.0));
+                    let after = h
+                        .state_mut()
+                        .active_tab_mut()
+                        .unwrap()
+                        .selected_details()
+                        .map(|d| d.points)
+                        .unwrap_or_default();
+                    let moved = after.first().is_some_and(|q| (q.x - p0.x).abs() > 10.0);
+                    let others_kept =
+                        after.iter().skip(1).zip(points.iter().skip(1)).all(|(a, b)| a.distance(*b) < 0.5);
+                    let text_after =
+                        h.state_mut().active_tab_mut().unwrap().annotations(0)[0].contents.clone();
+                    let measure = if text_before.contains("mm") || text_before.contains("cm") {
+                        if text_after != text_before { ", Messwert neu" } else { ", **Messwert alt**" }
+                    } else {
+                        ""
+                    };
+                    if moved && others_kept {
+                        format!("ok (Punkt){measure}")
+                    } else {
+                        format!("**nein** {points:?} → {after:?}")
+                    }
+                }
+                None => "**keine Punkte**".to_string(),
+            },
+            _ => "keine Griffe (richtig)".to_string(),
+        };
+        let r2 = first_rect(&mut h).unwrap_or(r1);
+        if let Ok(img) = h.render() {
+            let _ = img.save(out_dir().join(format!("handling-{tool:?}.png")));
+        }
+        // Delete and undo.
+        let count =
+            |h: &mut Harness<'_, MrPdfApp>| h.state_mut().active_tab_mut().unwrap().annotations(0).len();
+        let p = to_screen(&h, (r2.x0 + r2.x1) / 2.0, (r2.y0 + r2.y1) / 2.0);
+        click(&mut h, p);
+        if h.state().active_tab().unwrap().selected_annot.is_none() {
+            let p = to_screen(&h, r2.x0 + 1.0, (r2.y0 + r2.y1) / 2.0);
+            click(&mut h, p);
+        }
+        key(&mut h, Key::Delete);
+        let deleted = count(&mut h) == 0;
+        h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+        h.run_steps(4);
+        let back = count(&mut h) == 1;
+        let line = format!(
+            "| {tool:?} | {created} | {} | {} | {size_text} | {} | {} |",
+            ok(selected),
+            ok(moved),
+            ok(deleted),
+            ok(back)
+        );
+        println!("{line}");
+        lines.push(line);
+    }
+    std::fs::write(
+        out_dir().join("handling.md"),
+        "# Umgang mit Anmerkungen\n\n".to_string() + &lines.join("\n") + "\n",
+    )
+    .unwrap();
+}

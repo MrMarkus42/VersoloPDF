@@ -48,6 +48,15 @@ pub struct MovePreview {
     pub parts: Vec<(egui::Rect, egui::TextureHandle, egui::TextureHandle)>,
 }
 
+/// A handle of a selected comment: one of the eight box handles (0 top
+/// left, then clockwise: top, top right, right, bottom right, bottom,
+/// bottom left, left) or a point (end of a line, vertex of a polygon).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Grip {
+    Box(u8),
+    Point(usize),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Interaction {
     None,
@@ -72,6 +81,12 @@ pub enum Interaction {
     MoveAnnot {
         annot: AnnotRef,
         delta: Vec2,
+    },
+    /// Dragging a handle of the selected comment (screen position).
+    ReshapeAnnot {
+        annot: AnnotRef,
+        grip: Grip,
+        current: Pos2,
     },
     /// Selection rectangle of "Anmerkungen bearbeiten" (view space).
     Marquee {

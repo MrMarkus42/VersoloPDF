@@ -14,7 +14,7 @@ use crate::ui::cache::Budget;
 use crate::ui::i18n::Strings;
 use crate::ui::pickers::Unit;
 use crate::ui::tab::{
-    AnnotRef, DocTab, FieldEdit, Guide, Interaction, MovePreview, ScrollRequest, Split, TextSelection,
+    AnnotRef, DocTab, FieldEdit, Grip, Guide, Interaction, MovePreview, ScrollRequest, Split, TextSelection,
 };
 use crate::ui::theme;
 use crate::ui::tools::{Gesture, Tool};
@@ -86,6 +86,13 @@ pub enum CanvasEvent {
         annot: AnnotRef,
         dx: f32,
         dy: f32,
+    },
+    /// New size or point of a comment (its handles); `contents` is the new
+    /// value of a measurement.
+    Reshape {
+        annot: AnnotRef,
+        reshape: crate::pdf_edit::Reshape,
+        contents: Option<String>,
     },
     OpenUri(String),
     CommitField {
@@ -198,6 +205,10 @@ impl PageOnScreen {
             self.view_to_screen(PointF::new(v.x0, v.y0)),
             self.view_to_screen(PointF::new(v.x1, v.y1)),
         )
+    }
+
+    fn pdf_to_screen(&self, p: PointF) -> Pos2 {
+        self.view_to_screen(self.geo.pdf_to_view(p))
     }
 
     fn view_rect_to_pdf(&self, a: PointF, b: PointF) -> RectF {
@@ -795,6 +806,76 @@ fn move_preview_parts(
     }
     parts
 }
+/// Handles of the selected comment on this page (screen positions): box
+/// handles for comments with an area, points for lines and polygons.
+fn grips(tab: &mut DocTab, pos: &PageOnScreen) -> Vec<(Grip, Pos2)> {
+    let Some(sel) = tab.selected_annot.filter(|s| s.page == pos.page) else { return Vec::new() };
+    if tab.selected_annots().len() > 1 {
+        return Vec::new();
+    }
+    let Some(a) = tab.annotations(pos.page).get(sel.index).cloned() else { return Vec::new() };
+    match a.kind {
+        AnnotKind::Square | AnnotKind::Circle | AnnotKind::FreeText | AnnotKind::Stamp | AnnotKind::Ink => {
+            let r = pos.pdf_rect_to_screen(&a.rect);
+            box_grips(r).into_iter().enumerate().map(|(i, p)| (Grip::Box(i as u8), p)).collect()
+        }
+        AnnotKind::Line | AnnotKind::Polygon | AnnotKind::Polyline => tab
+            .selected_details()
+            .map(|d| {
+                d.points.iter().enumerate().map(|(i, p)| (Grip::Point(i), pos.pdf_to_screen(*p))).collect()
+            })
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    }
+}
+
+/// The eight box handles, clockwise from the top left corner.
+fn box_grips(r: Rect) -> [Pos2; 8] {
+    [
+        r.left_top(),
+        r.center_top(),
+        r.right_top(),
+        r.right_center(),
+        r.right_bottom(),
+        r.center_bottom(),
+        r.left_bottom(),
+        r.left_center(),
+    ]
+}
+
+/// The handle under the screen point `p`.
+fn grip_at(tab: &mut DocTab, pos: &PageOnScreen, p: Pos2) -> Option<Grip> {
+    grips(tab, pos).into_iter().find(|(_, g)| g.distance(p) <= 6.0).map(|(g, _)| g)
+}
+
+/// The box after dragging handle `grip` to `to`.
+fn reshaped_box(r: Rect, grip: u8, to: Pos2) -> Rect {
+    let (mut x0, mut y0, mut x1, mut y1) = (r.min.x, r.min.y, r.max.x, r.max.y);
+    if matches!(grip, 0 | 6 | 7) {
+        x0 = to.x;
+    }
+    if matches!(grip, 2..=4) {
+        x1 = to.x;
+    }
+    if matches!(grip, 0..=2) {
+        y0 = to.y;
+    }
+    if matches!(grip, 4..=6) {
+        y1 = to.y;
+    }
+    Rect::from_two_pos(pos2(x0, y0), pos2(x1, y1))
+}
+
+fn grip_cursor(grip: Grip) -> CursorIcon {
+    match grip {
+        Grip::Box(0 | 4) => CursorIcon::ResizeNwSe,
+        Grip::Box(2 | 6) => CursorIcon::ResizeNeSw,
+        Grip::Box(1 | 5) => CursorIcon::ResizeVertical,
+        Grip::Box(_) => CursorIcon::ResizeHorizontal,
+        Grip::Point(_) => CursorIcon::Crosshair,
+    }
+}
+
 /// The comments that move with `annot`: the whole selection if `annot` is
 /// part of it, else `annot` alone.
 fn moving_annots(tab: &DocTab, annot: AnnotRef) -> Vec<AnnotRef> {
@@ -917,8 +998,56 @@ fn draw_overlays(
         }
         let accent = theme::ACCENT;
         painter.rect_stroke(r, 0.0, Stroke::new(1.5, accent), StrokeKind::Outside);
-        for c in [r.left_top(), r.right_top(), r.left_bottom(), r.right_bottom()] {
-            painter.rect_filled(Rect::from_center_size(c, vec2(6.0, 6.0)), 0.0, accent);
+    }
+    // Handles of a single selected comment: squares change the size, circles
+    // move a point. Comments without handles (text markup, note symbols)
+    // only show the frame.
+    if !matches!(interaction, Interaction::MoveAnnot { .. }) {
+        for (grip, p) in grips(tab, pos) {
+            let stroke = Stroke::new(1.2, theme::ACCENT);
+            match grip {
+                Grip::Box(_) => {
+                    painter.rect(
+                        Rect::from_center_size(p, vec2(7.0, 7.0)),
+                        1.0,
+                        Color32::WHITE,
+                        stroke,
+                        StrokeKind::Middle,
+                    );
+                }
+                Grip::Point(_) => {
+                    painter.circle(p, 4.0, Color32::WHITE, stroke);
+                }
+            }
+        }
+    }
+    // The new shape while a handle is dragged.
+    if let Interaction::ReshapeAnnot { annot, grip, current } = &interaction
+        && annot.page == page
+        && let Some(a) = tab.annotations(page).get(annot.index).cloned()
+    {
+        let stroke = Stroke::new(1.2, theme::ACCENT);
+        match grip {
+            Grip::Box(i) => {
+                let r = reshaped_box(pos.pdf_rect_to_screen(&a.rect), *i, *current);
+                let pts = [r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom(), r.left_top()];
+                painter.extend(egui::Shape::dashed_line(&pts, stroke, 5.0, 3.0));
+            }
+            Grip::Point(i) => {
+                let mut pts: Vec<Pos2> = tab
+                    .selected_details()
+                    .map(|d| d.points.iter().map(|p| pos.pdf_to_screen(*p)).collect())
+                    .unwrap_or_default();
+                if let Some(p) = pts.get_mut(*i) {
+                    *p = *current;
+                }
+                if a.kind == AnnotKind::Polygon
+                    && let Some(first) = pts.first().copied()
+                {
+                    pts.push(first);
+                }
+                painter.extend(egui::Shape::dashed_line(&pts, stroke, 5.0, 3.0));
+            }
         }
     }
     // Selection rectangle.
@@ -1152,10 +1281,11 @@ fn handle_input(
     if let Some(h) = response.hover_pos()
         && let Some(pos) = find_page(on_screen, h)
     {
-        let cursor = match guide_at(tab, cx, &pos, h) {
-            Some(i) if tab.guides[i].vertical => CursorIcon::ResizeHorizontal,
-            Some(_) => CursorIcon::ResizeVertical,
-            None => cursor_for(tab, cx, &pos, pos.pdf_at(h)),
+        let cursor = match (grip_at(tab, &pos, h), guide_at(tab, cx, &pos, h)) {
+            (Some(grip), _) => grip_cursor(grip),
+            (None, Some(i)) if tab.guides[i].vertical => CursorIcon::ResizeHorizontal,
+            (None, Some(_)) => CursorIcon::ResizeVertical,
+            (None, None) => cursor_for(tab, cx, &pos, pos.pdf_at(h)),
         };
         ui.ctx().set_cursor_icon(cursor);
         // "Seitenmaße/Position" and the loupe follow the pointer.
@@ -1293,6 +1423,12 @@ fn start_drag(
     if let Some(index) = guide_at(tab, cx, &pos, start) {
         return Interaction::Guide { index };
     }
+    // A handle of the selected comment: change its size or a point.
+    if let Some(grip) = grip_at(tab, &pos, start)
+        && let Some(annot) = tab.selected_annot
+    {
+        return Interaction::ReshapeAnnot { annot, grip, current: start };
+    }
     let pdf = pos.pdf_at(start);
     let v = pos.view_at(start);
     let snapped = snap_point(tab, cx, v);
@@ -1423,6 +1559,11 @@ fn continue_drag(
                 *current = pos.view_at(cur.clamp(pos.rect.min, pos.rect.max));
             }
         }
+        Interaction::ReshapeAnnot { annot, current, .. } => {
+            if let Some(pos) = on_screen.iter().find(|p| p.page == annot.page) {
+                *current = cur.clamp(pos.rect.min, pos.rect.max);
+            }
+        }
         Interaction::DynamicZoom { anchor } => {
             // Up zooms in, down zooms out.
             let factor = (-delta.y * 0.01).exp();
@@ -1494,6 +1635,42 @@ fn finish_drag(tab: &mut DocTab, cx: &mut CanvasCtx, interaction: Interaction, o
                 let (dx, dy) = pos.geo.view_delta_to_pdf(delta.x / scale, delta.y / scale);
                 cx.events.push(CanvasEvent::Move { annot, dx, dy });
             }
+        }
+        Interaction::ReshapeAnnot { annot, grip, current } => {
+            let Some(pos) = on_screen.iter().find(|p| p.page == annot.page) else { return };
+            let Some(a) = tab.annotations(annot.page).get(annot.index).cloned() else { return };
+            let reshape = match grip {
+                Grip::Box(i) => {
+                    let r = reshaped_box(pos.pdf_rect_to_screen(&a.rect), i, current);
+                    if r.width() < 4.0 || r.height() < 4.0 {
+                        return;
+                    }
+                    crate::pdf_edit::Reshape::Rect(
+                        pos.view_rect_to_pdf(pos.view_at(r.min), pos.view_at(r.max)),
+                    )
+                }
+                Grip::Point(index) => crate::pdf_edit::Reshape::Point { index, to: pos.pdf_at(current) },
+            };
+            // A measurement shows its new value.
+            let contents = tab.selected_details().filter(|d| d.measure).and_then(|d| {
+                let mut pts = d.points.clone();
+                if let (Grip::Point(i), crate::pdf_edit::Reshape::Point { to, .. }) = (grip, reshape) {
+                    *pts.get_mut(i)? = to;
+                }
+                Some(match a.kind {
+                    AnnotKind::Line if pts.len() >= 2 => {
+                        format_measure(pts[0].distance(pts[1]) * PT_TO_MM, false, cx.decimal_comma)
+                    }
+                    AnnotKind::Polyline => {
+                        format_measure(path_length(&pts) * PT_TO_MM, false, cx.decimal_comma)
+                    }
+                    AnnotKind::Polygon => {
+                        format_measure(polygon_area(&pts) * PT_TO_MM * PT_TO_MM, true, cx.decimal_comma)
+                    }
+                    _ => return None,
+                })
+            });
+            cx.events.push(CanvasEvent::Reshape { annot, reshape, contents });
         }
         Interaction::Marquee { page, start, current, add } => {
             let Some(pos) = on_screen.iter().find(|p| p.page == page) else { return };
