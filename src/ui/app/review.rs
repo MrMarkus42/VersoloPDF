@@ -6,7 +6,6 @@ use egui::Context;
 
 use super::commands::Cmd;
 use super::{Dialog, MrPdfApp, RangePurpose};
-use crate::compare::Change;
 use crate::model::Rgba;
 use crate::report::Line;
 use crate::ui::i18n::Language;
@@ -45,7 +44,7 @@ impl MrPdfApp {
                     Err(err) => self.show_error(&err),
                 }
             }
-            Cmd::CompareDocuments => self.compare_documents(ctx),
+            Cmd::CompareDocuments => self.open_compare_dialog(),
             Cmd::SpellCheck => self.open_spell_check(),
             Cmd::DeletePageComments => self.delete_page_comments(ctx),
             Cmd::FlattenAll => self.flatten_all(ctx),
@@ -73,7 +72,7 @@ impl MrPdfApp {
         true
     }
 
-    fn open_report(&mut self, ctx: &Context, title: &str, lines: &[Line]) {
+    pub(super) fn open_report(&mut self, ctx: &Context, title: &str, lines: &[Line]) {
         let result = crate::report::build_pdf(title, lines)
             .and_then(|bytes| crate::Document::from_bytes(bytes, &format!("{title}.pdf"), None));
         match result {
@@ -129,90 +128,6 @@ impl MrPdfApp {
             Some(Err(err)) => self.show_error(&err),
             None => {}
         }
-    }
-
-    fn compare_documents(&mut self, ctx: &Context) {
-        let de = self.review_de();
-        let Some(tab) = self.active_tab() else { return };
-        let name = tab.doc.display_name().to_string();
-        let Some(path) = rfd::FileDialog::new()
-            .set_title(if de { "Vergleichen mit …" } else { "Compare with …" })
-            .add_filter("PDF", &["pdf", "PDF"])
-            .pick_file()
-        else {
-            return;
-        };
-        let result = (|| {
-            let other = crate::Document::open(&path, None)?;
-            let old = tab.doc.text_lines()?;
-            let new = other.text_lines()?;
-            Ok::<_, crate::Error>((other.display_name().to_string(), crate::compare::diff(&old, &new)))
-        })();
-        let (other_name, changes) = match result {
-            Ok(r) => r,
-            Err(err) => {
-                self.show_error(&err);
-                return;
-            }
-        };
-        let removed = changes.iter().filter(|c| matches!(c, Change::Removed(..))).count();
-        let added = changes.iter().filter(|c| matches!(c, Change::Added(..))).count();
-        let title = if de { "Dokumentvergleich" } else { "Document comparison" };
-        let mut lines = vec![
-            Line::title(title),
-            Line::small(format!(
-                "{} {name}  ·  {} {other_name}",
-                if de { "Alt:" } else { "Old:" },
-                if de { "Neu:" } else { "New:" }
-            )),
-            Line::new(if de {
-                format!("{removed} Zeilen entfernt, {added} Zeilen hinzugefügt")
-            } else {
-                format!("{removed} lines removed, {added} lines added")
-            }),
-        ];
-        if removed + added == 0 {
-            lines.push(Line::heading(if de {
-                "Keine Textunterschiede gefunden."
-            } else {
-                "No text differences found."
-            }));
-        }
-        let page = if de { "S." } else { "p." };
-        // Changed lines with one line of unchanged context before each block.
-        let mut last_was_change = false;
-        for (i, change) in changes.iter().enumerate() {
-            match change {
-                Change::Same(p, _, text) => {
-                    let next_changes =
-                        matches!(changes.get(i + 1), Some(Change::Removed(..) | Change::Added(..)));
-                    if next_changes {
-                        lines.push(Line {
-                            space_before: 6.0,
-                            ..Line::small(format!("  {page} {}: {text}", p + 1))
-                        });
-                    }
-                    last_was_change = false;
-                }
-                Change::Removed(p, text) => {
-                    let space = if last_was_change { 0.0 } else { 2.0 };
-                    lines.push(Line {
-                        space_before: space,
-                        ..Line::new(format!("- {page} {}: {text}", p + 1)).color(RED)
-                    });
-                    last_was_change = true;
-                }
-                Change::Added(p, text) => {
-                    let space = if last_was_change { 0.0 } else { 2.0 };
-                    lines.push(Line {
-                        space_before: space,
-                        ..Line::new(format!("+ {page} {}: {text}", p + 1)).color(GREEN)
-                    });
-                    last_was_change = true;
-                }
-            }
-        }
-        self.open_report(ctx, title, &lines);
     }
 
     fn accessibility_report(&mut self, ctx: &Context) {

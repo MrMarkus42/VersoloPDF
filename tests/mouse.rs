@@ -560,6 +560,203 @@ fn background_on_covered_page() {
     assert!(tinted * 10 > was_white * 9, "Seite nicht eingefärbt");
 }
 
+/// "Dokumente vergleichen" with the mouse: dialog, OK, both documents side
+/// by side with the differences marked, "Nächster", "Vergleich beenden".
+/// Screenshots in target/mouse/compare-*.png.
+#[test]
+#[ignore = "long; run explicitly"]
+fn compare_documents() {
+    use mrpdf::compare::DiffKind;
+    use mrpdf::ui::app::commands::Cmd;
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let old = dir.path().join("Vertrag-alt.pdf");
+    let new = dir.path().join("Vertrag-neu.pdf");
+    std::fs::write(
+        &old,
+        common::lines_pdf(
+            &[
+                &[
+                    "Vertrag über Leistungen",
+                    "Der Preis beträgt 100 Euro pro Monat.",
+                    "Laufzeit zwölf Monate.",
+                ],
+                &["Seite zwei bleibt gleich.", "Mit einem zweiten Satz."],
+            ],
+            None,
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        &new,
+        common::lines_pdf(
+            &[
+                &["Vertrag über Leistungen", "Der Preis beträgt 120 Euro pro Monat inklusive Steuer."],
+                &["Eine ganz neue Seite mit Anlagen."],
+                &["Seite zwei bleibt gleich.", "Mit einem zweiten Satz."],
+            ],
+            Some(2),
+        ),
+    )
+    .unwrap();
+    // The new document first, then the old one: the old one is active.
+    let mut h = harness(new);
+    let ctx = h.ctx.clone();
+    h.state_mut().open_path(&ctx, old, None);
+    h.run_steps(5);
+    h.state_mut().run(&ctx, Cmd::CompareDocuments);
+    h.run_steps(5);
+    if let Ok(img) = h.render() {
+        let _ = img.save(out_dir().join("compare-1-dialog.png"));
+    }
+    assert!(matches!(h.state().dialog(), Some(Dialog::Compare(_))), "Dialog fehlt");
+    let ok = h.get_all_by_label("OK").last().map(|n| n.rect().center()).expect("OK");
+    click(&mut h, ok);
+    for _ in 0..200 {
+        h.step();
+        if h.state().comparison().is_some_and(|c| !c.running()) {
+            break;
+        }
+    }
+    h.run_steps(5);
+    let c = h.state().comparison().expect("kein Vergleich");
+    assert!(!c.running(), "Berechnung endet nicht");
+    let diffs = c.diffs.clone();
+    let kinds: Vec<DiffKind> = diffs.iter().map(|d| d.kind).collect();
+    for d in &diffs {
+        println!("{:?}: {:?} | {:?} → {:?}", d.kind, d.pages(), d.old_text, d.new_text);
+    }
+    if let Ok(img) = h.render() {
+        let _ = img.save(out_dir().join("compare-2-result.png"));
+    }
+    let mut failed = Vec::new();
+    let has = |k: DiffKind, old: &str, new: &str| {
+        diffs.iter().any(|d| d.kind == k && d.old_text.contains(old) && d.new_text.contains(new))
+    };
+    if !has(DiffKind::Changed, "100", "120") {
+        failed.push("100 → 120 fehlt");
+    }
+    if !has(DiffKind::Inserted, "", "Steuer") && !has(DiffKind::Changed, "", "Steuer") {
+        failed.push("„inklusive Steuer“ fehlt");
+    }
+    if !has(DiffKind::Deleted, "Laufzeit", "") {
+        failed.push("„Laufzeit zwölf Monate“ nicht als gelöscht");
+    }
+    // The text of the new page is part of "Seite eingefügt", not a change.
+    if diffs.iter().any(|d| d.new_text.contains("Anlagen")) {
+        failed.push("Text der neuen Seite einzeln aufgeführt");
+    }
+    if !kinds.contains(&DiffKind::PageInserted) {
+        failed.push("eingefügte Seite fehlt");
+    }
+    if !kinds.contains(&DiffKind::Graphic) {
+        failed.push("Grafik fehlt");
+    }
+    let marked = h.state().active_tab().is_some_and(|t| !t.compare_marks.is_empty());
+    if !marked {
+        failed.push("keine Markierungen im Dokument");
+    }
+    // Scrolling the old document (left) takes the new one along.
+    let before = h.state().compared_scroll();
+    input(&mut h, Event::PointerMoved(pos2(420.0, 500.0)));
+    h.step();
+    input(
+        &mut h,
+        Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -400.0),
+            modifiers: Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        },
+    );
+    h.run_steps(30);
+    let after = h.state().compared_scroll();
+    println!("Blättern: vorher {before:?}, nachher {after:?}");
+    match (before, after) {
+        (Some(b), Some(a)) if a.0 > b.0 + 50.0 && a.1 > b.1 + 50.0 => {}
+        _ => failed.push("rechtes Dokument blättert nicht mit"),
+    }
+    // "Nächster" selects the first difference.
+    let next = h.get_all_by_label("Nächster ▶").next().map(|n| n.rect().center());
+    if let Some(p) = next {
+        click(&mut h, p);
+        h.run_steps(5);
+    }
+    let selected = h.state().comparison().and_then(|c| c.selected);
+    println!("ausgewählt: {selected:?}");
+    if selected != Some(0) {
+        failed.push("„Nächster“ wählt nichts");
+    }
+    if let Ok(img) = h.render() {
+        let _ = img.save(out_dir().join("compare-3-selected.png"));
+    }
+    let end = h.get_all_by_label("Vergleich beenden").next().map(|n| n.rect().center());
+    if let Some(p) = end {
+        click(&mut h, p);
+        h.run_steps(5);
+    }
+    if h.state().comparison().is_some() || h.state().active_tab().is_some_and(|t| !t.compare_marks.is_empty())
+    {
+        failed.push("„Vergleich beenden“ räumt nicht auf");
+    }
+    assert!(failed.is_empty(), "{failed:?}");
+}
+
+/// "Dokumente vergleichen" with the real test files (`MRPDF_TESTFILES`):
+/// each file against a copy without its second page. Exactly one
+/// difference ("Seite gelöscht") may come out; the time is printed.
+#[test]
+#[ignore = "needs MRPDF_TESTFILES"]
+fn compare_real_files() {
+    use mrpdf::compare::DiffKind;
+    use mrpdf::ui::app::commands::Cmd;
+    let Some(dir) = std::env::var_os("MRPDF_TESTFILES") else { return };
+    let _guard = common::lock();
+    let tmp = tempfile::tempdir().unwrap();
+    let mut files: Vec<PathBuf> =
+        std::fs::read_dir(&dir).unwrap().filter_map(|e| e.ok().map(|e| e.path())).collect();
+    files.sort();
+    let mut failed = Vec::new();
+    for path in files.into_iter().filter(|p| p.extension().is_some_and(|e| e == "pdf")) {
+        let name = path.file_name().unwrap().to_string_lossy().to_string();
+        let mut doc = mrpdf::Document::open(&path, None).unwrap();
+        let pages = doc.page_count();
+        if pages < 3 {
+            continue;
+        }
+        doc.delete_pages(&[1]).unwrap();
+        let copy = tmp.path().join(format!("ohne-seite-2-{name}"));
+        std::fs::write(&copy, doc.to_bytes().unwrap()).unwrap();
+        drop(doc);
+        // The copy first, then the original: the original is the old one.
+        let mut h = harness(copy);
+        let ctx = h.ctx.clone();
+        h.state_mut().open_path(&ctx, path.clone(), None);
+        h.run_steps(5);
+        h.state_mut().run(&ctx, Cmd::CompareDocuments);
+        h.run_steps(5);
+        let ok = h.get_all_by_label("OK").last().map(|n| n.rect().center()).unwrap();
+        let t = std::time::Instant::now();
+        click(&mut h, ok);
+        let mut steps = 0;
+        while h.state().comparison().is_none_or(|c| c.running()) && steps < 100_000 {
+            h.step();
+            steps += 1;
+        }
+        let secs = t.elapsed().as_secs_f32();
+        let c = h.state().comparison().unwrap();
+        let kinds: Vec<DiffKind> = c.diffs.iter().map(|d| d.kind).collect();
+        println!("{name}: {pages} Seiten, {secs:.1} s, Unterschiede: {kinds:?}");
+        for d in c.diffs.iter().take(5) {
+            println!("   {:?} {:?}", d.kind, d.pages());
+        }
+        if kinds != [DiffKind::PageDeleted] || c.diffs[0].pages() != (Some(1), None) {
+            failed.push(format!("{name}: {kinds:?}"));
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
 /// Hash of the pixels in `r` (screen points).
 fn region_hash(h: &mut Harness<'_, MrPdfApp>, r: Rect) -> u64 {
     use std::hash::{Hash, Hasher};

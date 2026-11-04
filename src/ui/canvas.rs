@@ -965,6 +965,24 @@ fn draw_overlays(
             painter.rect_filled(pos.pdf_rect_to_screen(r).expand(1.0), 1.0, color);
         }
     }
+    // Differences of "Dokumente vergleichen": tinted areas with a frame,
+    // the chosen one stronger.
+    for m in tab.compare_marks.iter().filter(|m| m.page == page) {
+        let c = crate::ui::tab::CompareMark::color(m.kind);
+        let r = pos.pdf_rect_to_screen(&m.rect).expand(if m.caret { 0.0 } else { 1.5 });
+        let alpha = if m.selected { 90 } else { 45 };
+        if m.caret {
+            painter.rect_filled(r.expand2(egui::vec2(1.0, 2.0)), 0.0, c);
+        } else {
+            painter.rect_filled(r, 2.0, Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), alpha));
+            painter.rect_stroke(
+                r,
+                2.0,
+                Stroke::new(if m.selected { 2.5 } else { 1.0 }, c),
+                StrokeKind::Outside,
+            );
+        }
+    }
     // Text selection (also previewed while using a markup tool).
     let interaction = tab.interaction.clone();
     let selection = match &interaction {

@@ -13,6 +13,41 @@ pub fn lock() -> MutexGuard<'static, ()> {
     LOCK.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// A PDF with one A4 page per entry of `pages`: its text lines (14 pt, from
+/// the top) and, if `box_on` names the page, a filled blue rectangle.
+#[allow(dead_code)]
+pub fn lines_pdf(pages: &[&[&str]], box_on: Option<usize>) -> Vec<u8> {
+    use pdfium_render::prelude::{PdfColor, PdfRect};
+    let pdfium = mrpdf::engine::pdfium().expect("PDFium must be available for tests");
+    let mut doc = pdfium.create_new_pdf().unwrap();
+    let font = doc.fonts_mut().helvetica();
+    for (i, lines) in pages.iter().enumerate() {
+        let mut page = doc.pages_mut().create_page_at_end(PdfPagePaperSize::a4()).unwrap();
+        for (k, line) in lines.iter().enumerate() {
+            page.objects_mut()
+                .create_text_object(
+                    PdfPoints::new(72.0),
+                    PdfPoints::new(760.0 - 30.0 * k as f32),
+                    *line,
+                    font,
+                    PdfPoints::new(14.0),
+                )
+                .unwrap();
+        }
+        if box_on == Some(i) {
+            page.objects_mut()
+                .create_path_object_rect(
+                    PdfRect::new_from_values(200.0, 300.0, 300.0, 400.0),
+                    None,
+                    None,
+                    Some(PdfColor::new(30, 60, 200, 255)),
+                )
+                .unwrap();
+        }
+    }
+    doc.save_to_bytes().unwrap()
+}
+
 /// A PDF with `pages` A4 pages, each containing the line `Page N Hello World`.
 pub fn text_pdf(pages: usize) -> Vec<u8> {
     let pdfium = mrpdf::engine::pdfium().expect("PDFium must be available for tests");

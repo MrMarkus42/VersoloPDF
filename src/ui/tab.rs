@@ -126,6 +126,31 @@ pub struct Guide {
     pub pos: f32,
 }
 
+/// A marked difference of "Dokumente vergleichen" on a page (PDF space).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CompareMark {
+    pub page: usize,
+    pub rect: crate::geometry::RectF,
+    pub kind: crate::compare::DiffKind,
+    /// Only the place where text is missing on this side.
+    pub caret: bool,
+    /// Part of the difference chosen in the results list.
+    pub selected: bool,
+}
+
+impl CompareMark {
+    /// Colour of a kind of difference (as in the results list).
+    pub fn color(kind: crate::compare::DiffKind) -> egui::Color32 {
+        use crate::compare::DiffKind as K;
+        match kind {
+            K::Inserted | K::PageInserted => egui::Color32::from_rgb(40, 160, 70),
+            K::Deleted | K::PageDeleted => egui::Color32::from_rgb(215, 50, 50),
+            K::Changed => egui::Color32::from_rgb(235, 140, 20),
+            K::Graphic => egui::Color32::from_rgb(60, 110, 230),
+        }
+    }
+}
+
 /// "Teilen": how the document window is split.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Split {
@@ -245,6 +270,8 @@ pub struct DocTab {
     pub selected_bookmark: Option<Vec<usize>>,
     details: Option<(AnnotRef, u64, AnnotDetails)>,
     pub search: SearchState,
+    /// Differences of "Dokumente vergleichen" shown on this document.
+    pub compare_marks: Vec<CompareMark>,
     pub interaction: Interaction,
     pub field_edit: Option<FieldEdit>,
     pub last_pointer: Option<Pos2>,
@@ -324,6 +351,7 @@ impl DocTab {
             selected_bookmark: None,
             details: None,
             search: SearchState::default(),
+            compare_marks: Vec::new(),
             interaction: Interaction::None,
             field_edit: None,
             last_pointer: None,

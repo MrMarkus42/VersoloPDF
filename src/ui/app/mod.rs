@@ -7,6 +7,7 @@ pub mod bookmark_dialogs;
 mod calculator_ui;
 pub mod commands;
 pub mod comment_cmds;
+pub mod compare_view;
 mod content_cmds;
 mod convert_dialogs;
 mod dialogs;
@@ -224,6 +225,8 @@ pub enum Dialog {
     Shape(Box<shape_dialogs::ShapeState>),
     Marks(Box<marks_dialogs::MarksState>),
     Labels(Box<labels_dialog::LabelsState>),
+    /// "Dokumente vergleichen".
+    Compare(Box<compare_view::CompareSetup>),
     SearchRedact {
         query: String,
         match_case: bool,
@@ -342,6 +345,10 @@ pub struct MrPdfApp {
     portfolio_cache: std::collections::HashMap<u64, (u64, Vec<crate::portfolio::Entry>)>,
     /// Tab last shown in each (window, group).
     group_focus: std::collections::HashMap<(u32, u32), u64>,
+    /// "Dokumente vergleichen": the comparison shown side by side.
+    compare: Option<Box<compare_view::Comparison>>,
+    /// Files chosen in the comparison dialog (not opened as tabs yet).
+    compare_files: Vec<(std::path::PathBuf, crate::Document)>,
     /// "Vollbild": the running presentation.
     presentation: Option<presentation::Presentation>,
     /// "Vorlesen": the running speech output.
@@ -451,6 +458,8 @@ impl MrPdfApp {
             pan_zoom_tex: None,
             presentation: None,
             group_focus: Default::default(),
+            compare: None,
+            compare_files: Vec::new(),
             portfolio_cache: Default::default(),
             speech: None,
             dialog_pos: None,
@@ -952,6 +961,7 @@ impl eframe::App for MrPdfApp {
         self.poll_download(&ctx);
         self.recovery_tick(&ctx);
         self.view_tick(&ctx);
+        self.compare_tick(&ctx);
         self.note_group_focus();
         // "Vollbild": only the presentation.
         if self.presentation.is_some() {
@@ -975,7 +985,9 @@ impl eframe::App for MrPdfApp {
                 if self.settings.show_sidebar {
                     self.sidebar(ui);
                 }
-                if self.settings.show_properties {
+                if self.compare.is_some() {
+                    self.compare_panel(ui);
+                } else if self.settings.show_properties {
                     self.properties_panel(ui);
                 }
             }

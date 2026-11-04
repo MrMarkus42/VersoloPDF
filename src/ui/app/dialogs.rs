@@ -580,6 +580,11 @@ impl MrPdfApp {
                             outcome = o;
                             action = a;
                         }
+                        Dialog::Compare(state) => {
+                            let (o, a) = self.compare_dialog(ui, state);
+                            outcome = o;
+                            action = a;
+                        }
                         Dialog::About => {
                             set_title(
                                 ui,
