@@ -41,6 +41,8 @@ pub const MAX_BITMAP_EDGE: u32 = 16_384;
 
 const MAX_UNDO_STEPS: usize = 50;
 const MAX_UNDO_BYTES: usize = 512 * 1024 * 1024;
+/// Undo steps moved into temporary files may take this much disk space.
+const MAX_UNDO_DISK: usize = 4 * 1024 * 1024 * 1024;
 const MAX_BOOKMARKS: usize = 20_000;
 const MAX_BOOKMARK_DEPTH: usize = 32;
 
@@ -138,15 +140,117 @@ pub struct RenderedImage {
     pub rgba: Vec<u8>,
 }
 
-struct Snapshot {
-    label: String,
-    bytes: Vec<u8>,
+/// Folder for undo steps moved out of memory.
+fn spill_dir() -> PathBuf {
+    std::env::temp_dir().join("mrpdf-undo")
 }
 
-#[derive(Default)]
+/// Removes undo files left behind by earlier runs (for example after a
+/// crash). Files still in use stay: Windows refuses to delete open files,
+/// and on other systems the running program reads them through its open
+/// handle.
+pub fn clean_old_undo_files() {
+    if let Ok(entries) = std::fs::read_dir(spill_dir()) {
+        for entry in entries.flatten() {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// An undo step written to a temporary file; the file is deleted with it.
+struct SpillFile {
+    file: Option<std::fs::File>,
+    path: PathBuf,
+    len: usize,
+}
+
+impl SpillFile {
+    fn write(bytes: &[u8]) -> std::io::Result<Self> {
+        use std::io::Write;
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let dir = spill_dir();
+        std::fs::create_dir_all(&dir)?;
+        let n = NEXT.fetch_add(1, Ordering::Relaxed);
+        let path = dir.join(format!("{}-{n}.pdf", std::process::id()));
+        let file = std::fs::OpenOptions::new().read(true).write(true).create_new(true).open(&path)?;
+        let spill = Self { file: Some(file), path, len: bytes.len() };
+        // On an error `spill` is dropped, which deletes the half-written file.
+        spill.file.as_ref().map_or(Ok(()), |mut f| f.write_all(bytes))?;
+        Ok(spill)
+    }
+
+    fn read(&self) -> std::io::Result<Vec<u8>> {
+        use std::io::{Read, Seek, SeekFrom};
+        let mut file = self.file.as_ref().ok_or(std::io::ErrorKind::NotFound)?;
+        file.seek(SeekFrom::Start(0))?;
+        let mut bytes = Vec::with_capacity(self.len);
+        file.read_to_end(&mut bytes)?;
+        Ok(bytes)
+    }
+}
+
+impl Drop for SpillFile {
+    fn drop(&mut self) {
+        // Close first: Windows cannot delete an open file.
+        self.file = None;
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+/// The document of an undo step: in memory, or in a temporary file once the
+/// steps in memory exceed [`MAX_UNDO_BYTES`].
+enum Stored {
+    Memory(Vec<u8>),
+    Disk(SpillFile),
+}
+
+impl Stored {
+    fn read(&self) -> Result<Vec<u8>> {
+        match self {
+            Stored::Memory(b) => Ok(b.clone()),
+            Stored::Disk(f) => f.read().map_err(|e| Error::io(&f.path, e)),
+        }
+    }
+
+    fn memory(&self) -> usize {
+        match self {
+            Stored::Memory(b) => b.len(),
+            Stored::Disk(_) => 0,
+        }
+    }
+
+    fn disk(&self) -> usize {
+        match self {
+            Stored::Memory(_) => 0,
+            Stored::Disk(f) => f.len,
+        }
+    }
+}
+
+struct Snapshot {
+    label: String,
+    data: Stored,
+}
+
+impl Snapshot {
+    fn new(label: impl Into<String>, bytes: Vec<u8>) -> Self {
+        Self { label: label.into(), data: Stored::Memory(bytes) }
+    }
+}
+
 struct History {
     undo: Vec<Snapshot>,
     redo: Vec<Snapshot>,
+    /// Limits (fields so tests can use small ones).
+    memory_limit: usize,
+    disk_limit: usize,
+}
+
+impl Default for History {
+    fn default() -> Self {
+        Self { undo: Vec::new(), redo: Vec::new(), memory_limit: MAX_UNDO_BYTES, disk_limit: MAX_UNDO_DISK }
+    }
 }
 
 impl History {
@@ -156,10 +260,46 @@ impl History {
         self.trim();
     }
 
+    /// Keeps the memory use of the steps below [`MAX_UNDO_BYTES`] by moving
+    /// the oldest steps into temporary files; only steps beyond
+    /// [`MAX_UNDO_STEPS`], or beyond [`MAX_UNDO_DISK`] on disk, are dropped.
     fn trim(&mut self) {
-        let mut total: usize = self.undo.iter().map(|s| s.bytes.len()).sum();
-        while self.undo.len() > MAX_UNDO_STEPS || (total > MAX_UNDO_BYTES && self.undo.len() > 1) {
-            total -= self.undo.remove(0).bytes.len();
+        while self.undo.len() > MAX_UNDO_STEPS {
+            self.undo.remove(0);
+        }
+        let memory = |h: &History| h.undo.iter().chain(&h.redo).map(|s| s.data.memory()).sum::<usize>();
+        // Oldest first: the undo steps from the bottom, then the redo steps
+        // from the bottom (the furthest away).
+        let mut next = 0;
+        while memory(self) > self.memory_limit {
+            let total = self.undo.len() + self.redo.len();
+            let Some(i) = (next..total).find(|&i| {
+                let s = if i < self.undo.len() { &self.undo[i] } else { &self.redo[i - self.undo.len()] };
+                matches!(s.data, Stored::Memory(_))
+            }) else {
+                break;
+            };
+            next = i + 1;
+            let slot =
+                if i < self.undo.len() { &mut self.undo[i] } else { &mut self.redo[i - self.undo.len()] };
+            let Stored::Memory(bytes) = &slot.data else { continue };
+            match SpillFile::write(bytes) {
+                Ok(file) => slot.data = Stored::Disk(file),
+                // No room on disk: drop the oldest step as before.
+                Err(_) => {
+                    if !self.undo.is_empty() {
+                        self.undo.remove(0);
+                    }
+                    next = 0;
+                    if self.undo.is_empty() {
+                        break;
+                    }
+                }
+            }
+        }
+        let disk = |h: &History| h.undo.iter().chain(&h.redo).map(|s| s.data.disk()).sum::<usize>();
+        while disk(self) > self.disk_limit && self.undo.len() > 1 {
+            self.undo.remove(0);
         }
     }
 }
@@ -397,22 +537,49 @@ impl Document {
         pdfium.load_pdf_from_byte_vec(bytes, password).map_err(|e| map_load_error(e, password.is_some()))
     }
 
+    /// Reads visible area and rotation of every page. Loading every page with
+    /// PDFium takes seconds for thousands of pages, so the values are read
+    /// from the file and only pages whose size disagrees with PDFium's
+    /// (cheap) page sizes are loaded.
     fn refresh_geometry(&mut self) {
-        self.geometry = self
-            .pdf
-            .pages()
-            .iter()
-            .map(|page| {
-                let crop = page
-                    .boundaries()
-                    .crop()
-                    .or_else(|_| page.boundaries().media())
-                    .map(|b| to_rectf(&b.bounds))
-                    .unwrap_or_else(|_| RectF::new(0.0, 0.0, page.width().value, page.height().value));
-                let rotation = page.rotation().map(from_pdf_rotation).unwrap_or_default();
-                PageGeometry::new(crop, rotation)
+        let count = self.pdf.pages().len() as usize;
+        let sizes = self.pdf.pages().page_sizes().unwrap_or_default();
+        // The file must be current to read the boxes from it.
+        let boxes = match self.sync_bytes() {
+            Ok(()) => pdf_edit::page_boxes(&self.bytes, self.password.as_deref()).unwrap_or_default(),
+            Err(_) => Vec::new(),
+        };
+        let geometry: Vec<PageGeometry> = (0..count)
+            .map(|i| {
+                let quick =
+                    boxes.get(i).map(|&(crop, rot)| PageGeometry::new(crop, Rotation::from_degrees(rot)));
+                match (quick, sizes.get(i)) {
+                    (Some(g), Some(size))
+                        if (g.view_size().0 - size.width().value).abs() < 0.5
+                            && (g.view_size().1 - size.height().value).abs() < 0.5 =>
+                    {
+                        g
+                    }
+                    _ => self.loaded_geometry(i),
+                }
             })
             .collect();
+        self.geometry = geometry;
+    }
+
+    /// Visible area and rotation of one page, loading the page.
+    fn loaded_geometry(&self, index: usize) -> PageGeometry {
+        let Ok(page) = page_index(index).and_then(|i| self.pdf.pages().get(i).map_err(Error::from)) else {
+            return PageGeometry::new(RectF::new(0.0, 0.0, 612.0, 792.0), Rotation::R0);
+        };
+        let crop = page
+            .boundaries()
+            .crop()
+            .or_else(|_| page.boundaries().media())
+            .map(|b| to_rectf(&b.bounds))
+            .unwrap_or_else(|_| RectF::new(0.0, 0.0, page.width().value, page.height().value));
+        let rotation = page.rotation().map(from_pdf_rotation).unwrap_or_default();
+        PageGeometry::new(crop, rotation)
     }
 
     // -----------------------------------------------------------------
@@ -1155,7 +1322,7 @@ impl Document {
         let new_bytes = f(&self.bytes, self.password.as_deref())?;
         let old = self.bytes.clone();
         self.reload(new_bytes)?;
-        self.history.push_undo(Snapshot { label: label.to_string(), bytes: old });
+        self.history.push_undo(Snapshot::new(label, old));
         self.modified = true;
         Ok(())
     }
@@ -1171,7 +1338,7 @@ impl Document {
         match f(&mut self.pdf) {
             Ok(()) => {
                 self.engine_dirty = true;
-                self.history.push_undo(Snapshot { label: label.to_string(), bytes: snapshot });
+                self.history.push_undo(Snapshot::new(label, snapshot));
                 self.refresh_geometry();
                 self.mark_changed();
                 Ok(())
@@ -1219,7 +1386,10 @@ impl Document {
             return Ok(false);
         }
         self.sync_bytes()?;
-        let mut current = self.bytes.clone();
+        // Read the target first: if that fails, nothing has changed yet.
+        let from = if forward { &self.history.redo } else { &self.history.undo };
+        let target = from[from.len() - n].data.read()?;
+        let mut current = Stored::Memory(self.bytes.clone());
         for _ in 0..n {
             let (from, to) = if forward {
                 (&mut self.history.redo, &mut self.history.undo)
@@ -1227,10 +1397,12 @@ impl Document {
                 (&mut self.history.undo, &mut self.history.redo)
             };
             let Some(snapshot) = from.pop() else { break };
-            to.push(Snapshot { label: snapshot.label, bytes: current });
-            current = snapshot.bytes;
+            to.push(Snapshot { label: snapshot.label, data: current });
+            current = snapshot.data;
         }
-        self.reload(current)?;
+        drop(current);
+        self.reload(target)?;
+        self.history.trim();
         self.modified = true;
         Ok(true)
     }
@@ -2714,7 +2886,7 @@ impl Document {
             if removed > 0 {
                 let old = std::mem::replace(&mut self.bytes, bytes.clone());
                 self.reload(bytes)?;
-                self.history.push_undo(Snapshot { label: "delete bookmarks".into(), bytes: old });
+                self.history.push_undo(Snapshot::new("delete bookmarks", old));
             }
         }
         self.delete_pages(pages)
@@ -3535,6 +3707,44 @@ mod tests {
         assert_eq!(move_order(3, &[1], 1).unwrap(), vec![0, 1, 2]);
         assert!(move_order(3, &[5], 0).is_err());
         assert!(move_order(3, &[], 0).is_err());
+    }
+
+    #[test]
+    fn undo_steps_move_to_disk_instead_of_being_dropped() {
+        let mut h = History { memory_limit: 250, ..History::default() };
+        for i in 0..6u8 {
+            h.push_undo(Snapshot::new(format!("step {i}"), vec![i; 100]));
+        }
+        assert_eq!(h.undo.len(), 6, "no step dropped");
+        let in_memory = h.undo.iter().filter(|s| matches!(s.data, Stored::Memory(_))).count();
+        assert!(in_memory <= 2, "{in_memory} steps in memory");
+        assert!(matches!(h.undo.last().unwrap().data, Stored::Memory(_)), "the newest stays in memory");
+        for (i, s) in h.undo.iter().enumerate() {
+            assert_eq!(s.data.read().unwrap(), vec![i as u8; 100], "step {i}");
+        }
+        let files: Vec<PathBuf> = h
+            .undo
+            .iter()
+            .filter_map(|s| match &s.data {
+                Stored::Disk(f) => Some(f.path.clone()),
+                Stored::Memory(_) => None,
+            })
+            .collect();
+        assert_eq!(files.len(), 6 - in_memory);
+        assert!(files.iter().all(|p| p.exists()));
+        drop(h);
+        assert!(files.iter().all(|p| !p.exists()), "files are removed with the history");
+    }
+
+    #[test]
+    fn disk_limit_drops_the_oldest_steps() {
+        let mut h = History { memory_limit: 0, disk_limit: 250, ..History::default() };
+        for i in 0..6u8 {
+            h.push_undo(Snapshot::new(format!("step {i}"), vec![i; 100]));
+        }
+        assert_eq!(h.undo.len(), 2);
+        assert_eq!(h.undo[0].label, "step 4");
+        assert_eq!(h.undo[1].data.read().unwrap(), vec![5u8; 100]);
     }
 
     #[test]

@@ -45,6 +45,7 @@ fn main() -> eframe::Result {
             mrpdf::instance::Start::First(inbox) => inbox,
         }
     };
+    mrpdf::document::clean_old_undo_files();
     let inbox = std::sync::Arc::new(std::sync::Mutex::new(inbox));
 
     let start = |renderer, files: Vec<PathBuf>| {

@@ -76,6 +76,13 @@ fn timings_with_real_files() {
         doc.move_annotations(0, &[index], 20.0, 10.0).unwrap();
         let moved = t.elapsed();
         let t = Instant::now();
+        doc.rotate_pages(&[0], 90).unwrap();
+        let rotate = t.elapsed();
+        let t = Instant::now();
+        doc.delete_pages(&[pages - 1]).unwrap();
+        let delete = t.elapsed();
+        println!("{name}: drehen {} | Seite löschen {}", ms(rotate), ms(delete));
+        let t = Instant::now();
         let bytes = doc.to_bytes().unwrap();
         let save = t.elapsed();
         // Parts of an edit: the byte edit alone and loading the result.
@@ -237,4 +244,43 @@ fn round_trips_with_real_files() {
         println!("  {p}");
     }
     assert!(problems.is_empty(), "{problems:#?}");
+}
+
+/// Probe: reading page geometry by loading every page vs. page_sizes().
+#[test]
+#[ignore = "needs MRPDF_TESTFILES"]
+fn probe_geometry_speed() {
+    let _guard = common::lock();
+    let pdfium = mrpdf::engine::pdfium().unwrap();
+    for path in files() {
+        let name = path.file_name().unwrap().to_string_lossy().to_string();
+        let t = Instant::now();
+        let doc = pdfium.load_pdf_from_file(&path, None).unwrap();
+        let load = t.elapsed();
+        let t = Instant::now();
+        let mut rotated = 0;
+        let mut offset = 0;
+        for page in doc.pages().iter() {
+            let crop = page.boundaries().crop().or_else(|_| page.boundaries().media()).map(|b| b.bounds);
+            if let Ok(r) = crop
+                && (r.left().value.abs() > 0.5 || r.bottom().value.abs() > 0.5)
+            {
+                offset += 1;
+            }
+            if page.rotation().map(|r| r.as_degrees() != 0.0).unwrap_or(false) {
+                rotated += 1;
+            }
+        }
+        let each = t.elapsed();
+        let t = Instant::now();
+        let sizes = doc.pages().page_sizes().unwrap();
+        let fast = t.elapsed();
+        println!(
+            "{name}: laden {} | jede Seite laden {} | page_sizes {} ({} Seiten, {rotated} gedreht, {offset} mit verschobenem Rahmen)",
+            ms(load),
+            ms(each),
+            ms(fast),
+            sizes.len()
+        );
+    }
 }

@@ -1182,6 +1182,60 @@ pub fn reorder_pages(bytes: &[u8], password: Option<&str>, order: &[usize]) -> R
     })
 }
 
+/// Visible area (crop box, else media box) and rotation of every page, read
+/// from the page dictionaries (inherited values included). Much faster than
+/// loading every page with PDFium; `Document` checks the result against
+/// PDFium's page sizes.
+pub fn page_boxes(bytes: &[u8], password: Option<&str>) -> Result<Vec<(RectF, i32)>> {
+    guarded(|| {
+        let mut options = match password {
+            Some(pw) => LoadOptions::with_password(pw),
+            None => LoadOptions::default(),
+        };
+        options.max_decompressed_size = Some(MAX_DECOMPRESSED_STREAM);
+        let doc = Document::load_mem_with_options(bytes, options)?;
+        // A value of the page or the nearest parent that has it.
+        let inherited = |id: ObjectId, key: &[u8]| -> Option<Object> {
+            let mut current = Some(id);
+            for _ in 0..64 {
+                let dict = doc.get_dictionary(current?).ok()?;
+                if let Ok(value) = dict.get(key) {
+                    return match value {
+                        Object::Reference(r) => doc.get_object(*r).ok().cloned(),
+                        other => Some(other.clone()),
+                    };
+                }
+                current = dict.get(b"Parent").and_then(Object::as_reference).ok();
+            }
+            None
+        };
+        let rect = |obj: Option<Object>| -> Option<RectF> {
+            let obj = obj?;
+            let items = obj.as_array().ok()?;
+            let values: Vec<f32> = items
+                .iter()
+                .filter_map(|o| match o {
+                    Object::Reference(r) => doc.get_object(*r).ok().and_then(number),
+                    other => number(other),
+                })
+                .collect();
+            match values.as_slice() {
+                [a, b, c, d] => Some(RectF::new(*a, *b, *c, *d).normalized()),
+                _ => None,
+            }
+        };
+        doc.get_pages()
+            .into_values()
+            .map(|id| {
+                let media = rect(inherited(id, b"MediaBox")).unwrap_or(RectF::new(0.0, 0.0, 612.0, 792.0));
+                let crop = rect(inherited(id, b"CropBox")).unwrap_or(media);
+                let rotate = inherited(id, b"Rotate").as_ref().and_then(number).unwrap_or(0.0) as i32;
+                Ok((crop, rotate.rem_euclid(360)))
+            })
+            .collect()
+    })
+}
+
 /// Reads the document information dictionary.
 pub fn read_metadata(bytes: &[u8], password: Option<&str>) -> Result<Metadata> {
     guarded(|| {

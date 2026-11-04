@@ -123,6 +123,79 @@ fn comment_edits_are_page_local() {
     assert!(doc.page_revision(0) > rev0);
 }
 
+/// Visible area and rotation read quickly from the file must match what
+/// PDFium reports when the page is loaded: rotated, cropped and inherited.
+#[test]
+fn page_geometry_matches_pdfium() {
+    let _guard = common::lock();
+    let check = |bytes: Vec<u8>| {
+        let doc = Document::from_bytes(bytes.clone(), "g.pdf", None).unwrap();
+        let pdfium = mrpdf::engine::pdfium().unwrap();
+        let raw = pdfium.load_pdf_from_byte_vec(bytes, None).unwrap();
+        for (i, page) in raw.pages().iter().enumerate() {
+            let g = doc.geometry(i).unwrap();
+            // PDFium's box functions ignore inherited boxes; then compare the
+            // size PDFium draws the page with.
+            match page.boundaries().crop().or_else(|_| page.boundaries().media()) {
+                Ok(b) => {
+                    let b = b.bounds;
+                    let want = RectF::new(b.left().value, b.bottom().value, b.right().value, b.top().value)
+                        .normalized();
+                    for (a, w) in [
+                        (g.crop.x0, want.x0),
+                        (g.crop.y0, want.y0),
+                        (g.crop.x1, want.x1),
+                        (g.crop.y1, want.y1),
+                    ] {
+                        assert!((a - w).abs() < 0.01, "page {i}: {:?} != {want:?}", g.crop);
+                    }
+                }
+                Err(_) => {
+                    let (w, h) = g.view_size();
+                    assert!(
+                        (w - page.width().value).abs() < 0.5 && (h - page.height().value).abs() < 0.5,
+                        "page {i}"
+                    );
+                }
+            }
+            assert_eq!(g.rotation.degrees(), page.rotation().unwrap().as_degrees() as i32, "page {i}");
+        }
+    };
+    // Rotated and cropped pages.
+    let mut doc = open(4);
+    doc.rotate_pages(&[1], 90).unwrap();
+    doc.rotate_pages(&[2], 270).unwrap();
+    doc.crop_pages(&[3], [20.0, 30.0, 40.0, 50.0]).unwrap();
+    check(doc.to_bytes().unwrap());
+
+    // Rotation and boxes only on the parent "Pages" node.
+    use lopdf::{Object, Stream, dictionary};
+    let mut l = lopdf::Document::with_version("1.7");
+    let pages_id = l.new_object_id();
+    let content = l.add_object(Stream::new(lopdf::Dictionary::new(), b"".to_vec()));
+    let kids: Vec<Object> = (0..2)
+        .map(|_| {
+            l.add_object(dictionary! { "Type" => "Page", "Parent" => pages_id, "Contents" => content }).into()
+        })
+        .collect();
+    l.objects.insert(
+        pages_id,
+        Object::Dictionary(dictionary! {
+            "Type" => "Pages",
+            "Kids" => kids,
+            "Count" => 2,
+            "Rotate" => 90,
+            "MediaBox" => vec![0.into(), 0.into(), 400.into(), 600.into()],
+            "CropBox" => vec![10.into(), 20.into(), 390.into(), 580.into()],
+        }),
+    );
+    let catalog = l.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+    l.trailer.set("Root", catalog);
+    let mut bytes = Vec::new();
+    l.save_to(&mut bytes).unwrap();
+    check(bytes);
+}
+
 /// The undo list: several steps back and forward at once.
 #[test]
 fn undo_and_redo_several_steps() {

@@ -28,14 +28,18 @@ echte Drucken und das Arbeiten mit der Maus in jedem Werkzeug.
 | F2 | B | Hohe Dialoge („Paginierung hinzufügen“, „Kopf- und Fußzeilen“) waren höher als das Fenster; Titel oben abgeschnitten, OK unten am Rand oder unerreichbar | Kein Dialog wird mehr höher als das Fenster, sonst erscheint ein sichtbarer Rollbalken; die Vorschau dieser Dialoge passt sich der Fensterhöhe an |
 | F3 | D | Die Hilfe zur Kommandozeile kannte `--new-window` und `--opengl` nicht | Ergänzt |
 
+### Nachträglich behoben (2026-11-04)
+
+| Nr | Stufe | Fund | Lösung |
+|---|---|---|---|
+| F4 | C | Bei sehr großen Dateien blieb nur **ein** Rückgängig-Schritt: Jeder Schritt speichert die ganze Datei, der Verlauf durfte 512 MB belegen, ältere Schritte wurden ohne Hinweis verworfen | Ältere Schritte werden in temporäre Dateien ausgelagert statt verworfen (höchstens 4 GB, wie bisher höchstens 50 Schritte). Die Dateien verschwinden mit dem Schritt bzw. beim Schließen; Reste nach einem Absturz räumt der nächste Start auf. Mit 274 MB: sechs Änderungen und „alles rückgängig“ ergeben wieder genau den Anfangszustand |
+| F5 | C | Änderungen der Seitenstruktur dauerten bei 274 MB / 1476 Seiten 1,5 bis 2 s, weil danach jede Seite geladen wurde, nur um ihre Größe zu lesen | Rahmen und Drehung werden direkt aus der Datei gelesen und mit PDFiums schneller Größenabfrage abgeglichen; nur abweichende Seiten werden geladen. Drehen 0,40 s, Seite löschen 0,25 s; bei 50 MB 20 bis 80 ms |
+| F6 | C | Öffnen der 274-MB-Datei dauerte 1,6 s | Gleiche Lösung: 0,18 s |
+| F7 | B | Bei Seiten, deren Seitenrahmen nur vom übergeordneten Seitenknoten geerbt wird, nahm MrPDF einen Rahmen am Nullpunkt an; Klickpositionen konnten dort leicht versetzt sein. Beim Bau von F5 gefunden | Der geerbte Rahmen wird jetzt gelesen; ein Test vergleicht gedrehte, zugeschnittene und geerbte Seiten mit PDFium |
+
 ### Offen
 
-| Nr | Stufe | Fund | Vorschlag |
-|---|---|---|---|
-| F4 | C | Bei sehr großen Dateien bleibt nur **ein** Rückgängig-Schritt: Jeder Schritt speichert die ganze Datei, der Verlauf darf 512 MB belegen. Bei 274 MB werden ältere Schritte ohne Hinweis verworfen | Ältere Schritte auf die Festplatte auslagern (Temp-Ordner), statt sie zu verwerfen; mindestens einen Hinweis zeigen |
-| F5 | C | Änderungen an der Seitenstruktur (drehen, löschen, einfügen, umkehren) dauern bei 274 MB / 1476 Seiten etwa 1,5 bis 2 s, weil danach alle Seitengrößen neu gelesen werden | Seitengrößen nur für betroffene Seiten neu lesen |
-| F6 | C | Öffnen der 274-MB-Datei dauert etwa 1,6 s aus demselben Grund | Seitengrößen beim Öffnen schneller ermitteln |
-
+Keine offenen Punkte aus dieser Prüfung.
 ## Werkzeuge der Prüfung
 
 * `cargo test --release --test tour -- --ignored --nocapture` – Befehls-Rundgang,
