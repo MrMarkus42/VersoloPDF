@@ -299,6 +299,9 @@ pub struct MrPdfApp {
     preview: [Option<preview::PreviewCache>; preview::SLOTS],
     /// Extra document shown in a dialog (source file, generated pages).
     dialog_doc: Option<(String, crate::Document)>,
+    /// Background dialog: the previewed page covers its background, and
+    /// "Über den Inhalt legen" was switched on for that once.
+    mark_covered: (bool, bool),
     /// Clipboard content read for "Seiten aus der Zwischenablage einfügen".
     clipboard: (Option<String>, Option<crate::pdf_edit::RgbaImage>),
     /// Source document of the overlay dialog.
@@ -427,6 +430,7 @@ impl MrPdfApp {
             last_radio: ("RadioGroup1".into(), 0),
             preview: Default::default(),
             dialog_doc: None,
+            mark_covered: (false, false),
             clipboard: (None, None),
             overlay_source: None,
             backstage,

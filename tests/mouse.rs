@@ -523,6 +523,43 @@ fn polygon_gestures() {
     assert!(failed.is_empty(), "nicht gezeichnet: {failed:?}");
 }
 
+/// Background colour on a page that covers its background (first real test
+/// file, `MRPDF_TESTFILES`): the dialog switches to "Über den Seiteninhalt
+/// legen" by itself and OK colours the white parts of the page.
+#[test]
+#[ignore = "needs MRPDF_TESTFILES"]
+fn background_on_covered_page() {
+    use mrpdf::ui::app::commands::Cmd;
+    let Some(dir) = std::env::var_os("MRPDF_TESTFILES") else { return };
+    let file = PathBuf::from(dir).join("test1.pdf");
+    let _guard = common::lock();
+    let mut h = harness(file);
+    let ctx = h.ctx.clone();
+    let before = h.state_mut().active_tab_mut().unwrap().doc.render_page(0, 100, 140).unwrap();
+    h.state_mut().run(&ctx, Cmd::Background);
+    h.run_steps(10);
+    let check = h
+        .get_all_by_label("Über den Seiteninhalt legen (multiplizieren)")
+        .next()
+        .map(|n| n.accesskit_node().toggled());
+    println!("Schalter: {check:?}");
+    if let Ok(img) = h.render() {
+        let _ = img.save(out_dir().join("covered-dialog.png"));
+    }
+    assert_eq!(check, Some(Some(egui::accesskit::Toggled::True)), "Schalter nicht von selbst an");
+    let ok = h.get_all_by_label("OK").last().map(|n| n.rect().center()).unwrap();
+    click(&mut h, ok);
+    h.run_steps(10);
+    let tab = h.state_mut().active_tab_mut().unwrap();
+    let img = tab.doc.render_page(0, 100, 140).unwrap();
+    // White pixels that took the (light) colour.
+    let white = |p: &[u8]| p[0] > 245 && p[1] > 245 && p[2] > 245;
+    let was_white = before.rgba.chunks(4).filter(|p| white(p)).count();
+    let tinted = before.rgba.chunks(4).zip(img.rgba.chunks(4)).filter(|(a, b)| white(a) && a != b).count();
+    println!("eingefärbt: {tinted} von {was_white} weißen Pixeln");
+    assert!(tinted * 10 > was_white * 9, "Seite nicht eingefärbt");
+}
+
 /// Hash of the pixels in `r` (screen points).
 fn region_hash(h: &mut Harness<'_, MrPdfApp>, r: Rect) -> u64 {
     use std::hash::{Hash, Hasher};

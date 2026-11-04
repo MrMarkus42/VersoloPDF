@@ -165,6 +165,10 @@ pub struct MarkDef {
     pub h_from: Align,
     pub v_from: Align,
     pub behind: bool,
+    /// Colour backgrounds: laid over the page content and multiplied with
+    /// it (white turns into the colour, text stays dark), for pages that
+    /// cover their background (scans, own white area).
+    pub multiply: bool,
     /// Pages (0-based) the mark is placed on.
     pub pages: Vec<usize>,
     pub bates: BatesFormat,
@@ -185,6 +189,7 @@ impl Default for MarkDef {
             h_from: Align::Center,
             v_from: Align::Center,
             behind: false,
+            multiply: false,
             pages: Vec::new(),
             bates: BatesFormat::default(),
         }
@@ -192,6 +197,11 @@ impl Default for MarkDef {
 }
 
 impl MarkDef {
+    /// A colour background laid over the content in multiply mode.
+    pub fn multiplies(&self) -> bool {
+        self.multiply && self.kind == Kind::Background && matches!(self.source, Source::Color { .. })
+    }
+
     /// Short description for lists.
     pub fn describe(&self) -> String {
         match &self.source {
@@ -654,6 +664,9 @@ pub fn add(
             d.set("Type", Object::Name(b"ExtGState".to_vec()));
             d.set("CA", real(def.opacity.clamp(0.0, 1.0)));
             d.set("ca", real(def.opacity.clamp(0.0, 1.0)));
+            if def.multiplies() {
+                d.set("BM", Object::Name(b"Multiply".to_vec()));
+            }
             edit.add(Object::Dictionary(d))
         };
         let font = match &def.source {
@@ -712,7 +725,7 @@ pub fn add(
             if let Some(oc) = ocg {
                 add_resource(&mut edit, page_id, b"Properties", &names.oc, Object::Reference(oc))?;
             }
-            let behind = def.behind || def.kind == Kind::Background;
+            let behind = (def.behind || def.kind == Kind::Background) && !def.multiplies();
             add_content(&mut edit, page_id, content.into_bytes(), behind)?;
             tag_last_stream(&mut edit, page_id, &id, def.kind, behind)?;
         }

@@ -246,6 +246,52 @@ fn round_trips_with_real_files() {
     assert!(problems.is_empty(), "{problems:#?}");
 }
 
+/// "Hintergrund" with a colour on the first page of every file: share of
+/// pixels that change (0 % = the page covers its background completely).
+#[test]
+#[ignore = "needs MRPDF_TESTFILES"]
+fn background_colour_on_real_files() {
+    use mrpdf::marks::{Kind, MarkDef, Source};
+    let _guard = common::lock();
+    let mut problems = Vec::new();
+    for path in files() {
+        let name = path.file_name().unwrap().to_string_lossy().to_string();
+        for multiply in [false, true] {
+            let mut doc = Document::open(&path, None).unwrap();
+            let before = doc.render_page(0, 200, 280).unwrap();
+            let def = MarkDef {
+                kind: Kind::Background,
+                source: Source::Color { color: Rgba::rgb(255, 200, 120) },
+                multiply,
+                pages: vec![0],
+                ..MarkDef::default()
+            };
+            doc.add_mark(&def, None).unwrap();
+            let after = doc.render_page(0, 200, 280).unwrap();
+            let px = before.rgba.len() / 4;
+            let white = |p: &[u8]| p[0] > 245 && p[1] > 245 && p[2] > 245;
+            let was_white = before.rgba.chunks(4).filter(|p| white(p)).count();
+            // White pixels that took the colour.
+            let tinted = before
+                .rgba
+                .chunks(4)
+                .zip(after.rgba.chunks(4))
+                .filter(|(a, b)| white(a) && b[2] < 200 && b[0] > 230)
+                .count();
+            let share = 100.0 * tinted as f64 / was_white.max(1) as f64;
+            println!(
+                "{name} {}: weiß vorher {:.0} %, davon eingefärbt {share:.1} %",
+                if multiply { "darüber (multipliziert)" } else { "dahinter" },
+                100.0 * was_white as f64 / px as f64,
+            );
+            if multiply && share < 95.0 {
+                problems.push(format!("{name}: nur {share:.1} % eingefärbt"));
+            }
+        }
+    }
+    assert!(problems.is_empty(), "{problems:?}");
+}
+
 /// Probe: reading page geometry by loading every page vs. page_sizes().
 #[test]
 #[ignore = "needs MRPDF_TESTFILES"]

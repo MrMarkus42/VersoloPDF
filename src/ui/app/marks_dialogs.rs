@@ -192,6 +192,20 @@ fn font_menu(ui: &mut Ui, de: bool, font: &mut FontSpec) {
     });
 }
 
+/// True when fewer than half of the white pixels of `before` (RGBA) changed
+/// in `after`: the page covers a background put behind it.
+fn background_hidden(before: &[u8], after: &[u8]) -> bool {
+    let white = |p: &[u8]| p[0] > 245 && p[1] > 245 && p[2] > 245;
+    let (mut total, mut changed) = (0usize, 0usize);
+    for (a, b) in before.chunks(4).zip(after.chunks(4)) {
+        if white(a) {
+            total += 1;
+            changed += usize::from(a != b);
+        }
+    }
+    total > 0 && changed * 2 < total
+}
+
 /// Dashed guides for the header and footer margins.
 fn margin_guides(area: &super::preview::PreviewArea, margins: &[f32; 4]) {
     let r = area.rect;
@@ -234,6 +248,7 @@ impl MrPdfApp {
     fn open_marks(&mut self, dialog: MarksDialog) {
         self.clear_previews();
         self.dialog_doc = None;
+        self.mark_covered = (false, false);
         self.dialog = Some(Dialog::Marks(Box::new(MarksState { dialog, preset_name: String::new() })));
     }
 
@@ -751,6 +766,36 @@ impl MrPdfApp {
                         }
                     }
                 });
+                if is_color {
+                    // Pages that cover their background (scans, own white
+                    // area): the colour goes over the content, once
+                    // switched on by itself.
+                    let (covered, switched) = self.mark_covered;
+                    if covered && !switched {
+                        def.multiply = true;
+                        self.mark_covered.1 = true;
+                    }
+                    ui.checkbox(
+                        &mut def.multiply,
+                        tr(de, "Über den Seiteninhalt legen (multiplizieren)", "Lay over the page content (multiply)"),
+                    )
+                    .on_hover_text(tr(
+                        de,
+                        "Für Seiten, die ihren Hintergrund verdecken, z. B. Scans: Weiß wird zur gewählten Farbe, Text und dunkle Stellen bleiben erhalten; Bilder werden mit eingefärbt.",
+                        "For pages that cover their background, e.g. scans: white becomes the chosen colour, text and dark parts stay; pictures are tinted too.",
+                    ));
+                    if covered {
+                        ui.label(
+                            RichText::new(tr(
+                                de,
+                                "Diese Seite verdeckt ihren Hintergrund vollständig (z. B. ein Scan oder eine eigene weiße Fläche). Hinter dem Inhalt wäre die Farbe nicht zu sehen.",
+                                "This page covers its background completely (e.g. a scan or its own white area). Behind the content the colour would not show.",
+                            ))
+                            .small()
+                            .color(Color32::from_rgb(170, 90, 0)),
+                        );
+                    }
+                }
                 ui.horizontal(|ui| {
                     if ui.radio(!is_color, tr(de, "Bild:", "Image:")).clicked() && is_color {
                         def.source = Source::Image { name: String::new() };
@@ -983,6 +1028,18 @@ impl MrPdfApp {
                 (_, image) => self.active_tab().map(|t| t.doc.mark_preview(page, def, image)),
             };
             if let Some(Ok(d)) = doc {
+                // A colour background behind content that covers the page
+                // hardly shows: compare small pictures.
+                if def.kind == Kind::Background && matches!(def.source, Source::Color { .. }) && !def.multiply
+                {
+                    let small = |doc: &Document, p: usize| doc.render_page(p, 60, 85).ok().map(|i| i.rgba);
+                    if let (Some(a), Some(b)) =
+                        (self.active_tab().and_then(|t| small(&t.doc, page)), small(&d, 0))
+                        && background_hidden(&a, &b)
+                    {
+                        self.mark_covered.0 = true;
+                    }
+                }
                 self.dialog_doc = Some((key, d));
             }
         }
@@ -1112,5 +1169,18 @@ fn load_image_data(path: &Path, page: u32) -> crate::Result<ImageData> {
         Ok(ImageData::PdfPage(Box::new(src), p))
     } else {
         Ok(ImageData::Pixels(crate::document::load_image(path)?))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn hidden_background() {
+        let white = [255u8, 255, 255, 255];
+        let tint = [255u8, 200, 120, 255];
+        let page = [white, white, white, white].concat();
+        assert!(super::background_hidden(&page, &page));
+        assert!(super::background_hidden(&page, &[tint, white, white, white].concat()));
+        assert!(!super::background_hidden(&page, &[tint, tint, white, white].concat()));
     }
 }
