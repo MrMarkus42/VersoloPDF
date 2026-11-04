@@ -1081,8 +1081,10 @@ impl MrPdfApp {
                 ui.add_enabled_ui(s.color_on, |ui| color_button(ui, &mut s.color));
             });
         });
-        ui.horizontal_top(|ui| {
-            section(ui, tr(de, "Verknüpfungen", "Links"), |ui| {
+        // Two columns of equal width (a row would give the first all the room).
+        ui.columns(2, |cols| {
+            let [left, right] = cols else { return };
+            section(left, tr(de, "Verknüpfungen", "Links"), |ui| {
                 egui::Grid::new("links-look").num_columns(2).spacing([6.0, 4.0]).show(ui, |ui| {
                     ui.label(tr(de, "Strichfarbe:", "Line colour:"));
                     color_button(ui, &mut s.look.color);
@@ -1137,37 +1139,42 @@ impl MrPdfApp {
                     ui.end_row();
                 });
             });
-            section(ui, tr(de, "Einstellungen", "Settings"), |ui| {
-                ui.checkbox(
-                    &mut s.opts.ignore_case,
-                    tr(de, "Groß-/Kleinschreibung ignorieren", "Ignore case"),
-                );
-                ui.checkbox(
-                    &mut s.opts.ignore_spaces,
-                    tr(de, "Aufeinanderfolgende Leerzeichen ignorieren", "Ignore repeated spaces"),
-                );
-                ui.checkbox(
-                    &mut s.opts.whole_words,
-                    tr(de, "Nur ganze Wörter vergleichen", "Whole words only"),
-                );
-                ui.checkbox(
-                    &mut s.opts.over_existing,
-                    tr(de, "Verweise über bestehenden erzeugen", "Create links over existing ones"),
-                );
-                ui.checkbox(
-                    &mut s.opts.trim,
-                    tr(de, "Weißraum aus Lesezeichen entfernen", "Trim white space of titles"),
-                );
-                ui.checkbox(
-                    &mut s.pattern_on,
-                    tr(de, "Textmuster (Regulärer Ausdruck)", "Text pattern (regular expression)"),
-                )
-                .on_hover_text(tr(
-                    de,
-                    "Nur Lesezeichen, deren Titel zum Muster passt.",
-                    "Only bookmarks whose title matches.",
-                ));
-                ui.add_enabled(s.pattern_on, egui::TextEdit::singleline(&mut s.pattern).desired_width(220.0));
+            section(right, tr(de, "Einstellungen", "Settings"), |ui| {
+                ui.vertical(|ui| {
+                    ui.checkbox(
+                        &mut s.opts.ignore_case,
+                        tr(de, "Groß-/Kleinschreibung ignorieren", "Ignore case"),
+                    );
+                    ui.checkbox(
+                        &mut s.opts.ignore_spaces,
+                        tr(de, "Aufeinanderfolgende Leerzeichen ignorieren", "Ignore repeated spaces"),
+                    );
+                    ui.checkbox(
+                        &mut s.opts.whole_words,
+                        tr(de, "Nur ganze Wörter vergleichen", "Whole words only"),
+                    );
+                    ui.checkbox(
+                        &mut s.opts.over_existing,
+                        tr(de, "Verweise über bestehenden erzeugen", "Create links over existing ones"),
+                    );
+                    ui.checkbox(
+                        &mut s.opts.trim,
+                        tr(de, "Weißraum aus Lesezeichen entfernen", "Trim white space of titles"),
+                    );
+                    ui.checkbox(
+                        &mut s.pattern_on,
+                        tr(de, "Textmuster (Regulärer Ausdruck)", "Text pattern (regular expression)"),
+                    )
+                    .on_hover_text(tr(
+                        de,
+                        "Nur Lesezeichen, deren Titel zum Muster passt.",
+                        "Only bookmarks whose title matches.",
+                    ));
+                    ui.add_enabled(
+                        s.pattern_on,
+                        egui::TextEdit::singleline(&mut s.pattern).desired_width(220.0),
+                    );
+                });
             });
         });
         let pages = s.range.resolve(n, cur);

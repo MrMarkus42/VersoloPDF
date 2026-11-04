@@ -103,3 +103,138 @@ fn timings_with_real_files() {
         );
     }
 }
+
+/// The characters of a page's text, sorted (to compare pages; a rotated
+/// page gives the same characters in another order).
+fn text_of(doc: &Document, page: usize) -> String {
+    let mut chars: Vec<char> = doc
+        .page_text(page)
+        .map(|t| t.all_text().chars().filter(|c| !c.is_whitespace()).collect())
+        .unwrap_or_default();
+    chars.sort_unstable();
+    chars.into_iter().collect()
+}
+
+fn reopen(doc: &mut Document) -> mrpdf::Result<Document> {
+    Document::from_bytes(doc.to_bytes()?, "check.pdf", None)
+}
+
+/// Edits every real file, saves, opens the result again and compares.
+#[test]
+#[ignore = "needs MRPDF_TESTFILES"]
+fn round_trips_with_real_files() {
+    let _guard = common::lock();
+    let files = files();
+    assert!(!files.is_empty(), "MRPDF_TESTFILES must name a folder with PDFs");
+    let mut problems: Vec<String> = Vec::new();
+    for path in files {
+        let name = path.file_name().unwrap().to_string_lossy().to_string();
+        let mut doc = match Document::open(&path, None) {
+            Ok(d) => d,
+            Err(e) => {
+                problems.push(format!("{name}: öffnen: {e}"));
+                continue;
+            }
+        };
+        let n = doc.page_count();
+        let first = text_of(&doc, 0);
+        let last = text_of(&doc, n - 1);
+        let size0 = doc.geometry(0).unwrap().view_size();
+        let mut check = |what: &str, ok: Result<bool, String>, took: Duration| {
+            let line = match ok {
+                Ok(true) => format!("{name}: {what} ok ({})", ms(took)),
+                Ok(false) => {
+                    problems.push(format!("{name}: {what}: Ergebnis falsch"));
+                    format!("{name}: {what} FALSCH")
+                }
+                Err(e) => {
+                    problems.push(format!("{name}: {what}: {e}"));
+                    format!("{name}: {what} FEHLER {e}")
+                }
+            };
+            println!("{line}");
+        };
+        let step = |doc: &mut Document,
+                    f: &dyn Fn(&mut Document) -> mrpdf::Result<()>|
+         -> Result<Document, String> {
+            f(doc).map_err(|e| e.to_string())?;
+            reopen(doc).map_err(|e| format!("neu öffnen: {e}"))
+        };
+
+        let t = Instant::now();
+        let r = step(&mut doc, &|d| d.rotate_pages(&[0], 90)).map(|r| {
+            let s = r.geometry(0).unwrap().view_size();
+            (s.0 - size0.1).abs() < 1.0 && (s.1 - size0.0).abs() < 1.0
+        });
+        check("Seite 1 drehen", r, t.elapsed());
+
+        let t = Instant::now();
+        let style =
+            AnnotStyle { color: Rgba::RED, width: 2.0, author: "Test".into(), ..AnnotStyle::default() };
+        let mut square = NewAnnotation::new(AnnotKind::Square, style);
+        square.rect = RectF::new(100.0, 100.0, 200.0, 180.0);
+        let before = doc.annotations(0).map(|a| a.len()).unwrap_or(0);
+        let r = step(&mut doc, &|d| d.add_annotation(0, &square))
+            .map(|r| r.annotations(0).map(|a| a.len()).unwrap_or(0) == before + 1);
+        check("Anmerkung einfügen", r, t.elapsed());
+
+        let t = Instant::now();
+        let r = step(&mut doc, &|d| d.delete_pages(&[n - 1])).map(|r| r.page_count() == n - 1);
+        check("letzte Seite löschen", r, t.elapsed());
+
+        let t = Instant::now();
+        let r = step(&mut doc, &|d| d.insert_blank_page(0, 595.0, 842.0)).map(|r| {
+            let ok = r.page_count() == n && text_of(&r, 1) == first;
+            if !ok {
+                println!(
+                    "  Seiten {} (erwartet {n}); Text Seite 2 gleich Anfang: {}; Länge Text {} / {}",
+                    r.page_count(),
+                    text_of(&r, 1) == first,
+                    text_of(&r, 1).len(),
+                    first.len()
+                );
+            }
+            ok
+        });
+        check("leere Seite vorn einfügen", r, t.elapsed());
+
+        let t = Instant::now();
+        let r = step(&mut doc, &|d| d.reverse_pages())
+            .map(|r| r.page_count() == n && text_of(&r, n - 2) == first);
+        check("Reihenfolge umkehren", r, t.elapsed());
+
+        let t = Instant::now();
+        let r = doc
+            .extract_pages_to_bytes(&[n - 1, n - 2])
+            .map_err(|e| e.to_string())
+            .and_then(|b| Document::from_bytes(b, "x.pdf", None).map_err(|e| e.to_string()))
+            .map(|x| x.page_count() == 2 && text_of(&x, 1) == first);
+        check("zwei Seiten herausziehen", r, t.elapsed());
+
+        let t = Instant::now();
+        let r = doc.undo_steps(99).map_err(|e| e.to_string()).and_then(|_| {
+            let r = reopen(&mut doc).map_err(|e| e.to_string())?;
+            let s = r.geometry(0).unwrap().view_size();
+            Ok(r.page_count() == n
+                && text_of(&r, 0) == first
+                && text_of(&r, n - 1) == last
+                && (s.0 - size0.0).abs() < 1.0
+                && r.annotations(0).map(|a| a.len()).unwrap_or(0) == before)
+        });
+        check("alles rückgängig = Anfangszustand", r, t.elapsed());
+
+        let t = Instant::now();
+        let out = std::env::temp_dir().join(format!("mrpdf-roundtrip-{}.pdf", std::process::id()));
+        let r = doc.save_as(&out).map_err(|e| e.to_string()).and_then(|_| {
+            let r = Document::open(&out, None).map_err(|e| e.to_string())?;
+            Ok(r.page_count() == n && text_of(&r, 0) == first)
+        });
+        let _ = std::fs::remove_file(&out);
+        check("speichern und von Platte öffnen", r, t.elapsed());
+    }
+    println!("Probleme: {}", problems.len());
+    for p in &problems {
+        println!("  {p}");
+    }
+    assert!(problems.is_empty(), "{problems:#?}");
+}

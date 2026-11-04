@@ -97,3 +97,47 @@ fn mutated_documents_never_crash() {
     }
     assert!(opened > 30, "most mutations should still open ({opened})");
 }
+
+/// The same with a real document: the smallest PDF of the folder named in
+/// `MRPDF_TESTFILES` (real files are not part of the repository).
+#[test]
+#[ignore = "needs MRPDF_TESTFILES"]
+fn mutated_real_document_never_crashes() {
+    let _guard = common::lock();
+    let dir = std::env::var_os("MRPDF_TESTFILES").expect("MRPDF_TESTFILES");
+    let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(dir)
+        .unwrap()
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("pdf")))
+        .collect();
+    files.sort_by_key(|p| std::fs::metadata(p).map(|m| m.len()).unwrap_or(u64::MAX));
+    let base = std::fs::read(&files[0]).unwrap();
+    let mut rng = Lcg(0xC0FF_EE01);
+    let (mut opened, mut slow) = (0, 0);
+    for _ in 0..200 {
+        let bytes = mutate(&base, &mut rng);
+        let start = std::time::Instant::now();
+        if let Ok(mut doc) = Document::from_bytes(bytes.clone(), "fuzz.pdf", None) {
+            opened += 1;
+            let n = doc.page_count();
+            for page in [0, n / 2, n.saturating_sub(1)] {
+                let _ = doc.render_page(page, 200, 280);
+                let _ = doc.page_text(page);
+                let _ = doc.annotations(page);
+            }
+            let _ = doc.bookmarks();
+            let mut annot = NewAnnotation::new(AnnotKind::Square, AnnotStyle::default());
+            annot.rect = RectF::new(10.0, 10.0, 50.0, 50.0);
+            let _ = doc.add_annotation(0, &annot);
+            let _ = doc.rotate_pages(&[0], 90);
+            let _ = doc.undo_steps(2);
+            let _ = doc.to_bytes();
+        }
+        let _ = pdf_edit::read_metadata(&bytes, None);
+        if start.elapsed().as_secs_f64() > 5.0 {
+            slow += 1;
+        }
+    }
+    println!("geöffnet: {opened} von 200, langsamer als 5 s: {slow}");
+    assert_eq!(slow, 0, "a damaged file must not hang");
+}

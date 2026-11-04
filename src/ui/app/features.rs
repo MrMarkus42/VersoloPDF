@@ -53,9 +53,9 @@ impl MrPdfApp {
             }
             Cmd::CommandLineHelp => {
                 let text = if de {
-                    "Aufruf:\n  mrpdf [DATEI.pdf ...]\n\nAlle angegebenen PDF-Dateien werden in eigenen Tabs geöffnet.\nUmgebungsvariable MRPDF_PDFIUM_DIR: Ordner mit der PDFium-Bibliothek (absoluter Pfad).\nRUST_LOG=info: ausführliche Protokollausgabe."
+                    "Aufruf:\n  mrpdf [Optionen] [DATEI.pdf ...]\n\nAlle angegebenen PDF-Dateien werden in eigenen Tabs geöffnet. Läuft MrPDF schon, öffnet das laufende Programm sie.\n\nOptionen:\n  --new-window   eigenes Fenster, auch wenn MrPDF schon läuft\n  --opengl       Darstellung mit OpenGL statt DirectX/Vulkan/Metal\n\nUmgebungsvariablen:\n  MRPDF_PDFIUM_DIR: Ordner mit der PDFium-Bibliothek (absoluter Pfad)\n  MRPDF_RENDERER=opengl: wie --opengl\n  RUST_LOG=info: ausführliche Protokollausgabe"
                 } else {
-                    "Usage:\n  mrpdf [FILE.pdf ...]\n\nAll given PDF files are opened in tabs.\nEnvironment variable MRPDF_PDFIUM_DIR: folder of the PDFium library (absolute path).\nRUST_LOG=info: verbose logging."
+                    "Usage:\n  mrpdf [options] [FILE.pdf ...]\n\nAll given PDF files are opened in tabs. If MrPDF is running already, the running program opens them.\n\nOptions:\n  --new-window   a window of its own even if MrPDF is running\n  --opengl       draw with OpenGL instead of DirectX/Vulkan/Metal\n\nEnvironment variables:\n  MRPDF_PDFIUM_DIR: folder of the PDFium library (absolute path)\n  MRPDF_RENDERER=opengl: same as --opengl\n  RUST_LOG=info: verbose logging"
                 };
                 self.info(Cmd::CommandLineHelp.label(self.settings.language), text.to_string());
             }

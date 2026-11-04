@@ -392,7 +392,9 @@ impl MrPdfApp {
                         }
                         ui.label(format!("/{n}"));
                     });
-                    self.mark_preview_ui(ui, def, None, 1, *page, vec2(760.0, 300.0));
+                    // A smaller preview on small screens, so OK stays in view.
+                    let height = (ui.ctx().content_rect().height() - 620.0).clamp(120.0, 300.0);
+                    self.mark_preview_ui(ui, def, None, 1, *page, vec2(760.0, height));
                 }
                 let mut name = std::mem::take(&mut state.preset_name);
                 let key = format!("mark-{kind:?}");
