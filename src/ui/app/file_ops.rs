@@ -226,7 +226,7 @@ impl MrPdfApp {
         true
     }
 
-    fn revert(&mut self, ctx: &Context) {
+    pub(super) fn revert(&mut self, ctx: &Context) {
         let Some(tab) = self.tab() else { return };
         let page = tab.current_page;
         let result = tab.doc.revert();

@@ -38,3 +38,10 @@ First version:
   properties, settings dialog
 * Images in GIF, TIFF, WebP, PBM/PGM/PPM, TGA and ICO can be opened and
   inserted; page export also as GIF, WebP and PBM/PGM/PPM
+* Digital signatures: sign with a digital ID (.pfx/.p12 or a new self-signed
+  one), visible, invisible or into an existing signature field (PAdES,
+  appended as incremental update); check signatures, hint when opening a
+  signed document and when saving breaks signatures
+* Keyboard operation of the ribbon with key tips (Alt or F10)
+* Error log and crash reports ("Hilfe › Fehlerprotokoll öffnen")
+* Modern look as default (system font, outline icons, fixed dialog buttons)

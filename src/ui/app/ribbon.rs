@@ -631,16 +631,28 @@ impl MrPdfApp {
             return;
         }
         let lang = self.settings.language;
-        let matches: Vec<Cmd> = SEARCHABLE
+        // Exact names first, then names starting with the query, then the rest.
+        let rank = |c: &Cmd| {
+            let (de, en) = c.names();
+            let (de, en) = (de.to_lowercase(), en.to_lowercase());
+            if de == query || en == query {
+                Some(0)
+            } else if de.starts_with(&query) || en.starts_with(&query) {
+                Some(1)
+            } else if de.contains(&query) || en.contains(&query) {
+                Some(2)
+            } else {
+                None
+            }
+        };
+        let mut ranked: Vec<(u8, Cmd)> = SEARCHABLE
             .iter()
             .copied()
             .filter(|c| self.cmd_implemented(*c))
-            .filter(|c| {
-                let (de, en) = c.names();
-                de.to_lowercase().contains(&query) || en.to_lowercase().contains(&query)
-            })
-            .take(12)
+            .filter_map(|c| rank(&c).map(|r| (r, c)))
             .collect();
+        ranked.sort_by_key(|(r, _)| *r);
+        let matches: Vec<Cmd> = ranked.into_iter().map(|(_, c)| c).take(12).collect();
         let mut run = None;
         if edit.has_focus() || edit.lost_focus() {
             egui::Area::new(id.with("popup"))
@@ -839,11 +851,7 @@ impl MrPdfApp {
             );
         });
         group(ui, t.tab_protect, |ui| {
-            self.big(
-                ui,
-                ctx,
-                UA(Unavailable::Signatures, "Dokument signieren", "Sign document", Icon::Signature),
-            );
+            self.big(ui, ctx, Cmd::SignDocument);
         });
     }
 
@@ -1146,8 +1154,8 @@ impl MrPdfApp {
                 ui,
                 ctx,
                 &[
-                    UA(Unavailable::Signatures, "Dokument signieren", "Sign document", Icon::Signature),
-                    UA(Unavailable::Signatures, "Signatur einfügen", "Insert signature", Icon::Signature),
+                    Cmd::SignDocument,
+                    Cmd::VerifySignatures,
                     UA(Unavailable::Signatures, "Signaturen einfügen", "Insert signatures", Icon::Signature),
                 ],
             );

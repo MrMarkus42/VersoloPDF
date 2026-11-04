@@ -2568,3 +2568,82 @@ fn backstage_and_tool_at_start() {
     assert!(h.state().backstage_open());
     assert_eq!(h.state().tool(), mrpdf::ui::tools::Tool::SelectText);
 }
+
+/// "Dokument signieren" with a stored digital ID, then "Signaturen überprüfen"
+/// and the hint when a signed document is opened.
+#[test]
+fn sign_and_check_document() {
+    use mrpdf::ui::app::Dialog;
+    use mrpdf::ui::app::commands::Cmd;
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let ids = dir.path().join("ids");
+    std::fs::create_dir_all(&ids).unwrap();
+    let id = mrpdf::sign::id::DigitalId::create(&mrpdf::sign::cert::NewId {
+        name: "Erika Test",
+        email: "",
+        organisation: "",
+        years: 1,
+    })
+    .unwrap();
+    std::fs::write(ids.join("Erika Test.pfx"), id.to_pfx("geheim1").unwrap()).unwrap();
+    let out = dir.path().join("Beispiel_signiert.pdf");
+    // SAFETY: only tests holding the lock read these variables.
+    unsafe {
+        std::env::set_var("MRPDF_IDS_DIR", &ids);
+        std::env::set_var("MRPDF_SIGN_SAVE_PATH", &out);
+    }
+    let mut h = harness(vec![sample_file(&dir, 2)], false);
+    h.run_steps(8);
+    let ctx = h.ctx.clone();
+    h.state_mut().run(&ctx, Cmd::SignDocument);
+    h.run_steps(6);
+    assert!(matches!(h.state().dialog(), Some(Dialog::Sign(_))), "sign dialog expected");
+    save(&mut h, "95-sign-dialog");
+    // A wrong password keeps the dialog open with a message.
+    h.input_mut().events.push(Event::Text("falsch".into()));
+    h.run_steps(2);
+    h.get_by_label("Signieren").click();
+    h.run_steps(8);
+    assert!(matches!(h.state().dialog(), Some(Dialog::Sign(_))), "still open after a wrong password");
+    assert!(h.query_by_label_contains("Kennwort der digitalen ID ist falsch").is_some());
+    // The right one signs and opens the signed file.
+    h.input_mut().events.push(Event::Text("geheim1".into()));
+    h.run_steps(2);
+    h.get_by_label("Signieren").click();
+    h.run_steps(10);
+    assert!(h.state().dialog().is_none(), "dialog closed: {:?}", h.state().status_text());
+    let bytes = std::fs::read(&out).expect("signed file written");
+    let sigs = mrpdf::sign::pdf::signatures(&bytes);
+    assert_eq!(sigs.len(), 1);
+    assert!(sigs[0].valid() && sigs[0].whole_file, "{sigs:?}");
+    assert_eq!(sigs[0].signer, "Erika Test");
+    assert_eq!(h.state().tab_count(), 2);
+    assert_eq!(h.state().active_tab().unwrap().doc.path(), Some(out.as_path()));
+    assert_eq!(h.state().status_text(), Some("Dokument signiert und gespeichert"));
+    save(&mut h, "96-signed");
+    // "Signaturen überprüfen".
+    h.state_mut().run(&ctx, Cmd::VerifySignatures);
+    h.run_steps(6);
+    match h.state().dialog() {
+        Some(Dialog::Signatures(s)) => assert!(s.len() == 1 && s[0].valid()),
+        other => panic!("signature report expected, got {other:?}"),
+    }
+    assert!(h.query_by_label_contains("Selbst ausgestellte digitale ID").is_some());
+    save(&mut h, "97-signatures");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(4);
+    assert!(h.state().dialog().is_none());
+    // Opening a signed document tells so.
+    let copy = dir.path().join("Kopie.pdf");
+    std::fs::copy(&out, &copy).unwrap();
+    h.state_mut().open_path(&ctx, copy, None);
+    h.run_steps(4);
+    let status = h.state().status_text().unwrap_or_default().to_string();
+    assert!(status.starts_with("Digital signiert: 1 gültige Signatur"), "{status}");
+    // SAFETY: see above.
+    unsafe {
+        std::env::remove_var("MRPDF_IDS_DIR");
+        std::env::remove_var("MRPDF_SIGN_SAVE_PATH");
+    }
+}

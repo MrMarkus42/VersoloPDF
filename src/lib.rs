@@ -50,6 +50,7 @@ pub mod redact;
 pub mod report;
 pub mod search;
 pub mod security;
+pub mod sign;
 pub mod speech;
 pub mod spell;
 pub mod text;

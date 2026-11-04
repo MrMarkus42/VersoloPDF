@@ -149,6 +149,7 @@ impl MrPdfApp {
                 {
                     tab.go_to_page(page);
                 }
+                self.note_signatures(ctx);
                 ctx.request_repaint();
             }
             Err(Error::PasswordRequired) => {
@@ -203,7 +204,8 @@ impl MrPdfApp {
         match self.tabs[index].doc.save() {
             Ok(()) => {
                 let t = self.t();
-                self.set_status(ctx, t.saved);
+                let msg = self.saved_message(index, t.saved);
+                self.set_status(ctx, msg);
                 self.forget_recovery(self.tabs[index].id);
                 true
             }
@@ -264,7 +266,8 @@ impl MrPdfApp {
         match self.tabs[index].doc.save_as(&path) {
             Ok(()) => {
                 self.settings.add_recent(&path);
-                self.set_status(ctx, t.saved);
+                let msg = self.saved_message(index, t.saved);
+                self.set_status(ctx, msg);
                 self.forget_recovery(self.tabs[index].id);
                 true
             }

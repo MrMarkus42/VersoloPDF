@@ -586,6 +586,12 @@ impl MrPdfApp {
                             outcome = o;
                             action = a;
                         }
+                        Dialog::Sign(state) => {
+                            let (o, a) = self.sign_dialog(ui, state);
+                            outcome = o;
+                            action = a;
+                        }
+                        Dialog::Signatures(sigs) => outcome = self.signatures_dialog(ui, sigs),
                         Dialog::About => {
                             set_title(
                                 ui,

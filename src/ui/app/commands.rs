@@ -47,8 +47,8 @@ impl Unavailable {
     pub fn reason(self, lang: Language) -> &'static str {
         let (de, en) = match self {
             Unavailable::Signatures => (
-                "Digitale Signaturen mit Zertifikaten werden noch nicht unterstützt.",
-                "Digital signatures with certificates are not supported yet.",
+                "Noch nicht enthalten. Signieren geht mit „Dokument signieren“, Prüfen mit „Signaturen überprüfen“.",
+                "Not included yet. Sign with “Sign document”, check with “Check signatures”.",
             ),
             Unavailable::JavaScript => (
                 "JavaScript in PDF-Dateien wird aus Sicherheitsgründen bewusst nicht ausgeführt.",
@@ -178,6 +178,10 @@ pub enum Cmd {
     RemoveProtection,
     ApplyRedactions,
     SearchRedact,
+    /// "Dokument signieren" (digital signature with a digital ID).
+    SignDocument,
+    /// "Signaturen überprüfen".
+    VerifySignatures,
     // Form
     HighlightFields,
     ResetForm,
@@ -424,6 +428,8 @@ pub const SEARCHABLE: &[Cmd] = &[
     Cmd::RemoveProtection,
     Cmd::ApplyRedactions,
     Cmd::SearchRedact,
+    Cmd::SignDocument,
+    Cmd::VerifySignatures,
     Cmd::HighlightFields,
     Cmd::ResetForm,
     Cmd::ExportFormData,
@@ -641,6 +647,8 @@ impl Cmd {
             RemoveProtection => ("Schutz entfernen", "Remove protection"),
             ApplyRedactions => ("Übernehmen", "Apply"),
             SearchRedact => ("Suchen und schwärzen", "Search and redact"),
+            SignDocument => ("Dokument signieren", "Sign document"),
+            VerifySignatures => ("Signaturen überprüfen", "Check signatures"),
             HighlightFields => ("Felder hervorheben", "Highlight fields"),
             ResetForm => ("Formular zurücksetzen", "Reset form"),
             ExportFormData => ("Formulardaten exportieren", "Export form data"),
@@ -846,6 +854,8 @@ impl Cmd {
             RemoveProtection => Icon::Unlock,
             ApplyRedactions => Icon::Redact,
             SearchRedact => Icon::Search,
+            SignDocument => Icon::Signature,
+            VerifySignatures => Icon::Accessibility,
             HighlightFields => Icon::Form,
             ResetForm => Icon::Undo,
             ExportFormData => Icon::Export,
@@ -1074,6 +1084,14 @@ fn explain(cmd: Cmd) -> Option<(&'static str, &'static str)> {
             "Kennwort zum Öffnen oder Einschränkungen für Drucken und Ändern festlegen.",
             "Set a password to open, or limit printing and changes.",
         ),
+        SignDocument => (
+            "Das Dokument mit Ihrer digitalen ID fälschungssicher unterschreiben.",
+            "Sign the document tamper-evidently with your digital ID.",
+        ),
+        VerifySignatures => (
+            "Prüfen, ob die digitalen Signaturen gültig sind und wer unterschrieben hat.",
+            "Check whether the digital signatures are valid and who signed.",
+        ),
         ApplyRedactions => (
             "Markierte Stellen endgültig schwärzen – der Inhalt darunter wird gelöscht.",
             "Redact marked areas for good – the content below is deleted.",
@@ -1232,6 +1250,7 @@ impl MrPdfApp {
             DeleteComment => tab.is_some_and(|t| t.selected_annot.is_some()),
             RemoveProtection => tab.is_some_and(|t| t.doc.is_encrypted() && t.doc.has_full_access()),
             PasswordProtect => tab.is_some_and(|t| t.doc.has_full_access()),
+            SignDocument => tab.is_some_and(|t| !t.doc.is_encrypted()),
             MovePageUp => tab.is_some_and(|t| t.current_page > 0),
             MovePageDown => tab.is_some_and(|t| t.current_page + 1 < t.doc.page_count()),
             DeletePages | SwapPages => tab.is_some_and(|t| t.doc.page_count() > 1),
@@ -1486,6 +1505,8 @@ impl MrPdfApp {
                     error: None,
                 })
             }
+            SignDocument => self.open_sign_dialog(),
+            VerifySignatures => self.show_signatures(ctx),
             RemoveProtection => {
                 self.edit(ctx, |tab| tab.doc.unprotect());
                 let t = self.t();

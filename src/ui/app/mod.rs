@@ -37,6 +37,7 @@ mod ribbon;
 pub mod settings_dialog;
 mod shape_dialogs;
 mod sidebar;
+mod sign_dialog;
 mod statusbar;
 mod structure;
 mod style_flyout;
@@ -263,6 +264,10 @@ pub enum Dialog {
     Scripts(Box<form_cmds::ScriptList>),
     /// "Rechtschreibprüfung".
     SpellCheck(Box<review_cmds::SpellState>),
+    /// "Dokument signieren".
+    Sign(Box<sign_dialog::SignState>),
+    /// "Signaturen überprüfen".
+    Signatures(Vec<crate::sign::pdf::SigInfo>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -573,6 +578,11 @@ impl MrPdfApp {
 
     pub fn dialog(&self) -> Option<&Dialog> {
         self.dialog.as_ref()
+    }
+
+    /// The message shown in the status bar.
+    pub fn status_text(&self) -> Option<&str> {
+        self.status.as_ref().map(|(s, _)| s.as_str())
     }
 
     pub fn set_status(&mut self, ctx: &Context, text: impl Into<String>) {
