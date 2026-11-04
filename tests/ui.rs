@@ -2647,3 +2647,65 @@ fn sign_and_check_document() {
         std::env::remove_var("MRPDF_SIGN_SAVE_PATH");
     }
 }
+
+/// "Menüband reduzieren": only the tabs stay; a tab shows its commands over
+/// the document until one is used; "Menüband anheften" and Strg+F1.
+#[test]
+fn ribbon_collapse_and_pin() {
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = harness(vec![sample_file(&dir, 2)], false);
+    h.run_steps(8);
+    save(&mut h, "98-ribbon-compact");
+    // "Hand" is a ribbon button (and the title of the properties panel).
+    let hands = |h: &Harness<'_, MrPdfApp>| h.query_all_by_label("Hand").count();
+    let pinned = hands(&h);
+    h.get_by_label("Menüband reduzieren").click();
+    h.run_steps(4);
+    assert!(h.state().settings().ribbon_collapsed);
+    assert_eq!(hands(&h), pinned - 1, "commands hidden");
+    save(&mut h, "98-ribbon-collapsed");
+    // A tab shows its commands over the document.
+    tab(&mut h, "Ansicht");
+    h.run_steps(3);
+    assert!(h.query_by_label("Lineale").is_some(), "commands shown");
+    save(&mut h, "98-ribbon-peek");
+    // Using a command hides them again; the ribbon stays collapsed.
+    h.get_by_label("Lineale").click();
+    h.run_steps(4);
+    assert!(h.query_by_label("Lineale").is_none(), "hidden after the command");
+    assert!(h.state().settings().ribbon_collapsed);
+    // A click into the document hides them too.
+    tab(&mut h, "Start");
+    h.run_steps(3);
+    assert_eq!(hands(&h), pinned);
+    h.input_mut().events.push(Event::PointerMoved(pos2(640.0, 600.0)));
+    h.input_mut().events.push(Event::PointerButton {
+        pos: pos2(640.0, 600.0),
+        button: PointerButton::Primary,
+        pressed: true,
+        modifiers: Modifiers::NONE,
+    });
+    h.input_mut().events.push(Event::PointerButton {
+        pos: pos2(640.0, 600.0),
+        button: PointerButton::Primary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    });
+    h.run_steps(4);
+    assert_eq!(hands(&h), pinned - 1, "hidden after a click elsewhere");
+    // "Menüband anheften" in the shown ribbon pins it again.
+    tab(&mut h, "Start");
+    h.run_steps(3);
+    h.get_by_label("Menüband anheften").click();
+    h.run_steps(4);
+    assert!(!h.state().settings().ribbon_collapsed);
+    assert_eq!(hands(&h), pinned);
+    // Strg+F1 collapses and pins.
+    h.key_press_modifiers(Modifiers::COMMAND, egui::Key::F1);
+    h.run_steps(3);
+    assert!(h.state().settings().ribbon_collapsed);
+    h.key_press_modifiers(Modifiers::COMMAND, egui::Key::F1);
+    h.run_steps(3);
+    assert!(!h.state().settings().ribbon_collapsed);
+}

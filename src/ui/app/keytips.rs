@@ -240,6 +240,9 @@ impl MrPdfApp {
                 self.ribbon = tab;
                 self.close_backstage();
                 self.keytips.level = Some(Level::Commands);
+                if self.settings.ribbon_collapsed {
+                    self.ribbon_peek = true;
+                }
             }
             Kind::File => {
                 self.toggle_backstage();

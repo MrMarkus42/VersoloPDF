@@ -319,6 +319,9 @@ pub struct MrPdfApp {
     backstage: Option<backstage::Page>,
     /// Search text of the recent files list in the backstage.
     recent_filter: String,
+    /// Collapsed ribbon: the commands of the chosen tab are shown over the
+    /// document for now.
+    ribbon_peek: bool,
     /// Shown sub-page of "Öffnen".
     open_view: backstage::OpenView,
     /// Name field of "Aktuelle Sitzung speichern".
@@ -451,6 +454,7 @@ impl MrPdfApp {
             overlay_source: None,
             backstage,
             recent_filter: String::new(),
+            ribbon_peek: false,
             open_view: backstage::OpenView::Recent,
             session_name: String::new(),
             recent_thumbs: Default::default(),
@@ -814,6 +818,10 @@ impl MrPdfApp {
         }
         if ctx.input(|i| i.key_pressed(Key::F4)) {
             self.settings.show_sidebar = !self.settings.show_sidebar;
+        }
+        // Strg+F1: "Menüband reduzieren" / "anheften" (as in office programs).
+        if ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::F1)) {
+            self.toggle_ribbon();
         }
     }
 

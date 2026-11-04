@@ -1367,6 +1367,8 @@ impl MrPdfApp {
         }
         // Closes the drop-down of a collapsed ribbon group.
         crate::ui::widgets::note_command_ran(ctx);
+        // A ribbon shown over the document (collapsed ribbon) closes again.
+        self.ribbon_peek = false;
         // Page dialogs of "Dokumentaufbau" (insert, delete, extract, …).
         if let View(v) = cmd {
             self.run_view(ctx, v);

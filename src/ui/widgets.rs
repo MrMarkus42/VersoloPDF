@@ -132,7 +132,7 @@ pub fn big_button(ui: &mut Ui, icon: Icon, label: &str, selected: bool, enabled:
     let text_color = if enabled { ui.visuals().text_color() } else { ui.visuals().weak_text_color() };
     let galley = ui.painter().layout(label.to_string(), font, text_color, width - 4.0);
     // Tall enough for two label lines in any font.
-    let size = vec2(width, (35.0 + galley.size().y + 4.0).max(62.0));
+    let size = vec2(width, (31.0 + galley.size().y + 3.0).max(56.0));
     let sense = if enabled { Sense::click() } else { Sense::hover() };
     let (rect, response) = ui.allocate_exact_size(size, sense);
     response.widget_info(|| WidgetInfo::selected(WidgetType::Button, enabled, selected, label));
@@ -141,14 +141,14 @@ pub fn big_button(ui: &mut Ui, icon: Icon, label: &str, selected: bool, enabled:
         if selected {
             selected_bar(ui, rect);
         }
-        let icon_rect = Rect::from_center_size(rect.center_top() + vec2(0.0, 18.0), Vec2::splat(26.0));
+        let icon_rect = Rect::from_center_size(rect.center_top() + vec2(0.0, 16.0), Vec2::splat(24.0));
         let painter = ui.painter_at(rect);
         let mut alpha_painter = painter.clone();
         if !enabled {
             alpha_painter.multiply_opacity(0.4);
         }
         icons::paint(&alpha_painter, icon_rect, icon, icon_tint(ui, enabled));
-        let pos = rect.center_top() + vec2(-galley.size().x / 2.0, 35.0);
+        let pos = rect.center_top() + vec2(-galley.size().x / 2.0, 31.0);
         ui.painter().galley(pos, galley, text_color);
     }
     response
@@ -174,19 +174,19 @@ pub fn big_menu_button(ui: &mut Ui, icon: Icon, label: &str, enabled: bool, open
     let text_color = if enabled { ui.visuals().text_color() } else { ui.visuals().weak_text_color() };
     let galley = ui.painter().layout(label.to_string(), font, text_color, width - 4.0);
     // Room for the label lines and the arrow below them in any font.
-    let size = vec2(width, (33.0 + galley.size().y + 9.0).max(64.0));
+    let size = vec2(width, (30.0 + galley.size().y + 8.0).max(58.0));
     let sense = if enabled { Sense::click() } else { Sense::hover() };
     let (rect, response) = ui.allocate_exact_size(size, sense);
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, label));
     if ui.is_rect_visible(rect) {
         button_frame(ui, rect, &response, open);
-        let icon_rect = Rect::from_center_size(rect.center_top() + vec2(0.0, 17.0), Vec2::splat(26.0));
+        let icon_rect = Rect::from_center_size(rect.center_top() + vec2(0.0, 15.0), Vec2::splat(24.0));
         let mut painter = ui.painter_at(rect);
         if !enabled {
             painter.multiply_opacity(0.4);
         }
         icons::paint(&painter, icon_rect, icon, icon_tint(ui, enabled));
-        let pos = rect.center_top() + vec2(-galley.size().x / 2.0, 33.0);
+        let pos = rect.center_top() + vec2(-galley.size().x / 2.0, 30.0);
         let text_bottom = pos.y + galley.size().y;
         ui.painter().galley(pos, galley, text_color);
         paint_chevron(
@@ -204,7 +204,7 @@ pub fn small_menu_button(ui: &mut Ui, icon: Icon, label: &str, enabled: bool, op
     let shrunk = ribbon_fit(ui.ctx()).shrunk();
     let font = FontId::proportional(12.5);
     let text_w = ui.painter().layout_no_wrap(label.to_string(), font.clone(), Color32::WHITE).size().x;
-    let size = if shrunk { vec2(34.0, 21.0) } else { vec2(text_w + 42.0, 21.0) };
+    let size = if shrunk { vec2(34.0, 20.0) } else { vec2(text_w + 42.0, 20.0) };
     let sense = if enabled { Sense::click() } else { Sense::hover() };
     let (rect, response) = ui.allocate_exact_size(size, sense);
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, label));
@@ -216,7 +216,7 @@ pub fn small_menu_button(ui: &mut Ui, icon: Icon, label: &str, enabled: bool, op
         }
         icons::paint(
             &painter,
-            Rect::from_min_size(rect.min + vec2(3.0, 2.5), Vec2::splat(16.0)),
+            Rect::from_min_size(rect.min + vec2(3.0, 2.0), Vec2::splat(16.0)),
             icon,
             icon_tint(ui, enabled),
         );
@@ -304,13 +304,13 @@ pub fn small_button(ui: &mut Ui, icon: Icon, label: &str, selected: bool, enable
     let shrunk = ribbon_fit(ui.ctx()).shrunk();
     let font = FontId::proportional(12.5);
     let text_w = ui.painter().layout_no_wrap(label.to_string(), font.clone(), Color32::WHITE).size().x;
-    let size = if shrunk { vec2(24.0, 21.0) } else { vec2(text_w + 30.0, 21.0) };
+    let size = if shrunk { vec2(24.0, 20.0) } else { vec2(text_w + 30.0, 20.0) };
     let sense = if enabled { Sense::click() } else { Sense::hover() };
     let (rect, response) = ui.allocate_exact_size(size, sense);
     response.widget_info(|| WidgetInfo::selected(WidgetType::Button, enabled, selected, label));
     if ui.is_rect_visible(rect) {
         button_frame(ui, rect, &response, selected);
-        let icon_rect = Rect::from_min_size(rect.min + vec2(3.0, 2.5), Vec2::splat(16.0));
+        let icon_rect = Rect::from_min_size(rect.min + vec2(3.0, 2.0), Vec2::splat(16.0));
         let painter = ui.painter_at(rect);
         let mut painter = painter;
         if !enabled {
@@ -371,7 +371,7 @@ pub fn group(ui: &mut Ui, caption: &str, add: impl FnOnce(&mut Ui)) {
         set_ribbon_fit(&ctx, fit);
         let icon = ctx.data(|d| d.get_temp::<Icon>(icon_id)).unwrap_or(Icon::Gear);
         ui.vertical(|ui| {
-            ui.set_min_height(80.0);
+            ui.set_min_height(72.0);
             let response = ui
                 .push_id(("ribbon-group", caption), |ui| big_menu_button(ui, icon, caption, true, false))
                 .inner;
@@ -381,7 +381,7 @@ pub fn group(ui: &mut Ui, caption: &str, add: impl FnOnce(&mut Ui)) {
                     set_ribbon_fit(ui.ctx(), RibbonFit { in_popup: true, ..outer });
                     ui.ctx().data_mut(|d| d.insert_temp(command_ran_id(), false));
                     ui.horizontal(|ui| {
-                        ui.set_min_height(64.0);
+                        ui.set_min_height(58.0);
                         add(ui);
                     });
                     set_ribbon_fit(ui.ctx(), outer);
@@ -397,9 +397,9 @@ pub fn group(ui: &mut Ui, caption: &str, add: impl FnOnce(&mut Ui)) {
     fit.first_icon = None;
     set_ribbon_fit(&ctx, fit);
     ui.vertical(|ui| {
-        ui.set_min_height(80.0);
+        ui.set_min_height(72.0);
         ui.horizontal(|ui| {
-            ui.set_min_height(64.0);
+            ui.set_min_height(58.0);
             add(ui);
         });
         // Caption centred under the group (by indenting it: a centred layout

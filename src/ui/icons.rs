@@ -51,6 +51,10 @@ pub enum Icon {
     ExtractPages,
     MoveUp,
     MoveDown,
+    /// "Menüband reduzieren" (chevron up).
+    CollapseUp,
+    /// "Menüband anheften".
+    Pin,
     Search,
     First,
     Prev,
@@ -202,6 +206,8 @@ impl Icon {
         Icon::ExtractPages,
         Icon::MoveUp,
         Icon::MoveDown,
+        Icon::CollapseUp,
+        Icon::Pin,
         Icon::Search,
         Icon::First,
         Icon::Prev,
@@ -795,6 +801,16 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
         Icon::Close => {
             line((0.24, 0.24), (0.76, 0.76), bold(k.ink));
             line((0.76, 0.24), (0.24, 0.76), bold(k.ink));
+        }
+        Icon::CollapseUp => {
+            path(&[(0.22, 0.64), (0.5, 0.36), (0.78, 0.64)], bold(k.ink));
+        }
+        Icon::Pin => {
+            // A push pin, slightly tilted like in office programs.
+            line((0.2, 0.84), (0.42, 0.6), bold(k.ink));
+            poly(&[(0.36, 0.48), (0.54, 0.3), (0.72, 0.48), (0.52, 0.68)], tint(k.blue), edge(k.blue));
+            line((0.3, 0.46), (0.56, 0.72), bold(k.blue));
+            line((0.56, 0.22), (0.8, 0.46), bold(k.blue));
         }
         Icon::Delete => {
             line((0.2, 0.2), (0.8, 0.8), Stroke::new(w * 1.9, k.red));

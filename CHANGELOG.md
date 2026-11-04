@@ -45,3 +45,6 @@ First version:
 * Keyboard operation of the ribbon with key tips (Alt or F10)
 * Error log and crash reports ("Hilfe › Fehlerprotokoll öffnen")
 * Modern look as default (system font, outline icons, fixed dialog buttons)
+* Compacter ribbon that can be collapsed and pinned as in office programs
+  (corner button, double click on a tab, Ctrl+F1); a collapsed ribbon shows
+  a tab's commands over the document until one is used

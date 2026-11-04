@@ -349,11 +349,11 @@ impl MrPdfApp {
         {
             self.ribbon = RibbonTab::Home;
         }
-        Panel::top("ribbon")
+        let panel = Panel::top("ribbon")
             .frame(
                 Frame::new()
                     .fill(theme::ribbon_background(ui.visuals().dark_mode, self.settings.design))
-                    .inner_margin(Margin::symmetric(6, 3)),
+                    .inner_margin(Margin::symmetric(6, 2)),
             )
             .show(ui, |ui| {
                 // Keyboard letters: tabs and quick access first.
@@ -384,6 +384,7 @@ impl MrPdfApp {
                 });
                 // Row 2: file menu and tabs.
                 ui.horizontal(|ui| {
+                    ui.spacing_mut().button_padding.y = 2.0;
                     self.file_menu(ui);
                     let mut tabs = vec![
                         (RibbonTab::Home, t.tab_home),
@@ -410,10 +411,100 @@ impl MrPdfApp {
                     }
                     self.tab_row(ui, &tabs);
                 });
-                if self.backstage_open() {
+                if self.backstage_open() || self.settings.ribbon_collapsed {
                     return;
                 }
-                ui.add_space(2.0);
+                ui.add_space(1.0);
+                self.ribbon_commands(ui, &ctx, content_tabs, tool_format);
+            })
+            .response
+            .rect;
+        self.ribbon_overlay(&ctx, panel, content_tabs, tool_format);
+    }
+
+    /// "Menüband reduzieren" / "Menüband anheften".
+    pub(super) fn toggle_ribbon(&mut self) {
+        self.settings.ribbon_collapsed = !self.settings.ribbon_collapsed;
+        self.ribbon_peek = false;
+    }
+
+    /// Collapsed ribbon: the commands of the chosen tab over the document,
+    /// until a command runs or the user clicks elsewhere.
+    fn ribbon_overlay(&mut self, ctx: &Context, panel: egui::Rect, content_tabs: bool, tool_format: bool) {
+        if !self.settings.ribbon_collapsed || self.backstage_open() || self.dialog.is_some() {
+            self.ribbon_peek = false;
+        }
+        if !self.ribbon_peek {
+            return;
+        }
+        let area = egui::Area::new(egui::Id::new("ribbon-peek"))
+            .order(egui::Order::Middle)
+            .fixed_pos(panel.left_bottom())
+            .show(ctx, |ui| {
+                let visuals = ui.visuals().clone();
+                Frame::new()
+                    .fill(theme::ribbon_background(visuals.dark_mode, self.settings.design))
+                    .inner_margin(Margin::symmetric(6, 3))
+                    .stroke(visuals.widgets.noninteractive.bg_stroke)
+                    .shadow(visuals.popup_shadow)
+                    .show(ui, |ui| {
+                        ui.set_width(panel.width() - 12.0);
+                        self.ribbon_commands(ui, ctx, content_tabs, tool_format);
+                    });
+            });
+        let rect = area.response.rect;
+        let (pressed, pos, esc) = ctx
+            .input(|i| (i.pointer.any_pressed(), i.pointer.interact_pos(), i.key_pressed(egui::Key::Escape)));
+        let outside = pos.is_some_and(|p| !rect.contains(p) && !panel.contains(p));
+        if (pressed && outside && !egui::Popup::is_any_open(ctx)) || (esc && self.keytips.level().is_none()) {
+            self.ribbon_peek = false;
+        }
+    }
+
+    /// The groups of the active tab, fitted into the width, and the button
+    /// that collapses (or pins) the ribbon in the bottom right corner (over
+    /// the row of group captions, as in office programs).
+    fn ribbon_commands(&mut self, ui: &mut Ui, ctx: &Context, content_tabs: bool, tool_format: bool) {
+        let right = ui.max_rect().right();
+        let width = ui.available_width().max(100.0);
+        let row = ui
+            .allocate_ui_with_layout(egui::vec2(width, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
+                ui.set_max_width(width);
+                self.ribbon_groups_ui(ui, ctx, content_tabs, tool_format);
+            })
+            .response
+            .rect;
+        let de = self.settings.language == Language::German;
+        let (icon, name, tip) = if self.ribbon_peek {
+            (
+                Icon::Pin,
+                if de { "Menüband anheften" } else { "Pin the ribbon" },
+                if de { "Menüband immer anzeigen (Strg+F1)" } else { "Always show the ribbon (Ctrl+F1)" },
+            )
+        } else {
+            (
+                Icon::CollapseUp,
+                if de { "Menüband reduzieren" } else { "Collapse the ribbon" },
+                if de {
+                    "Nur die Registerkarten anzeigen; ein Klick darauf zeigt die Befehle (Strg+F1)"
+                } else {
+                    "Show only the tab names; a click on one shows its commands (Ctrl+F1)"
+                },
+            )
+        };
+        let spot =
+            egui::Rect::from_min_size(egui::pos2(right - 22.0, row.bottom() - 21.0), egui::vec2(24.0, 24.0));
+        let resp = ui.put(spot, |ui: &mut Ui| icon_button_named(ui, icon, name, tip, false, true));
+        let keyed = self.keytips.button(ui, &resp, name, true, KeyKind::Button, false);
+        if resp.clicked() || keyed {
+            self.toggle_ribbon();
+        }
+    }
+
+    fn ribbon_groups_ui(&mut self, ui: &mut Ui, ctx: &Context, content_tabs: bool, tool_format: bool) {
+        let ctx = ctx.clone();
+        {
+            {
                 // Fit the ribbon into the window: level 0 full size, 1 dense
                 // (narrower large buttons, less space), 2 small buttons
                 // without labels, 3.. collapse groups from the right. The
@@ -466,12 +557,12 @@ impl MrPdfApp {
                         // The ribbon keeps its compact grid in every look,
                         // so all groups fit; the room goes to dialogs and
                         // panels.
-                        ui.spacing_mut().item_spacing = egui::vec2(6.0, 4.0);
-                        ui.spacing_mut().button_padding = egui::vec2(6.0, 3.0);
+                        ui.spacing_mut().item_spacing = egui::vec2(6.0, 2.0);
+                        ui.spacing_mut().button_padding = egui::vec2(6.0, 2.0);
                         ui.spacing_mut().interact_size.y = 18.0;
                         drawn_width = ui
                             .horizontal(|ui| {
-                                ui.set_min_height(82.0);
+                                ui.set_min_height(72.0);
                                 match self.ribbon {
                                     RibbonTab::Home => self.ribbon_home(ui, &ctx),
                                     RibbonTab::View => self.ribbon_view(ui, &ctx),
@@ -506,7 +597,8 @@ impl MrPdfApp {
                         ctx.request_repaint();
                     }
                 }
-            });
+            }
+        }
     }
 
     /// The ribbon tabs; tabs that do not fit go into a "»" menu at the end.
@@ -557,7 +649,9 @@ impl MrPdfApp {
         }
         let mut chosen = None;
         for &(tab, label) in shown_idx.iter().map(|&i| &tabs[i]) {
-            let active = self.ribbon == tab && !backstage;
+            // A collapsed ribbon marks a tab only while its commands are shown.
+            let active =
+                self.ribbon == tab && !backstage && (!self.settings.ribbon_collapsed || self.ribbon_peek);
             // Modern: the active tab only by its bar and bold text.
             let resp = if modern {
                 let text = text_of(tab, label);
@@ -585,6 +679,18 @@ impl MrPdfApp {
             if resp.clicked() {
                 chosen = Some(tab);
             }
+            // A double click collapses or pins the ribbon (as in office programs).
+            if resp.double_clicked() && !backstage {
+                self.toggle_ribbon();
+                chosen = None;
+            }
+            if self.settings.ribbon_collapsed {
+                resp.on_hover_text(if self.settings.language == Language::German {
+                    "Doppelklick: Menüband anheften"
+                } else {
+                    "Double click: pin the ribbon"
+                });
+            }
         }
         if !hidden_idx.is_empty() {
             let hidden_selected = hidden_idx.iter().any(|&i| tabs[i].0 == self.ribbon) && !backstage;
@@ -607,6 +713,11 @@ impl MrPdfApp {
             });
         }
         if let Some(tab) = chosen {
+            // Collapsed ribbon: a click shows the tab's commands over the
+            // document; a second click on the same tab hides them again.
+            if self.settings.ribbon_collapsed && !backstage {
+                self.ribbon_peek = !(self.ribbon_peek && self.ribbon == tab);
+            }
             self.ribbon = tab;
             self.close_backstage();
         }

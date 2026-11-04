@@ -135,6 +135,9 @@ pub struct Settings {
     /// Modern look: system font in readable sizes, more room, calmer
     /// colours, no size change on hover.
     pub modern_look: bool,
+    /// "Menüband reduzieren": only the tab names are shown; a click on a
+    /// tab shows its commands over the document until one is used.
+    pub ribbon_collapsed: bool,
     /// "Automatisch blättern": points per second.
     pub auto_scroll_speed: f32,
     /// "Vorlesen": volume 0–100, speed −10…10 and options.
@@ -336,6 +339,7 @@ impl Default for Settings {
             show_pan_zoom: false,
             design: crate::ui::theme::Design::Standard,
             modern_look: true,
+            ribbon_collapsed: false,
             auto_scroll_speed: 60.0,
             read_volume: 100,
             read_rate: 0,
