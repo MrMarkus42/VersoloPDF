@@ -17,6 +17,7 @@ mod file_ops;
 pub mod form_cmds;
 mod formdata;
 mod insert_source;
+pub mod keytips;
 mod labels_dialog;
 mod layout_dialogs;
 mod marks_dialogs;
@@ -346,6 +347,8 @@ pub struct MrPdfApp {
     portfolio_cache: std::collections::HashMap<u64, (u64, Vec<crate::portfolio::Entry>)>,
     /// Tab last shown in each (window, group).
     group_focus: std::collections::HashMap<(u32, u32), u64>,
+    /// Keyboard operation of the ribbon (Alt / F10 and letters).
+    keytips: keytips::KeyTips,
     /// "Dokumente vergleichen": the comparison shown side by side.
     compare: Option<Box<compare_view::Comparison>>,
     /// Files chosen in the comparison dialog (not opened as tabs yet).
@@ -460,6 +463,7 @@ impl MrPdfApp {
             pan_zoom_tex: None,
             presentation: None,
             group_focus: Default::default(),
+            keytips: Default::default(),
             compare: None,
             compare_files: Vec::new(),
             portfolio_cache: Default::default(),
@@ -981,6 +985,9 @@ impl eframe::App for MrPdfApp {
             self.process_events(&ctx);
             return;
         }
+        // Keyboard letters of the ribbon first: while shown, the keys are
+        // theirs, not the shortcuts'.
+        self.keytips_input(&ctx);
         self.shortcuts(&ctx);
         self.handle_close_request(&ctx);
 
@@ -1007,6 +1014,7 @@ impl eframe::App for MrPdfApp {
         }
         self.doc_windows(&ctx);
         self.dialogs(&ctx);
+        self.keytips_paint(&ctx);
         self.process_events(&ctx);
         self.update_title(&ctx);
         if !self.pending_open.is_empty() {

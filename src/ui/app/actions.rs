@@ -62,7 +62,28 @@ pub fn is_safe_uri(uri: &str) -> bool {
 impl MrPdfApp {
     pub(super) fn show_error(&mut self, err: &Error) {
         let t = self.t();
-        self.dialog = Some(Dialog::Message { title: t.error.to_string(), text: error_text(t, err) });
+        let text = error_text(t, err);
+        // In the error log the first line only (it may name a file).
+        log::error!("Fehlermeldung: {}", text.lines().next().unwrap_or_default());
+        self.dialog = Some(Dialog::Message { title: t.error.to_string(), text });
+    }
+
+    /// After a crash in the last run: where the report is.
+    pub fn show_crash_notice(&mut self, report: &std::path::Path) {
+        let de = self.settings.language == crate::ui::i18n::Language::German;
+        let text = if de {
+            format!(
+                "MrPDF wurde beim letzten Mal unerwartet beendet. Dafür wurde ein Fehlerbericht gespeichert:\n\n{}\n\nÜber Hilfe › Fehlerprotokoll öffnen finden Sie ihn wieder; Sie können ihn dem Entwickler schicken. Er enthält keine Inhalte Ihrer Dokumente. Nicht gespeicherte Änderungen bietet MrPDF zur Wiederherstellung an, sofern vorhanden.",
+                report.display()
+            )
+        } else {
+            format!(
+                "MrPDF closed unexpectedly last time. An error report was saved:\n\n{}\n\nHelp › Open error log shows it again; you can send it to the developer. It contains nothing of your documents. Unsaved changes are offered for recovery where available.",
+                report.display()
+            )
+        };
+        let title = if de { "Unerwartet beendet" } else { "Closed unexpectedly" };
+        self.dialog = Some(Dialog::Message { title: title.into(), text });
     }
 
     /// Runs an edit on the active tab and refreshes dependent state.

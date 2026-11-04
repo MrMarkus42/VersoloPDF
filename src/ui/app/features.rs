@@ -23,6 +23,30 @@ impl MrPdfApp {
         self.settings.language == Language::German
     }
 
+    /// "Fehlerprotokoll öffnen": the newest log or crash report in the
+    /// file manager.
+    pub(super) fn open_log(&mut self) {
+        let Some(dir) = crate::crashlog::log_dir() else { return };
+        let newest = std::fs::read_dir(&dir).ok().and_then(|r| {
+            r.flatten()
+                .filter(|e| e.path().extension().is_some_and(|x| x == "log" || x == "txt"))
+                .max_by_key(|e| e.metadata().and_then(|m| m.modified()).ok())
+                .map(|e| e.path())
+        });
+        match newest {
+            Some(file) => reveal_in_file_manager(&file),
+            None => {
+                let de = self.german();
+                let text = if de {
+                    format!("Noch kein Fehlerprotokoll vorhanden.\n\nOrdner: {}", dir.display())
+                } else {
+                    format!("No error log yet.\n\nFolder: {}", dir.display())
+                };
+                self.info(if de { "Fehlerprotokoll" } else { "Error log" }, text);
+            }
+        }
+    }
+
     pub(super) fn info(&mut self, title: &str, text: String) {
         self.dialog = Some(Dialog::Message { title: title.to_string(), text });
     }

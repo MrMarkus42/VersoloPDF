@@ -275,6 +275,8 @@ pub enum Cmd {
     Manual,
     Support,
     ReportProblem,
+    /// "Fehlerprotokoll öffnen": the folder of the log and crash reports.
+    OpenLog,
     CommandLineHelp,
     CheckUpdate,
     About,
@@ -523,6 +525,7 @@ pub const SEARCHABLE: &[Cmd] = &[
     Cmd::Manual,
     Cmd::Support,
     Cmd::ReportProblem,
+    Cmd::OpenLog,
     Cmd::CommandLineHelp,
     Cmd::CheckUpdate,
     Cmd::About,
@@ -749,6 +752,7 @@ impl Cmd {
             Manual => ("Handbuch", "Manual"),
             Support => ("Support", "Support"),
             ReportProblem => ("Problem melden", "Report a problem"),
+            OpenLog => ("Fehlerprotokoll öffnen", "Open error log"),
             CommandLineHelp => ("Hilfe zur Kommandozeile", "Command line help"),
             CheckUpdate => ("Nach neuer Version suchen", "Check for updates"),
             About => ("Über", "About"),
@@ -914,6 +918,7 @@ impl Cmd {
             Manual => Icon::Help,
             Support => Icon::Help,
             ReportProblem => Icon::Bug,
+            OpenLog => Icon::TextFile,
             CommandLineHelp => Icon::Console,
             CheckUpdate => Icon::Web,
             About => Icon::Logo,
@@ -1215,8 +1220,8 @@ impl MrPdfApp {
         match cmd {
             New | Open | Exit | Settings | ExportSettings | ImportSettings | ResetSettings
             | ToggleSidebar | ToggleProperties | Fullscreen | DarkMode | FromFiles | MergeFiles
-            | CompareDocuments | Manual | Support | ReportProblem | CommandLineHelp | CheckUpdate | About
-            | FileAssociation | Homepage => true,
+            | CompareDocuments | Manual | Support | ReportProblem | OpenLog | CommandLineHelp
+            | CheckUpdate | About | FileAssociation | Homepage => true,
             Undo => tab.and_then(|t| t.doc.can_undo()).is_some(),
             Redo => tab.and_then(|t| t.doc.can_redo()).is_some(),
             ViewBack => tab.is_some_and(|t| t.can_go_back()),
@@ -1508,6 +1513,7 @@ impl MrPdfApp {
             About => self.dialog = Some(Dialog::About),
             Homepage | Support => ctx.open_url(egui::OpenUrl::new_tab(HOMEPAGE)),
             ReportProblem => ctx.open_url(egui::OpenUrl::new_tab(format!("{HOMEPAGE}/issues"))),
+            OpenLog => self.open_log(),
             CheckUpdate => ctx.open_url(egui::OpenUrl::new_tab(format!("{HOMEPAGE}/releases"))),
             other => self.run_feature(ctx, other),
         }

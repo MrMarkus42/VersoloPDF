@@ -26,7 +26,13 @@ fn options(renderer: eframe::Renderer) -> eframe::NativeOptions {
 }
 
 fn main() -> eframe::Result {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+    // Error log and crash reports ("Fehlerprotokoll").
+    mrpdf::crashlog::init();
+    let crash = mrpdf::crashlog::take_crash_notice();
+    // For testing the crash report only.
+    if std::env::var_os("MRPDF_TEST_CRASH").is_some() {
+        panic!("Testabsturz (MRPDF_TEST_CRASH gesetzt)");
+    }
 
     let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
     // "--opengl" (or MRPDF_RENDERER=opengl) uses OpenGL instead of the
@@ -48,8 +54,16 @@ fn main() -> eframe::Result {
     mrpdf::document::clean_old_undo_files();
     let inbox = std::sync::Arc::new(std::sync::Mutex::new(inbox));
 
-    let start = |renderer, files: Vec<PathBuf>| {
+    let start = |renderer: eframe::Renderer, files: Vec<PathBuf>| {
+        log::info!(
+            "MrPDF {} gestartet ({} {}, Grafik: {renderer:?}, {} Datei(en))",
+            env!("CARGO_PKG_VERSION"),
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+            files.len()
+        );
         let inbox = inbox.clone();
+        let crash = crash.clone();
         eframe::run_native(
             "MrPDF",
             options(renderer),
@@ -57,6 +71,9 @@ fn main() -> eframe::Result {
                 let mut app = MrPdfApp::new(cc, files);
                 if let Some(inbox) = inbox.lock().ok().and_then(|mut i| i.take()) {
                     app.set_inbox(&cc.egui_ctx, inbox);
+                }
+                if let Some(report) = crash {
+                    app.show_crash_notice(&report);
                 }
                 Ok(Box::new(app))
             }),

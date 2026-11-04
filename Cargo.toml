@@ -69,7 +69,9 @@ tempfile = "3"
 [profile.release]
 lto = "thin"
 codegen-units = 4
-strip = "symbols"
+# Function names stay in the program, so crash reports show where it
+# happened (debug information is removed).
+strip = "debuginfo"
 
 [profile.dev.package."*"]
 opt-level = 2

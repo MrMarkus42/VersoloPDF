@@ -6,6 +6,7 @@ use egui::{Context, Frame, Margin, Panel, RichText, Ui};
 
 use super::commands::Side;
 use super::commands::{Cmd, SEARCHABLE, Unavailable};
+use super::keytips::Kind as KeyKind;
 use super::structure::MarkKind;
 use super::{MrPdfApp, RibbonTab, SidePanel};
 use crate::model::{Rgba, StampPreset};
@@ -68,8 +69,10 @@ impl MrPdfApp {
             run = self.style_flyout(ui, ctx, &resp, tool);
             tip.push_str(self.hold_hint());
         }
+        let label = cmd.label(self.settings.language);
+        let keyed = self.keytips.button(ui, &resp, label, self.cmd_enabled(cmd), KeyKind::Button, false);
         let resp = resp.on_hover_text(tip);
-        if resp.clicked() && run {
+        if (resp.clicked() && run) || keyed {
             self.run(ctx, cmd);
         }
     }
@@ -92,7 +95,9 @@ impl MrPdfApp {
             Cmd::Tool(tool) if presets => self.style_flyout(ui, ctx, &resp, tool),
             _ => true,
         };
-        if resp.clicked() && run {
+        let label = cmd.label(self.settings.language);
+        let keyed = self.keytips.button(ui, &resp, label, self.cmd_enabled(cmd), KeyKind::Button, false);
+        if (resp.clicked() && run) || keyed {
             self.run(ctx, cmd);
         }
     }
@@ -141,6 +146,8 @@ impl MrPdfApp {
         if !enabled {
             return;
         }
+        let popup = egui::Popup::default_response_id(&resp);
+        self.keytips.button(ui, &resp, tip, true, KeyKind::MenuButton(popup), false);
         let mut chosen = None;
         egui::Popup::menu(&resp).show(|ui| {
             ui.set_min_width(240.0);
@@ -155,7 +162,8 @@ impl MrPdfApp {
                     if r.hovered() {
                         now_hovered = Some(i);
                     }
-                    if r.clicked() {
+                    let keyed = self.keytips.button(ui, &r, name, true, KeyKind::Button, true);
+                    if r.clicked() || keyed {
                         chosen = Some(i + 1);
                         ui.close();
                     }
@@ -192,7 +200,14 @@ impl MrPdfApp {
         let entries: Vec<Entry> = cmds.iter().map(|c| Entry::C(*c)).collect();
         let enabled = !self.tabs.is_empty();
         let resp = small_menu_button(ui, icon, label, enabled, false);
+        self.menu_keytip(ui, &resp, label, enabled);
         self.popup_menu(ctx, &resp, &entries);
+    }
+
+    /// Letters for a button opening a drop-down.
+    fn menu_keytip(&self, ui: &Ui, resp: &egui::Response, label: &str, enabled: bool) {
+        let popup = egui::Popup::default_response_id(resp);
+        self.keytips.button(ui, resp, label, enabled, KeyKind::MenuButton(popup), false);
     }
 
     /// Large button with drop-down ("Einfügen ▾").
@@ -211,6 +226,7 @@ impl MrPdfApp {
             Entry::Sep => false,
         });
         let resp = big_menu_button(ui, icon, label, enabled || !self.tabs.is_empty(), false);
+        self.menu_keytip(ui, &resp, label, enabled || !self.tabs.is_empty());
         self.popup_menu(ctx, &resp, entries);
     }
 
@@ -218,6 +234,7 @@ impl MrPdfApp {
     fn small_menu(&mut self, ui: &mut Ui, ctx: &Context, icon: Icon, label: (&str, &str), entries: &[Entry]) {
         let label = if self.settings.language == Language::German { label.0 } else { label.1 };
         let resp = small_menu_button(ui, icon, label, !self.tabs.is_empty(), false);
+        self.menu_keytip(ui, &resp, label, !self.tabs.is_empty());
         self.popup_menu(ctx, &resp, entries);
     }
 
@@ -263,9 +280,10 @@ impl MrPdfApp {
         let (de, en) = cmd.menu_names();
         let label = if lang == Language::German { de } else { en };
         let shortcut = cmd.shortcut().map(|(de, en)| if lang == Language::German { de } else { en });
-        menu_item(ui, cmd.icon(), label, shortcut, self.cmd_enabled(cmd), self.cmd_selected(cmd), false)
-            .on_hover_text(self.cmd_tooltip(cmd))
-            .clicked()
+        let enabled = self.cmd_enabled(cmd);
+        let resp = menu_item(ui, cmd.icon(), label, shortcut, enabled, self.cmd_selected(cmd), false);
+        let keyed = self.keytips.button(ui, &resp, label, enabled, KeyKind::Button, true);
+        resp.on_hover_text(self.cmd_tooltip(cmd)).clicked() || keyed
     }
 
     pub(super) fn tools_group(&mut self, ui: &mut Ui, ctx: &Context) {
@@ -338,6 +356,8 @@ impl MrPdfApp {
                     .inner_margin(Margin::symmetric(6, 3)),
             )
             .show(ui, |ui| {
+                // Keyboard letters: tabs and quick access first.
+                self.keytips.set_zone(Some(super::keytips::Level::Tabs));
                 // Row 1: quick access toolbar and quick start search (title bar row).
                 ui.horizontal(|ui| {
                     let (rect, _) = ui.allocate_exact_size(egui::vec2(20.0, 20.0), egui::Sense::hover());
@@ -437,6 +457,7 @@ impl MrPdfApp {
                     },
                 );
                 let mut drawn_width = 0.0;
+                self.keytips.set_zone(Some(super::keytips::Level::Commands));
                 egui::ScrollArea::horizontal()
                     .id_salt("ribbon-scroll")
                     .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
@@ -474,6 +495,7 @@ impl MrPdfApp {
                             .rect
                             .width();
                     });
+                self.keytips.set_zone(None);
                 let counted = ribbon_fit(&ctx).next_group;
                 set_ribbon_fit(&ctx, RibbonFit::FULL);
                 // A command may have switched the tab while drawing.
@@ -558,6 +580,8 @@ impl MrPdfApp {
             } else if resp.hovered() {
                 bar(0.45);
             }
+            // (Tabs are opened by `keytip_chosen` directly.)
+            self.keytips.button(ui, &resp, label, true, KeyKind::Tab(tab), false);
             if resp.clicked() {
                 chosen = Some(tab);
             }
@@ -568,9 +592,14 @@ impl MrPdfApp {
             let more = ui
                 .selectable_label(hidden_selected, RichText::new("»").size(14.0))
                 .on_hover_text(if de { "Weitere Registerkarten" } else { "More tabs" });
+            let more_label = if de { "Weitere Registerkarten" } else { "More tabs" };
+            let popup = egui::Popup::default_response_id(&more);
+            self.keytips.button(ui, &more, more_label, true, KeyKind::MenuButton(popup), false);
             egui::Popup::menu(&more).show(|ui| {
                 for &(tab, label) in hidden_idx.iter().map(|&i| &tabs[i]) {
-                    if ui.selectable_label(self.ribbon == tab && !backstage, text_of(tab, label)).clicked() {
+                    let r = ui.selectable_label(self.ribbon == tab && !backstage, text_of(tab, label));
+                    self.keytips.button(ui, &r, label, true, KeyKind::Tab(tab), true);
+                    if r.clicked() {
                         chosen = Some(tab);
                         ui.close();
                     }
@@ -652,7 +681,9 @@ impl MrPdfApp {
         let button = egui::Button::new(RichText::new(t.menu_file).color(egui::Color32::WHITE).strong())
             .fill(fill)
             .selected(open);
-        if ui.add(button).clicked() {
+        let resp = ui.add(button);
+        self.keytips.button(ui, &resp, t.menu_file, true, KeyKind::File, false);
+        if resp.clicked() {
             self.toggle_backstage();
         }
     }
@@ -1412,7 +1443,7 @@ impl MrPdfApp {
             });
         });
         group(ui, t.tab_help, |ui| {
-            for cmd in [Cmd::Manual, Cmd::Support, Cmd::ReportProblem, Cmd::CommandLineHelp] {
+            for cmd in [Cmd::Manual, Cmd::Support, Cmd::ReportProblem, Cmd::OpenLog, Cmd::CommandLineHelp] {
                 self.big(ui, ctx, cmd);
             }
         });

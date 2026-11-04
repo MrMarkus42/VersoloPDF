@@ -16,6 +16,7 @@ pub mod compare;
 pub mod compose;
 pub mod content;
 pub mod convert;
+pub mod crashlog;
 pub mod doc_props;
 pub mod document;
 pub mod download;

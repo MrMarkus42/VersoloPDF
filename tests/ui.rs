@@ -1149,6 +1149,85 @@ fn edit_page_content_ui() {
     assert!(h.state().active_tab().unwrap().doc.is_modified());
 }
 
+/// Keyboard operation of the ribbon: Alt shows letters on the tabs, a
+/// tab's letter shows the letters of its commands, a command's letters run
+/// it; a drop-down's letters open it and show letters on its entries; Esc
+/// goes back.
+#[test]
+fn ribbon_keyboard() {
+    use mrpdf::ui::app::keytips::Level;
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let file = sample_file(&dir, 2);
+    let mut h = harness(vec![file], false);
+    h.run_steps(10);
+    let code = |h: &Harness<'_, MrPdfApp>, label: &str| {
+        let (_, codes) = h.state().keytip_codes();
+        codes
+            .into_iter()
+            .find(|(l, _)| l == label)
+            .map(|(_, c)| c)
+            .unwrap_or_else(|| panic!("no letters for {label:?}: {:?}", h.state().keytip_codes()))
+    };
+    let typ = |h: &mut Harness<'_, MrPdfApp>, text: &str| {
+        h.input_mut().events.push(Event::Text(text.into()));
+        h.run_steps(3);
+    };
+    // Alt alone: letters on the tabs.
+    h.input_mut().events.push(Event::ModifiersChanged(Modifiers::ALT));
+    h.step();
+    h.input_mut().events.push(Event::ModifiersChanged(Modifiers::NONE));
+    h.run_steps(3);
+    assert_eq!(h.state().keytip_codes().0, Some(Level::Tabs));
+    save(&mut h, "key-01-tabs");
+    // "Ansicht", then "Lineale".
+    let c = code(&h, "Ansicht");
+    typ(&mut h, &c.to_lowercase());
+    assert_eq!(h.state().keytip_codes().0, Some(Level::Commands));
+    save(&mut h, "key-02-view");
+    let rulers = h.state().settings().show_rulers;
+    let c = code(&h, "Lineale");
+    typ(&mut h, &c);
+    assert_eq!(h.state().settings().show_rulers, !rulers, "Lineale nicht umgeschaltet");
+    assert_eq!(h.state().keytip_codes().0, None);
+
+    // A drop-down: Dokumentaufbau › Drehen › 180°.
+    h.key_press(egui::Key::F10);
+    h.run_steps(3);
+    let c = code(&h, "Dokumentaufbau");
+    typ(&mut h, &c);
+    let c = code(&h, "Drehen");
+    typ(&mut h, &c);
+    assert_eq!(h.state().keytip_codes().0, Some(Level::Menu));
+    save(&mut h, "key-03-menu");
+    let before = h.state().active_tab().unwrap().doc.revision();
+    let c = code(&h, "180°");
+    typ(&mut h, &c);
+    h.run_steps(3);
+    assert_ne!(h.state().active_tab().unwrap().doc.revision(), before, "180° nicht ausgeführt");
+
+    // Esc goes back level by level.
+    h.key_press(egui::Key::F10);
+    h.run_steps(3);
+    let c = code(&h, "Start");
+    typ(&mut h, &c);
+    assert_eq!(h.state().keytip_codes().0, Some(Level::Commands));
+    h.key_press(egui::Key::Escape);
+    h.run_steps(2);
+    assert_eq!(h.state().keytip_codes().0, Some(Level::Tabs));
+    h.key_press(egui::Key::Escape);
+    h.run_steps(2);
+    assert_eq!(h.state().keytip_codes().0, None);
+    // Alt+key is a shortcut, not the letters.
+    h.input_mut().events.push(Event::ModifiersChanged(Modifiers::ALT));
+    h.step();
+    h.key_press_modifiers(Modifiers::ALT, egui::Key::A);
+    h.step();
+    h.input_mut().events.push(Event::ModifiersChanged(Modifiers::NONE));
+    h.run_steps(3);
+    assert_eq!(h.state().keytip_codes().0, None);
+}
+
 /// All icons in light and dark, in the ribbon sizes (26 and 16 points).
 #[test]
 fn icon_gallery() {
