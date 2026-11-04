@@ -248,7 +248,9 @@ impl MrPdfApp {
             }
         });
         let n = self.source_doc(&side.source).map_or(0, Document::page_count);
-        let size = vec2(ui.available_width(), 300.0);
+        // Smaller previews in small windows, so OK stays in view.
+        let height = (ui.ctx().content_rect().height() - 520.0).clamp(140.0, 300.0);
+        let size = vec2(ui.available_width(), height);
         let opts = PreviewOpts::new(de);
         let shown = match side.source.clone() {
             Some(Source::Tab(id)) => self.tab_index(id).and_then(|i| {
@@ -281,9 +283,12 @@ impl MrPdfApp {
         ui.set_width(760.0);
         ui.horizontal_top(|ui| {
             let w = (ui.available_width() - 40.0) / 2.0;
-            ui.vertical(|ui| {
-                ui.set_width(w);
-                self.compare_side(ui, &mut s.old, 0, tr(de, "Altes Dokument:", "Old document:"));
+            // Each side its own id space (both have a page range grid).
+            ui.push_id("compare-old", |ui| {
+                ui.vertical(|ui| {
+                    ui.set_width(w);
+                    self.compare_side(ui, &mut s.old, 0, tr(de, "Altes Dokument:", "Old document:"));
+                })
             });
             ui.vertical(|ui| {
                 ui.add_space(170.0);
@@ -300,9 +305,11 @@ impl MrPdfApp {
                     self.clear_previews();
                 }
             });
-            ui.vertical(|ui| {
-                ui.set_width(w);
-                self.compare_side(ui, &mut s.new, 1, tr(de, "Neues Dokument:", "New document:"));
+            ui.push_id("compare-new", |ui| {
+                ui.vertical(|ui| {
+                    ui.set_width(w);
+                    self.compare_side(ui, &mut s.new, 1, tr(de, "Neues Dokument:", "New document:"));
+                })
             });
         });
         ui.separator();
@@ -823,7 +830,9 @@ impl MrPdfApp {
             // The list (only the visible rows are laid out).
             let visible: Vec<usize> =
                 (0..c.diffs.len()).filter(|&i| !c.hidden.contains(&c.diffs[i].kind)).collect();
-            let row_h = 38.0;
+            // Two lines of small text plus room, in the font in use.
+            let row_h =
+                ui.text_style_height(&egui::TextStyle::Small) * 2.0 + ui.spacing().item_spacing.y + 12.0;
             let footer_h = 70.0;
             egui::ScrollArea::vertical()
                 .max_height((ui.available_height() - footer_h).max(80.0))

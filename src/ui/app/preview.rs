@@ -255,10 +255,12 @@ fn zoom_buttons(
     de: bool,
     size_at: impl Fn(f32) -> Vec2 + Copy,
 ) {
-    let h = 18.0;
-    let widths = [18.0, 18.0, 44.0];
-    let mut x = bg.right() - 4.0 - widths.iter().sum::<f32>() - 4.0;
+    let font = egui::FontId::proportional(12.0);
     let label = format!("{:.0} %", c.zoom * 100.0);
+    let text_w = |t: &str| ui.painter().layout_no_wrap(t.to_string(), font.clone(), Color32::BLACK).size().x;
+    let h = (ui.fonts_mut(|f| f.row_height(&font)) + 4.0).max(18.0);
+    let widths = [h, h, (text_w(&label) + 12.0).max(44.0)];
+    let mut x = bg.right() - 4.0 - widths.iter().sum::<f32>() - 4.0;
     let items: [(&str, &str); 3] = [
         ("−", if de { "Verkleinern" } else { "Zoom out" }),
         ("+", if de { "Vergrößern" } else { "Zoom in" }),

@@ -325,6 +325,9 @@ impl MrPdfApp {
 
 /// Shows a file in the system file manager (no shell involved).
 pub(super) fn reveal_in_file_manager(path: &std::path::Path) {
+    if crate::mail::no_external() {
+        return;
+    }
     let result = if cfg!(windows) {
         let mut arg = std::ffi::OsString::from("/select,");
         arg.push(path.as_os_str());

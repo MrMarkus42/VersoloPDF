@@ -132,6 +132,9 @@ pub struct Settings {
     pub show_pan_zoom: bool,
     /// "Design" of the user interface.
     pub design: crate::ui::theme::Design,
+    /// Modern look: system font in readable sizes, more room, calmer
+    /// colours, no size change on hover.
+    pub modern_look: bool,
     /// "Automatisch blättern": points per second.
     pub auto_scroll_speed: f32,
     /// "Vorlesen": volume 0–100, speed −10…10 and options.
@@ -332,6 +335,7 @@ impl Default for Settings {
             loupe_factor: 4.0,
             show_pan_zoom: false,
             design: crate::ui::theme::Design::Standard,
+            modern_look: true,
             auto_scroll_speed: 60.0,
             read_volume: 100,
             read_rate: 0,

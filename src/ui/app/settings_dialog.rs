@@ -872,6 +872,11 @@ fn settings_page(ui: &mut Ui, de: bool, s: &mut SettingsPage, d: &mut Settings) 
                     !d.follow_system_theme,
                     egui::Checkbox::new(&mut d.dark_mode, tr(de, "Dunkler Modus", "Dark mode")),
                 );
+                ui.checkbox(&mut d.modern_look, tr(de, "Moderne Darstellung", "Modern look")).on_hover_text(tr(
+                    de,
+                    "Systemschrift in gut lesbarer Größe, mehr Abstand, ruhigere Farben. Ausgeschaltet: die frühere, kompaktere Darstellung.",
+                    "System font in a readable size, more room, calmer colours. Off: the former, more compact look.",
+                ));
             });
             section(ui, tr(de, "Größe", "Size"), |ui| {
                 ui.horizontal(|ui| {

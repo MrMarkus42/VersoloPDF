@@ -333,6 +333,7 @@ pub struct MrPdfApp {
     applied_scale: Option<f32>,
     /// Design last applied (see `applied_dark`).
     applied_design: Option<theme::Design>,
+    applied_modern: Option<bool>,
     /// Documents closed in this session ("Kürzlich geschlossene Dokumente").
     closed_files: Vec<PathBuf>,
     /// "Automatisch blättern": time of the last step (None: off).
@@ -452,6 +453,7 @@ impl MrPdfApp {
             settings_draft: None,
             applied_scale: None,
             applied_design: None,
+            applied_modern: None,
             closed_files: Vec::new(),
             auto_scroll: None,
             loupe: None,
@@ -486,10 +488,18 @@ impl MrPdfApp {
             } else {
                 self.settings.dark_mode
             };
-        if self.applied_dark != Some(dark) || self.applied_design != Some(design) {
-            theme::apply(ctx, dark, design);
+        let modern = self.settings.modern_look;
+        if self.applied_modern != Some(modern) {
+            theme::apply_fonts(ctx, modern);
+        }
+        if self.applied_dark != Some(dark)
+            || self.applied_design != Some(design)
+            || self.applied_modern != Some(modern)
+        {
+            theme::apply(ctx, dark, design, modern);
             self.applied_dark = Some(dark);
             self.applied_design = Some(design);
+            self.applied_modern = Some(modern);
         }
         let scale = self.settings.ui_scale.clamp(0.5, 2.0);
         if self.applied_scale != Some(scale) {

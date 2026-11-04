@@ -378,7 +378,28 @@ impl PageDialogState {
     }
 }
 
-/// Footer with optional "Einstellungen" button; returns (ok, cancel, settings).
+/// The footer a dialog asked for in this frame (drawn by the dialog window
+/// below the scrolling content, so OK stays in view).
+#[derive(Debug, Clone, Default)]
+pub(super) struct FooterRequest {
+    de: bool,
+    ok_enabled: bool,
+    with_settings: bool,
+    ok_label: String,
+}
+
+fn footer_request_id() -> egui::Id {
+    egui::Id::new("mrpdf-dialog-footer-request")
+}
+
+fn footer_result_id() -> egui::Id {
+    egui::Id::new("mrpdf-dialog-footer-result")
+}
+
+/// Footer with optional "Einstellungen" button; returns (ok, cancel,
+/// settings). The buttons are drawn by the dialog window under the
+/// scrolling content ([`draw_footer`]); their clicks arrive in the next
+/// frame.
 pub(super) fn footer(
     ui: &mut Ui,
     de: bool,
@@ -386,21 +407,52 @@ pub(super) fn footer(
     with_settings: bool,
     ok_label: &str,
 ) -> (bool, bool, bool) {
-    let mut result = (false, false, false);
-    ui.add_space(6.0);
-    ui.horizontal(|ui| {
-        if with_settings {
-            result.2 =
-                small_button(ui, Icon::Gear, tr(de, "Einstellungen", "Settings"), false, true).clicked();
-        }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            result.1 = ui.button(tr(de, "Abbrechen", "Cancel")).clicked();
-            result.0 =
-                ui.add_enabled(ok_enabled, egui::Button::new(RichText::new(ok_label).strong())).clicked();
-        });
+    let ctx = ui.ctx().clone();
+    let clicked =
+        ctx.data_mut(|d| d.remove_temp::<(bool, bool, bool)>(footer_result_id())).unwrap_or_default();
+    ctx.data_mut(|d| {
+        d.insert_temp(
+            footer_request_id(),
+            FooterRequest { de, ok_enabled, with_settings, ok_label: ok_label.to_string() },
+        )
     });
     let esc = ui.input(|i| i.key_pressed(egui::Key::Escape));
-    (result.0, result.1 || esc, result.2)
+    (clicked.0 && ok_enabled, clicked.1 || esc, clicked.2 && with_settings)
+}
+
+/// Forgets a footer click not taken (the dialog closed meanwhile), so it
+/// cannot reach the next dialog.
+pub(super) fn clear_footer(ctx: &egui::Context) {
+    ctx.data_mut(|d| {
+        d.remove_temp::<(bool, bool, bool)>(footer_result_id());
+        d.remove_temp::<FooterRequest>(footer_request_id());
+    });
+}
+
+/// Draws the footer asked for in this frame (if any); called by the dialog
+/// window after the content.
+pub(super) fn draw_footer(ui: &mut Ui) {
+    let ctx = ui.ctx().clone();
+    let Some(req) = ctx.data_mut(|d| d.remove_temp::<FooterRequest>(footer_request_id())) else { return };
+    let mut result = (false, false, false);
+    ui.add_space(4.0);
+    ui.separator();
+    ui.horizontal(|ui| {
+        if req.with_settings {
+            result.2 =
+                small_button(ui, Icon::Gear, tr(req.de, "Einstellungen", "Settings"), false, true).clicked();
+        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            result.1 = ui.button(tr(req.de, "Abbrechen", "Cancel")).clicked();
+            result.0 = ui
+                .add_enabled(req.ok_enabled, egui::Button::new(RichText::new(req.ok_label.as_str()).strong()))
+                .clicked();
+        });
+    });
+    if result != (false, false, false) {
+        ctx.data_mut(|d| d.insert_temp(footer_result_id(), result));
+        ctx.request_repaint();
+    }
 }
 
 fn paper_label(p: PaperChoice, de: bool) -> String {

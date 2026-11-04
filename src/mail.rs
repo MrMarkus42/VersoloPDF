@@ -17,6 +17,9 @@ use std::path::{Path, PathBuf};
 /// tried first; the result there is only known later), `false` when the
 /// user has to attach them.
 pub fn compose(subject: &str, files: Vec<PathBuf>) -> bool {
+    if no_external() {
+        return false;
+    }
     let subject = subject.to_string();
     #[cfg(windows)]
     {
@@ -41,6 +44,12 @@ pub fn compose(subject: &str, files: Vec<PathBuf>) -> bool {
         }
         false
     }
+}
+
+/// Automated tests set `MRPDF_NO_EXTERNAL`: then no mail program, file
+/// manager or browser is started.
+pub fn no_external() -> bool {
+    std::env::var_os("MRPDF_NO_EXTERNAL").is_some()
 }
 
 /// `mailto:` address with the subject, percent-encoded.

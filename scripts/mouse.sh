@@ -6,6 +6,9 @@
 cd "$(dirname "$0")/.."
 rm -rf target/mouse
 export MRPDF_MOUSE_TABS="$1"
+# No file manager, browser or mail program from the clicks (they would
+# keep running after the test).
+export MRPDF_NO_EXTERNAL=1
 # Without a desktop session the system file dialog would wait for input.
 nohup env DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent/bus timeout 5400 \
     cargo test --release --test mouse -- --ignored --nocapture > /tmp/mouse.log 2>&1 &

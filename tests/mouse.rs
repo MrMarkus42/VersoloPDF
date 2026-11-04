@@ -130,17 +130,42 @@ fn key(h: &mut Harness<'_, MrPdfApp>, k: Key) {
     h.run_steps(3);
 }
 
+/// Vertical extent of the ribbon (below the tab row with "Datei", above
+/// the document tabs), in any look.
+fn ribbon_band(h: &Harness<'_, MrPdfApp>) -> (f32, f32) {
+    let top = h.query_all_by_label("Datei").map(|n| n.rect().max.y).fold(f32::INFINITY, f32::min);
+    let top = if top.is_finite() { top + 4.0 } else { 55.0 };
+    // The document tab strip starts below the ribbon (the close buttons of
+    // the tabs and panels are the first "Schließen" below it).
+    let strip = h
+        .query_all_by_label("Schließen")
+        .map(|n| n.rect().min.y)
+        .filter(|y| *y > top + 40.0)
+        .fold(f32::INFINITY, f32::min);
+    (top, strip.min(top + 130.0))
+}
+
 /// Enabled buttons with a name; with `ribbon` only those in the ribbon.
 fn all_buttons(h: &Harness<'_, MrPdfApp>, ribbon: bool) -> Vec<(String, Rect)> {
+    let (top, bottom) = ribbon_band(h);
     h.get_all_by_role(Role::Button)
         .filter(|n| !n.accesskit_node().is_disabled())
         .filter_map(|n| {
             let label = n.accesskit_node().label()?.trim().to_string();
             let r = n.rect();
-            let in_ribbon = r.min.y > 55.0 && r.max.y < 165.0;
+            let in_ribbon = r.min.y > top && r.max.y < bottom;
             (!label.is_empty() && (!ribbon || in_ribbon)).then_some((label, r))
         })
         .collect()
+}
+
+/// A place on page 1 given as it was on the screen of the classic look
+/// (1280 × 820, page at 97 %): the same spot of the page in any look.
+fn at(h: &Harness<'_, MrPdfApp>, x: f32, y: f32) -> Pos2 {
+    const LEFT: f32 = 257.0;
+    const TOP: f32 = 218.0;
+    const SCALE: f32 = 770.0 / 595.28;
+    to_screen(h, (x - LEFT) / SCALE, 841.89 - (y - TOP) / SCALE)
 }
 
 fn buttons(h: &Harness<'_, MrPdfApp>) -> Vec<(String, Rect)> {
@@ -176,7 +201,8 @@ fn picture(h: &mut Harness<'_, MrPdfApp>) -> u64 {
     h.run_steps(3);
     let Ok(img) = h.render() else { return 0 };
     let ppp = img.width() as f32 / h.ctx.content_rect().width();
-    let top = (170.0 * ppp) as usize * img.width() as usize * 4;
+    let below_ribbon = ribbon_band(h).1 + 5.0;
+    let top = (below_ribbon * ppp) as usize * img.width() as usize * 4;
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     img.as_raw()[top.min(img.as_raw().len())..].hash(&mut hasher);
     hasher.finish()
@@ -214,11 +240,21 @@ fn use_tool(h: &mut Harness<'_, MrPdfApp>, tool: Tool) -> String {
     let before = snap(h);
     match tool.gesture() {
         // Over the first text line of the sample page.
-        Gesture::TextMarkup => drag(h, pos2(352.0, 392.0), pos2(612.0, 392.0)),
-        Gesture::Rect | Gesture::Line | Gesture::Freehand => drag(h, pos2(450.0, 600.0), pos2(650.0, 700.0)),
-        Gesture::Click => click(h, pos2(700.0, 650.0)),
+        Gesture::TextMarkup => {
+            let (a, b) = (at(h, 352.0, 392.0), at(h, 612.0, 392.0));
+            drag(h, a, b)
+        }
+        Gesture::Rect | Gesture::Line | Gesture::Freehand => {
+            let (a, b) = (at(h, 450.0, 600.0), at(h, 650.0, 700.0));
+            drag(h, a, b)
+        }
+        Gesture::Click => {
+            let p = at(h, 700.0, 650.0);
+            click(h, p)
+        }
         Gesture::Vertices => {
-            for p in [pos2(450.0, 600.0), pos2(650.0, 600.0), pos2(550.0, 710.0)] {
+            let corners = [at(h, 450.0, 600.0), at(h, 650.0, 600.0), at(h, 550.0, 710.0)];
+            for p in corners {
                 click(h, p);
             }
             key(h, Key::Enter);
@@ -304,7 +340,8 @@ fn outcome(h: &mut Harness<'_, MrPdfApp>, before: &Snap, shots: &str) -> String 
                 return format!("Werkzeug {tool:?} gewählt");
             }
             Tool::Zoom => {
-                click(h, pos2(640.0, 450.0));
+                let p = at(h, 640.0, 450.0);
+                click(h, p);
                 let changed = snap(h).zoom != now.zoom;
                 return format!(
                     "Werkzeug Zoom: {}",
@@ -473,7 +510,6 @@ fn polygon_gestures() {
     use mrpdf::ui::app::commands::Cmd;
     let _guard = common::lock();
     let dir = tempfile::tempdir().unwrap();
-    let corners = [pos2(450.0, 600.0), pos2(650.0, 600.0), pos2(550.0, 710.0)];
     let mut failed = Vec::new();
     let mut n = 0;
     for tool in [Tool::Cloud, Tool::Polygon, Tool::Polyline] {
@@ -488,6 +524,7 @@ fn polygon_gestures() {
             let ctx = h.ctx.clone();
             h.state_mut().run(&ctx, Cmd::Tool(tool));
             h.run_steps(3);
+            let corners = [at(&h, 450.0, 600.0), at(&h, 650.0, 600.0), at(&h, 550.0, 710.0)];
             for p in corners {
                 if way == "verrutschte Klicks" {
                     drag(&mut h, p, p + egui::vec2(9.0, 7.0));
@@ -658,7 +695,8 @@ fn compare_documents() {
     }
     // Scrolling the old document (left) takes the new one along.
     let before = h.state().compared_scroll();
-    input(&mut h, Event::PointerMoved(pos2(420.0, 500.0)));
+    let p = at(&h, 420.0, 500.0);
+    input(&mut h, Event::PointerMoved(p));
     h.step();
     input(
         &mut h,
@@ -925,8 +963,9 @@ fn dialog_previews() {
     click(&mut h, at + egui::vec2(120.0, 200.0));
     h.run_steps(5);
     let rev = h.state_mut().active_tab_mut().unwrap().doc.revision();
-    // A click outside closes the picker.
-    click(&mut h, pos2(600.0, 640.0));
+    // A click outside (on the dialog title) closes the picker.
+    let title = h.get_all_by_label("Hintergrund hinzufügen").next().map(|n| n.rect().center()).unwrap();
+    click(&mut h, title);
     h.run_steps(5);
     shot(&mut h, "background");
     let after = region_hash(&mut h, area);
@@ -957,7 +996,6 @@ fn text_tools() {
     let _guard = common::lock();
     let dir = tempfile::tempdir().unwrap();
     let count = |h: &mut Harness<'_, MrPdfApp>| h.state_mut().active_tab_mut().unwrap().annotations(0).len();
-    let line = (pos2(352.0, 392.0), pos2(612.0, 392.0));
     let cases: [(&str, Tool, Option<Event>); 3] = [
         (
             "Textkorrektur + Entf",
@@ -982,6 +1020,7 @@ fn text_tools() {
         h.state_mut().run(&ctx, Cmd::Tool(tool));
         h.run_steps(3);
         let before = count(&mut h);
+        let line = (at(&h, 352.0, 392.0), at(&h, 612.0, 392.0));
         match then {
             Some(e) => {
                 drag(&mut h, line.0, line.1);
@@ -995,7 +1034,10 @@ fn text_tools() {
                     h.run_steps(5);
                 }
             }
-            None => click(&mut h, pos2(450.0, 392.0)),
+            None => {
+                let p = at(&h, 450.0, 392.0);
+                click(&mut h, p)
+            }
         }
         let after = count(&mut h);
         let kinds: Vec<String> = h

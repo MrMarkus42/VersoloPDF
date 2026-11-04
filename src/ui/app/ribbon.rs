@@ -442,6 +442,12 @@ impl MrPdfApp {
                     .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
                     .show(ui, |ui| {
                         ui.style_mut().spacing.scroll.floating = false;
+                        // The ribbon keeps its compact grid in every look,
+                        // so all groups fit; the room goes to dialogs and
+                        // panels.
+                        ui.spacing_mut().item_spacing = egui::vec2(6.0, 4.0);
+                        ui.spacing_mut().button_padding = egui::vec2(6.0, 3.0);
+                        ui.spacing_mut().interact_size.y = 18.0;
                         drawn_width = ui
                             .horizontal(|ui| {
                                 ui.set_min_height(82.0);
@@ -483,8 +489,10 @@ impl MrPdfApp {
 
     /// The ribbon tabs; tabs that do not fit go into a "»" menu at the end.
     fn tab_row(&mut self, ui: &mut Ui, tabs: &[(RibbonTab, &str)]) {
+        let modern = theme::modern();
+        let size = if modern { 14.5 } else { 13.0 };
         let text_of = |tab: RibbonTab, label: &str| {
-            let text = RichText::new(label).size(13.0);
+            let text = RichText::new(label).size(size);
             if matches!(tab, RibbonTab::Format | RibbonTab::Arrange) {
                 text.color(egui::Color32::from_rgb(160, 110, 0)).strong()
             } else {
@@ -495,29 +503,46 @@ impl MrPdfApp {
         let widths: Vec<f32> = tabs
             .iter()
             .map(|(_, label)| {
-                let font = egui::FontId::proportional(13.0);
+                let font = egui::FontId::proportional(size);
                 ui.painter().layout_no_wrap(label.to_string(), font, egui::Color32::WHITE).size().x + pad
             })
             .collect();
         let avail = ui.available_width();
-        let shown = if widths.iter().sum::<f32>() <= avail {
-            tabs.len()
-        } else {
-            // Room for the "»" button.
-            let mut used = 34.0;
-            widths
-                .iter()
-                .take_while(|w| {
-                    used += **w;
-                    used <= avail
-                })
-                .count()
-        };
         let backstage = self.backstage_open();
+        // Tabs that must stay in view when the row is too narrow: the
+        // context tabs ("Format", "Anordnen") and the active one; the other
+        // tabs go behind "»" from the right.
+        let keep = |tab: RibbonTab| {
+            matches!(tab, RibbonTab::Format | RibbonTab::Arrange) || (tab == self.ribbon && !backstage)
+        };
+        let mut shown_idx: Vec<usize> = (0..tabs.len()).collect();
+        let mut hidden_idx: Vec<usize> = Vec::new();
+        if widths.iter().sum::<f32>() > avail {
+            // Room for the "»" button.
+            let mut used =
+                34.0 + (0..tabs.len()).filter(|&i| keep(tabs[i].0)).map(|i| widths[i]).sum::<f32>();
+            shown_idx.retain(|&i| {
+                if keep(tabs[i].0) {
+                    return true;
+                }
+                used += widths[i];
+                let fits = used <= avail && hidden_idx.is_empty();
+                if !fits {
+                    hidden_idx.push(i);
+                }
+                fits
+            });
+        }
         let mut chosen = None;
-        for &(tab, label) in &tabs[..shown] {
+        for &(tab, label) in shown_idx.iter().map(|&i| &tabs[i]) {
             let active = self.ribbon == tab && !backstage;
-            let resp = ui.selectable_label(active, text_of(tab, label));
+            // Modern: the active tab only by its bar and bold text.
+            let resp = if modern {
+                let text = text_of(tab, label);
+                ui.selectable_label(false, if active { text.strong() } else { text })
+            } else {
+                ui.selectable_label(active, text_of(tab, label))
+            };
             // Each tab has its topic colour: a bar under the active tab and
             // a faint one on hover.
             let bar = |alpha: f32| {
@@ -537,14 +562,14 @@ impl MrPdfApp {
                 chosen = Some(tab);
             }
         }
-        if shown < tabs.len() {
-            let hidden_selected = tabs[shown..].iter().any(|(tab, _)| *tab == self.ribbon) && !backstage;
+        if !hidden_idx.is_empty() {
+            let hidden_selected = hidden_idx.iter().any(|&i| tabs[i].0 == self.ribbon) && !backstage;
             let de = self.settings.language == Language::German;
             let more = ui
                 .selectable_label(hidden_selected, RichText::new("»").size(14.0))
                 .on_hover_text(if de { "Weitere Registerkarten" } else { "More tabs" });
             egui::Popup::menu(&more).show(|ui| {
-                for &(tab, label) in &tabs[shown..] {
+                for &(tab, label) in hidden_idx.iter().map(|&i| &tabs[i]) {
                     if ui.selectable_label(self.ribbon == tab && !backstage, text_of(tab, label)).clicked() {
                         chosen = Some(tab);
                         ui.close();

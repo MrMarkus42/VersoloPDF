@@ -145,6 +145,9 @@ fn write_media_temp(name: &str, data: &[u8]) -> Option<std::path::PathBuf> {
 
 /// Opens a file with the program the system uses for its type (no shell).
 fn open_with_system(path: &std::path::Path) {
+    if crate::mail::no_external() {
+        return;
+    }
     let result = if cfg!(windows) {
         std::process::Command::new("explorer").arg(path).spawn()
     } else if cfg!(target_os = "macos") {

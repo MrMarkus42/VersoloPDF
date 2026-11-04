@@ -991,8 +991,10 @@ fn bookmark_tools_ui() {
     h.get_by_label("Formatierung").click();
     h.run_steps(3);
     save(&mut h, "les-04-rule-format");
-    h.get_all_by_label("Abbrechen").last().unwrap().click();
-    h.run_steps(3);
+    // The rule editor's "Abbrechen" (the dialog's own one is at the bottom).
+    h.get_all_by_label("Abbrechen").min_by(|a, b| a.rect().min.y.total_cmp(&b.rect().min.y)).unwrap().click();
+    // The dialog gets smaller again and is centred anew.
+    h.run_steps(10);
     ok(&mut h);
     assert_eq!(h.state().active_tab().unwrap().doc.bookmarks().len(), 3);
 
@@ -1155,7 +1157,7 @@ fn icon_gallery() {
     let _guard = common::lock();
     for dark in [false, true] {
         let mut h = Harness::builder().with_size(egui::vec2(1240.0, 820.0)).wgpu().build_ui(move |ui| {
-            theme::apply(ui.ctx(), dark, theme::Design::Standard);
+            theme::apply(ui.ctx(), dark, theme::Design::Standard, false);
             let bg = if dark { egui::Color32::from_gray(38) } else { egui::Color32::from_gray(250) };
             ui.painter().rect_filled(ui.max_rect(), 0.0, bg);
             let ink = theme::icon_color(dark);

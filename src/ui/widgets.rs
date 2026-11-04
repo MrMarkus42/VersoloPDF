@@ -128,7 +128,11 @@ pub fn big_button(ui: &mut Ui, icon: Icon, label: &str, selected: bool, enabled:
         .split_whitespace()
         .map(|w| ui.painter().layout_no_wrap(w.to_string(), font.clone(), Color32::WHITE).size().x)
         .fold(0.0, f32::max);
-    let size = vec2((widest_word + 10.0).max(min_w), 62.0);
+    let width = (widest_word + 10.0).max(min_w);
+    let text_color = if enabled { ui.visuals().text_color() } else { ui.visuals().weak_text_color() };
+    let galley = ui.painter().layout(label.to_string(), font, text_color, width - 4.0);
+    // Tall enough for two label lines in any font.
+    let size = vec2(width, (35.0 + galley.size().y + 4.0).max(62.0));
     let sense = if enabled { Sense::click() } else { Sense::hover() };
     let (rect, response) = ui.allocate_exact_size(size, sense);
     response.widget_info(|| WidgetInfo::selected(WidgetType::Button, enabled, selected, label));
@@ -144,8 +148,6 @@ pub fn big_button(ui: &mut Ui, icon: Icon, label: &str, selected: bool, enabled:
             alpha_painter.multiply_opacity(0.4);
         }
         icons::paint(&alpha_painter, icon_rect, icon, icon_tint(ui, enabled));
-        let text_color = if enabled { ui.visuals().text_color() } else { ui.visuals().weak_text_color() };
-        let galley = ui.painter().layout(label.to_string(), font, text_color, size.x - 4.0);
         let pos = rect.center_top() + vec2(-galley.size().x / 2.0, 35.0);
         ui.painter().galley(pos, galley, text_color);
     }
@@ -168,7 +170,11 @@ pub fn big_menu_button(ui: &mut Ui, icon: Icon, label: &str, enabled: bool, open
         .split_whitespace()
         .map(|w| ui.painter().layout_no_wrap(w.to_string(), font.clone(), Color32::WHITE).size().x)
         .fold(0.0, f32::max);
-    let size = vec2((widest_word + 10.0).max(min_w), 64.0);
+    let width = (widest_word + 10.0).max(min_w);
+    let text_color = if enabled { ui.visuals().text_color() } else { ui.visuals().weak_text_color() };
+    let galley = ui.painter().layout(label.to_string(), font, text_color, width - 4.0);
+    // Room for the label lines and the arrow below them in any font.
+    let size = vec2(width, (33.0 + galley.size().y + 9.0).max(64.0));
     let sense = if enabled { Sense::click() } else { Sense::hover() };
     let (rect, response) = ui.allocate_exact_size(size, sense);
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, label));
@@ -180,8 +186,6 @@ pub fn big_menu_button(ui: &mut Ui, icon: Icon, label: &str, enabled: bool, open
             painter.multiply_opacity(0.4);
         }
         icons::paint(&painter, icon_rect, icon, icon_tint(ui, enabled));
-        let text_color = if enabled { ui.visuals().text_color() } else { ui.visuals().weak_text_color() };
-        let galley = ui.painter().layout(label.to_string(), font, text_color, size.x - 4.0);
         let pos = rect.center_top() + vec2(-galley.size().x / 2.0, 33.0);
         let text_bottom = pos.y + galley.size().y;
         ui.painter().galley(pos, galley, text_color);

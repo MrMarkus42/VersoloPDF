@@ -119,7 +119,8 @@ impl MrPdfApp {
         let modal =
             Modal::new(area_id).area(area).frame(frame).backdrop_color(egui::Color32::from_black_alpha(40));
         // No dialog may be taller than the window: higher contents scroll.
-        let max_height = (ctx.content_rect().height() - TITLE_BAR - 60.0).max(200.0);
+        // Room is kept for the footer with OK / Abbrechen below.
+        let max_height = (ctx.content_rect().height() - TITLE_BAR - 60.0 - 48.0).max(200.0);
         modal.show(ctx, |ui| {
             let bar_top = ui.cursor().min;
             ui.add_space(TITLE_BAR);
@@ -680,6 +681,9 @@ impl MrPdfApp {
                         }
                     }
                 });
+                // OK / Abbrechen of the large dialogs: below the scrolling
+                // content, always in view.
+                super::page_dialogs::draw_footer(ui);
             });
             let bar = egui::Rect::from_min_size(bar_top, egui::vec2(ui.min_rect().width(), TITLE_BAR));
             let title = ui.ctx().data(|d| d.get_temp::<String>(title_id())).unwrap_or_else(|| "MrPDF".into());
@@ -709,6 +713,7 @@ impl MrPdfApp {
             self.dialog = Some(dialog);
         } else {
             self.dialog_pos = None;
+            super::page_dialogs::clear_footer(ctx);
             if matches!(dialog, Dialog::Unsaved { .. }) {
                 self.clear_previews();
             }
