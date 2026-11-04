@@ -1345,6 +1345,39 @@ fn hold_down_style_presets() {
     assert!(h.query_by_label("Roter Rahmen").is_none(), "palette closed");
 }
 
+/// A Letter page on A4 paper: the print dialog warns that it is cut and
+/// offers to shrink it.
+#[test]
+fn print_dialog_warns_about_cut_pages() {
+    use mrpdf::ui::app::Dialog;
+    use mrpdf::ui::app::commands::Cmd;
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = harness(vec![sample_file(&dir, 1)], false);
+    h.run_steps(8);
+    {
+        let doc = &mut h.state_mut().active_tab_mut().unwrap().doc;
+        doc.insert_blank_page(0, 612.0, 792.0).unwrap(); // US Letter
+        doc.delete_pages(&[1]).unwrap();
+    }
+    h.run_steps(3);
+    let ctx = h.ctx.clone();
+    h.state_mut().run(&ctx, Cmd::Print);
+    h.run_steps(8);
+    save(&mut h, "print-letter-on-a4");
+    let shrink = h.get_by_label("Auf Druckbereich reduzieren");
+    shrink.click();
+    h.run_steps(8);
+    match h.state().dialog() {
+        Some(Dialog::Print(p)) => {
+            assert_eq!(p.settings.scaling, mrpdf::print_layout::Scaling::Shrink);
+            assert!(p.cut.is_empty(), "nothing cut after shrinking: {:?}", p.cut);
+        }
+        other => panic!("print dialog expected, got {other:?}"),
+    }
+    assert!(h.query_by_label("Auf Druckbereich reduzieren").is_none(), "warning gone");
+}
+
 /// Every ribbon tab with a document open, light and dark.
 #[test]
 fn ribbon_tour() {

@@ -5,6 +5,12 @@ Funde aus den Prüfrunden und aus dem Gebrauch. Neueste Prüfung oben.
 Einstufung: **A** stürzt ab / Daten in Gefahr · **B** falsch oder unbedienbar ·
 **C** langsam oder umständlich · **D** Schönheitsfehler
 
+## Aus dem Gebrauch
+
+| Nr | Stufe | Fund | Lösung | Stand |
+|---|---|---|---|---|
+| F8 | B | Drucken mit „Keine Größenanpassung“: Die Seite wurde an die Ecke des **bedruckbaren Bereichs** gelegt statt an die Papierecke, also um den Druckerrand nach rechts und unten verschoben; rechts und unten fehlte etwas, selbst bei A4 auf A4. Bei Letter auf A4 (6 mm breiter) fehlte deutlich mehr. Die Vorschau zeigte das nicht erkennbar (die abgeschnittene Kante sah aus wie ein Seitenrand). Gemeldet von Mr. M | Seiten sitzen an der Papierecke (bzw. mittig); nur der unbedruckbare Druckerrand fällt weg. Die Vorschau zeichnet den bedruckbaren Bereich gestrichelt ein. Ragt eine Seite über das Papier hinaus, warnt der Dialog („Seite 1 ist größer als das Papier … es fehlen bis zu 6 mm in der Breite“) und bietet „Auf Druckbereich reduzieren“ an | behoben 2026-11-04; mit echtem Windows-Drucker noch von Mr. M zu prüfen |
+
 ## Prüfung vom 2026-11-04
 
 ### Was geprüft wurde

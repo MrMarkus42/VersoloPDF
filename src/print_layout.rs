@@ -148,8 +148,25 @@ fn intersect(a: RectF, b: RectF) -> RectF {
 /// Places a page of upright size `(w, h)` into `area`.
 fn place(
     page: usize,
+    size: (f32, f32),
+    area: RectF,
+    scale: f32,
+    rotate: bool,
+    center: bool,
+    border: bool,
+) -> Placement {
+    place_clipped(page, size, area, area, scale, rotate, center, border)
+}
+
+/// Places a page by `area` (top left corner or centre) and cuts it to
+/// `clip`: for unscaled pages the position is taken from the whole paper and
+/// only the margin the printer cannot print on is lost.
+#[allow(clippy::too_many_arguments)]
+fn place_clipped(
+    page: usize,
     (w, h): (f32, f32),
     area: RectF,
+    clip: RectF,
     scale: f32,
     rotate: bool,
     center: bool,
@@ -164,7 +181,40 @@ fn place(
         m = m.then(Matrix::rotate(90.0)).then(Matrix::translate(h, 0.0));
     }
     let matrix = m.then(Matrix::scale(scale, scale)).then(Matrix::translate(x, y));
-    Placement { page, matrix, clip: intersect(RectF::new(x, y, x + dw, y + dh), area), border }
+    Placement { page, matrix, clip: intersect(RectF::new(x, y, x + dw, y + dh), clip), border }
+}
+
+/// A page cut at the paper's edge: page index, cut width and height (points).
+pub type CutPage = (usize, f32, f32);
+
+/// Pages of `pages` (index, upright size) that are cut on `sheets` because
+/// they reach beyond the paper (tiles are cut on purpose and not reported;
+/// the printer's unprintable border is lost by every program and shown in
+/// the preview instead). Returns (page, cut width, cut height) in points.
+pub fn cut_pages(
+    pages: &[(usize, (f32, f32))],
+    sheets: &[SheetSpec],
+    s: &PrintSettings,
+) -> Vec<(usize, f32, f32)> {
+    if matches!(s.scaling, Scaling::TileLarge | Scaling::TileAll) {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for sheet in sheets {
+        let bounds = RectF::new(0.0, 0.0, sheet.size.0, sheet.size.1);
+        for item in &sheet.items {
+            let Some(&(_, (w, h))) = pages.iter().find(|(p, _)| *p == item.page) else { continue };
+            let corners = [(0.0, 0.0), (w, 0.0), (0.0, h), (w, h)].map(|(x, y)| item.matrix.apply(x, y));
+            let (x0, x1) = corners.iter().fold((f32::MAX, f32::MIN), |(a, b), c| (a.min(c.0), b.max(c.0)));
+            let (y0, y1) = corners.iter().fold((f32::MAX, f32::MIN), |(a, b), c| (a.min(c.1), b.max(c.1)));
+            let lost_w = (bounds.x0 - x0).max(0.0) + (x1 - bounds.x1).max(0.0);
+            let lost_h = (bounds.y0 - y0).max(0.0) + (y1 - bounds.y1).max(0.0);
+            if (lost_w > 1.0 || lost_h > 1.0) && !out.iter().any(|(p, _, _)| *p == item.page) {
+                out.push((item.page, lost_w, lost_h));
+            }
+        }
+    }
+    out
 }
 
 fn fit_scale((w, h): (f32, f32), area: RectF) -> f32 {
@@ -199,11 +249,11 @@ pub fn layout(pages: &[(usize, (f32, f32))], paper: &Paper, s: &PrintSettings) -
                     });
                     continue;
                 }
-                let area = if s.ignore_margins && matches!(s.scaling, Scaling::Fit | Scaling::Shrink) {
-                    full
-                } else {
-                    printable
-                };
+                let fitting = matches!(s.scaling, Scaling::Fit | Scaling::Shrink);
+                // Fitted pages go into the printable area; unscaled pages sit
+                // on the paper like the page of the document (corner or
+                // centre) and lose only what the printer cannot print.
+                let area = if fitting && !s.ignore_margins { printable } else { full };
                 let rotate = should_rotate(s, size, area);
                 let upright = if rotate { (size.1, size.0) } else { size };
                 let scale = match s.scaling {
@@ -212,10 +262,11 @@ pub fn layout(pages: &[(usize, (f32, f32))], paper: &Paper, s: &PrintSettings) -
                     Scaling::Fit => fit_scale(upright, area),
                     _ => fit_scale(upright, area).min(1.0),
                 };
-                let center = s.auto_center || matches!(s.scaling, Scaling::Fit | Scaling::Shrink);
+                let center = s.auto_center || fitting;
+                let clip = if fitting { area } else { printable };
                 sheets.push(SheetSpec {
                     size: paper.size,
-                    items: vec![place(page, size, area, scale, rotate, center, false)],
+                    items: vec![place_clipped(page, size, area, clip, scale, rotate, center, false)],
                 });
             }
         }
@@ -431,6 +482,36 @@ mod tests {
             &PrintSettings { scaling: Scaling::Fit, auto_rotate: true, ..Default::default() },
         );
         assert!((scale(&r[0].items[0]) - 1.0).abs() < 0.01);
+    }
+
+    /// "Keine Größenanpassung" puts the page on the paper like the document
+    /// page (not shifted by the printer margin) and reports what is cut.
+    #[test]
+    fn unscaled_pages_sit_on_the_paper_and_cuts_are_reported() {
+        // A4 paper with 4.2 mm (12 pt) unprintable border.
+        let paper = Paper { size: A4, printable: RectF::new(12.0, 12.0, A4.0 - 12.0, A4.1 - 12.0) };
+        let none = PrintSettings::default();
+        // A4 on A4: top left corner of the page on the paper's corner.
+        let a4 = pages(1, A4);
+        let sheets = layout(&a4, &paper, &none);
+        let (x, y) = sheets[0].items[0].matrix.apply(0.0, A4.1);
+        assert!(x.abs() < 0.01 && (y - A4.1).abs() < 0.01, "not shifted: {x},{y}");
+        assert!(cut_pages(&a4, &sheets, &none).is_empty(), "only the printer border is lost");
+
+        // Letter (8.5 × 11 in) is 17 pt wider than A4: reported as cut.
+        let letter = pages(1, (612.0, 792.0));
+        let sheets = layout(&letter, &paper, &none);
+        let cut = cut_pages(&letter, &sheets, &none);
+        assert_eq!(cut.len(), 1);
+        assert!((cut[0].1 - 17.0).abs() < 1.0, "width lost: {}", cut[0].1);
+        // "Auf Druckbereich reduzieren" keeps it whole.
+        let shrink = PrintSettings { scaling: Scaling::Shrink, ignore_margins: false, ..Default::default() };
+        let sheets = layout(&letter, &paper, &shrink);
+        assert!(cut_pages(&letter, &sheets, &shrink).is_empty());
+        // Tiles are cut on purpose.
+        let tiles = PrintSettings { scaling: Scaling::TileAll, ..Default::default() };
+        let big = pages(1, (1190.0, 1684.0));
+        assert!(cut_pages(&big, &layout(&big, &paper, &tiles), &tiles).is_empty());
     }
 
     #[test]

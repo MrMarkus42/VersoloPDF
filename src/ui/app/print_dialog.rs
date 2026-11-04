@@ -11,7 +11,7 @@ use super::{Dialog, MrPdfApp};
 use crate::Document;
 use crate::import::PageOrder;
 use crate::print::PrinterInfo;
-use crate::print_layout::{Binding, Duplex, Paper, PrintContent, PrintSettings, Scaling};
+use crate::print_layout::{Binding, CutPage, Duplex, Paper, PrintContent, PrintSettings, Scaling};
 use crate::ui::pickers::{PageRange, RangeMode, Subset, parse_pages, preset_combo, section, segmented};
 
 /// State of the print dialog.
@@ -35,6 +35,9 @@ pub struct PrintState {
     pub error: Option<String>,
     /// Settings the shown sheets were made for.
     pub job_key: String,
+    /// Pages cut because they reach beyond the printable area (page, cut
+    /// width, cut height in points).
+    pub cut: Vec<CutPage>,
 }
 
 fn paper_of(settings: &PrintSettings, printer: &str, devmode: Option<&[u8]>) -> Paper {
@@ -55,6 +58,51 @@ fn paper_name(paper: &Paper) -> String {
 }
 
 /// Sheets chosen under "Drucke Blätter" (0-based).
+/// Warning about pages that do not fit the paper; true if the user chose to
+/// shrink them.
+fn cut_warning(ui: &mut Ui, de: bool, cut: &[CutPage], paper: &Paper) -> bool {
+    let mm = 25.4 / 72.0;
+    let (w, h) = cut.iter().fold((0.0f32, 0.0f32), |(a, b), c| (a.max(c.1), b.max(c.2)));
+    let pages: Vec<String> = cut.iter().take(8).map(|c| (c.0 + 1).to_string()).collect();
+    let more = if cut.len() > 8 { " …" } else { "" };
+    let lost = match (w * mm >= 1.0, h * mm >= 1.0) {
+        (true, true) => {
+            format!("{:.0} mm {} {:.0} mm", w * mm, tr(de, "in der Breite und", "in width and"), h * mm)
+        }
+        (true, false) => format!("{:.0} mm {}", w * mm, tr(de, "in der Breite", "in width")),
+        _ => format!("{:.0} mm {}", h * mm, tr(de, "in der Höhe", "in height")),
+    };
+    let text = format!(
+        "{} {}{more} {} ({}). {} {lost}.",
+        if cut.len() == 1 { tr(de, "Seite", "Page") } else { tr(de, "Seiten", "Pages") },
+        pages.join(", "),
+        if cut.len() == 1 {
+            tr(de, "ist größer als das Papier", "is larger than the paper")
+        } else {
+            tr(de, "sind größer als das Papier", "are larger than the paper")
+        },
+        paper_name(paper),
+        tr(de, "Beim Drucken fehlen bis zu", "Printing cuts off up to"),
+    );
+    let amber = egui::Color32::from_rgb(190, 110, 0);
+    egui::Frame::new()
+        .stroke(egui::Stroke::new(1.0, amber))
+        .corner_radius(3.0)
+        .inner_margin(6)
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.colored_label(amber, format!("⚠ {text}"));
+            ui.button(tr(de, "Auf Druckbereich reduzieren", "Shrink to printable area"))
+                .on_hover_text(tr(
+                    de,
+                    "Zu große Seiten werden verkleinert, kleinere bleiben unverändert.",
+                    "Pages that are too large are shrunk, smaller ones stay as they are.",
+                ))
+                .clicked()
+        })
+        .inner
+}
+
 fn chosen_sheets(text: &str, subset: Subset, reverse: bool, count: usize) -> Option<Vec<usize>> {
     let text = if text.trim().is_empty() { "1-" } else { text };
     let mut sheets: Vec<usize> = parse_pages(text, count)?
@@ -155,6 +203,7 @@ impl MrPdfApp {
             preset_name: String::new(),
             error: None,
             job_key: String::new(),
+            cut: Vec::new(),
         })));
     }
 
@@ -169,13 +218,13 @@ impl MrPdfApp {
     }
 
     /// The sheets to print for a document (content filter, flattening and
-    /// placement on sheets).
+    /// placement on sheets) and the pages cut at the paper's edge.
     fn print_job(
         doc: &mut Document,
         pages: &[usize],
         s: &PrintSettings,
         paper: &Paper,
-    ) -> crate::Result<Document> {
+    ) -> crate::Result<(Document, Vec<CutPage>)> {
         let bytes = doc.to_bytes()?;
         let (filtered, annots) = crate::print_layout::filter_content(&bytes, None, s.content)?;
         let filtered = if annots {
@@ -192,8 +241,9 @@ impl MrPdfApp {
             .map(|&p| Ok((p, crate::import::upright_size(&src, p)?)))
             .collect::<crate::Result<Vec<_>>>()?;
         let sheets = crate::print_layout::layout(&sizes, paper, s);
+        let cut = crate::print_layout::cut_pages(&sizes, &sheets, s);
         let bytes = crate::import::compose_sheets(&src, &sheets)?;
-        Document::from_bytes(bytes, doc.display_name(), None)
+        Ok((Document::from_bytes(bytes, doc.display_name(), None)?, cut))
     }
 
     /// Draws the print dialog.
@@ -384,12 +434,14 @@ impl MrPdfApp {
                         _ => Err(crate::Error::Invalid(tr(de, "Keine Seiten ausgewählt.", "No pages selected.").into())),
                     };
                     match job {
-                        Ok(doc) => {
+                        Ok((doc, cut)) => {
                             state.error = None;
+                            state.cut = cut;
                             self.dialog_doc = Some((key, doc));
                         }
                         Err(err) => {
                             state.error = Some(super::actions::error_text(self.t(), &err));
+                            state.cut.clear();
                             self.dialog_doc = None;
                         }
                     }
@@ -399,13 +451,39 @@ impl MrPdfApp {
                 if let Some((_, doc)) = &self.dialog_doc
                     && count > 0
                 {
-                    doc_preview(ui, &mut self.preview[0], doc, 0x9e1, state.preview_sheet, vec2(330.0, 380.0));
+                    let area =
+                        doc_preview(ui, &mut self.preview[0], doc, 0x9e1, state.preview_sheet, vec2(330.0, 380.0));
+                    // The printable area of the paper, so cut parts are visible.
+                    let sheet_is_paper = doc
+                        .geometry(state.preview_sheet)
+                        .is_some_and(|g| (g.crop.width() - state.paper.size.0).abs() < 1.0);
+                    let p = state.paper.printable;
+                    let has_border = p.x0 > 0.5 || p.y0 > 0.5 || p.x1 < state.paper.size.0 - 0.5;
+                    if let Some(area) = area
+                        && sheet_is_paper
+                        && has_border
+                    {
+                        let r = egui::Rect::from_two_pos(
+                            area.to_screen(crate::geometry::PointF::new(p.x0, p.y0)),
+                            area.to_screen(crate::geometry::PointF::new(p.x1, p.y1)),
+                        );
+                        let pts = [r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom(), r.left_top()];
+                        let stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(220, 60, 60));
+                        ui.painter().extend(egui::Shape::dashed_line(&pts, stroke, 4.0, 3.0));
+                    }
                 } else {
                     let (rect, _) = ui.allocate_exact_size(vec2(330.0, 380.0), egui::Sense::hover());
                     ui.painter().rect_filled(rect, 0.0, egui::Color32::from_gray(128));
                 }
                 if let Some(e) = &state.error {
                     ui.colored_label(egui::Color32::from_rgb(200, 40, 40), e.as_str());
+                }
+                if state.paper.printable != crate::geometry::RectF::new(0.0, 0.0, state.paper.size.0, state.paper.size.1) {
+                    ui.label(RichText::new(tr(de, "Gestrichelt: bedruckbarer Bereich des Druckers", "Dashed: printable area of the printer")).small().weak());
+                }
+                if !state.cut.is_empty() && cut_warning(ui, de, &state.cut, &state.paper) {
+                    state.settings.scaling = Scaling::Shrink;
+                    state.settings.ignore_margins = false;
                 }
                 ui.label(RichText::new(format!("{} {} / {count}", tr(de, "Blatt", "Sheet"), state.preview_sheet + 1)).small());
                 page_strip(ui, &mut state.preview_sheet, count);
@@ -480,7 +558,7 @@ impl MrPdfApp {
             let Some(pages) = pages else { continue };
             let title = tab.doc.display_name().to_string();
             let result =
-                Self::print_job(&mut tab.doc, &pages, &state.settings, &state.paper).and_then(|job| {
+                Self::print_job(&mut tab.doc, &pages, &state.settings, &state.paper).and_then(|(job, _)| {
                     let sheets = chosen_sheets(
                         &state.sheets,
                         state.sheet_subset,
