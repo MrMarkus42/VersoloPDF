@@ -48,3 +48,5 @@ First version:
 * Compacter ribbon that can be collapsed and pinned as in office programs
   (corner button, double click on a tab, Ctrl+F1); a collapsed ribbon shows
   a tab's commands over the document until one is used
+* The ribbon has the same height on every tab and in every window width (the
+  document no longer jumps); the tab names no longer move on hover

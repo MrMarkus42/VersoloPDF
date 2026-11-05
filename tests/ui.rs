@@ -2709,3 +2709,72 @@ fn ribbon_collapse_and_pin() {
     h.run_steps(3);
     assert!(!h.state().settings().ribbon_collapsed);
 }
+
+/// The ribbon keeps its height on every tab and in a narrow window (the
+/// document must not jump), and the tabs do not move on hover.
+#[test]
+fn ribbon_height_is_steady() {
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = harness(vec![sample_file(&dir, 2)], false);
+    h.run_steps(8);
+    let tabs = [
+        "Ansicht",
+        "Anmerkungen",
+        "Schützen",
+        "Formular",
+        "Dokumentaufbau",
+        "Umwandeln",
+        "Teilen",
+        "Überprüfen",
+        "Barrierefreiheit",
+        "Lesezeichen",
+        "Hilfe",
+        "Start",
+    ];
+    let expected = h.state().ribbon_height();
+    let mut heights = Vec::new();
+    for width in [1800.0, 1000.0, 700.0] {
+        h.set_size(egui::vec2(width, 820.0));
+        h.run_steps(6);
+        for name in tabs {
+            // In the narrow window some tabs are behind "»".
+            if h.query_all_by_label(name).next().is_none() {
+                assert!(width < 1800.0, "{name} missing");
+                continue;
+            }
+            tab(&mut h, name);
+            h.run_steps(6);
+            heights.push((width, name, h.state().ribbon_height()));
+            let cut = mrpdf::ui::widgets::ribbon_group_too_tall(&h.ctx);
+            assert_eq!(cut, None, "group too tall on {name} at {width}");
+        }
+    }
+    // The "Format" tab of a comment tool too.
+    h.set_size(egui::vec2(1800.0, 820.0));
+    h.run_steps(6);
+    tab(&mut h, "Anmerkungen");
+    h.get_all_by_label("Rechteck").next().unwrap().click();
+    h.run_steps(4);
+    tab(&mut h, "Format");
+    h.run_steps(6);
+    heights.push((1800.0, "Format", h.state().ribbon_height()));
+    save(&mut h, "99-ribbon-tool-format");
+    assert_eq!(mrpdf::ui::widgets::ribbon_group_too_tall(&h.ctx), None, "group too tall on Format");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(4);
+    eprintln!("ribbon heights: {heights:?}");
+    for (width, name, height) in &heights {
+        assert!((height - expected).abs() < 0.5, "{name} at {width}: {height} instead of {expected}");
+    }
+    // Hover over a tab: neither it nor its neighbour moves.
+    h.set_size(egui::vec2(1280.0, 820.0));
+    h.run_steps(6);
+    let rects = |h: &Harness<'_, MrPdfApp>| {
+        ["Ansicht", "Anmerkungen"].map(|n| h.get_all_by_label(n).next().unwrap().rect())
+    };
+    let before = rects(&h);
+    h.input_mut().events.push(Event::PointerMoved(before[0].center()));
+    h.run_steps(4);
+    assert_eq!(rects(&h), before, "tabs moved on hover");
+}

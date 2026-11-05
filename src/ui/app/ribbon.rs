@@ -419,6 +419,7 @@ impl MrPdfApp {
             })
             .response
             .rect;
+        self.ribbon_height = panel.height();
         self.ribbon_overlay(&ctx, panel, content_tabs, tool_format);
     }
 
@@ -467,13 +468,16 @@ impl MrPdfApp {
     fn ribbon_commands(&mut self, ui: &mut Ui, ctx: &Context, content_tabs: bool, tool_format: bool) {
         let right = ui.max_rect().right();
         let width = ui.available_width().max(100.0);
-        let row = ui
-            .allocate_ui_with_layout(egui::vec2(width, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
-                ui.set_max_width(width);
-                self.ribbon_groups_ui(ui, ctx, content_tabs, tool_format);
-            })
-            .response
-            .rect;
+        // Always the same height (whatever the tab holds), so the document
+        // below never moves.
+        let (row, _) = ui.allocate_exact_size(
+            egui::vec2(width, crate::ui::widgets::RIBBON_GROUP_HEIGHT),
+            egui::Sense::hover(),
+        );
+        let mut groups = ui
+            .new_child(egui::UiBuilder::new().max_rect(row).layout(egui::Layout::top_down(egui::Align::Min)));
+        groups.set_clip_rect(row.expand(2.0).intersect(ui.clip_rect()));
+        self.ribbon_groups_ui(&mut groups, ctx, content_tabs, tool_format);
         let de = self.settings.language == Language::German;
         let (icon, name, tip) = if self.ribbon_peek {
             (
@@ -539,6 +543,7 @@ impl MrPdfApp {
                     RibbonFit {
                         dense: level >= 1,
                         compact: level >= 2,
+                        in_ribbon: true,
                         collapse_from: if level >= 3 {
                             groups.saturating_sub(level - 2).max(1)
                         } else {
@@ -548,6 +553,7 @@ impl MrPdfApp {
                     },
                 );
                 let mut drawn_width = 0.0;
+                crate::ui::widgets::reset_ribbon_group_too_tall(&ctx);
                 self.keytips.set_zone(Some(super::keytips::Level::Commands));
                 egui::ScrollArea::horizontal()
                     .id_salt("ribbon-scroll")
@@ -562,7 +568,7 @@ impl MrPdfApp {
                         ui.spacing_mut().interact_size.y = 18.0;
                         drawn_width = ui
                             .horizontal(|ui| {
-                                ui.set_min_height(72.0);
+                                ui.set_min_height(crate::ui::widgets::RIBBON_GROUP_HEIGHT);
                                 match self.ribbon {
                                     RibbonTab::Home => self.ribbon_home(ui, &ctx),
                                     RibbonTab::View => self.ribbon_view(ui, &ctx),
@@ -655,9 +661,9 @@ impl MrPdfApp {
             // Modern: the active tab only by its bar and bold text.
             let resp = if modern {
                 let text = text_of(tab, label);
-                ui.selectable_label(false, if active { text.strong() } else { text })
+                crate::ui::widgets::ribbon_tab(ui, if active { text.strong() } else { text }, false)
             } else {
-                ui.selectable_label(active, text_of(tab, label))
+                crate::ui::widgets::ribbon_tab(ui, text_of(tab, label), active)
             };
             // Each tab has its topic colour: a bar under the active tab and
             // a faint one on hover.
@@ -695,8 +701,7 @@ impl MrPdfApp {
         if !hidden_idx.is_empty() {
             let hidden_selected = hidden_idx.iter().any(|&i| tabs[i].0 == self.ribbon) && !backstage;
             let de = self.settings.language == Language::German;
-            let more = ui
-                .selectable_label(hidden_selected, RichText::new("»").size(14.0))
+            let more = crate::ui::widgets::ribbon_tab(ui, RichText::new("»").size(14.0), hidden_selected)
                 .on_hover_text(if de { "Weitere Registerkarten" } else { "More tabs" });
             let more_label = if de { "Weitere Registerkarten" } else { "More tabs" };
             let popup = egui::Popup::default_response_id(&more);
@@ -1188,7 +1193,8 @@ impl MrPdfApp {
             );
             ui.vertical(|ui| {
                 self.small(ui, ctx, Cmd::Fullscreen);
-                ui.label(t.language);
+                // Never wrapped (a narrow ribbon would stack the letters).
+                ui.add(egui::Label::new(t.language).wrap_mode(egui::TextWrapMode::Extend));
                 self.language_picker(ui);
             });
         });
@@ -1557,7 +1563,7 @@ impl MrPdfApp {
         group(ui, if de { "Oberfläche" } else { "Interface" }, |ui| {
             self.big(ui, ctx, Cmd::DarkMode);
             ui.vertical(|ui| {
-                ui.label(t.language);
+                ui.add(egui::Label::new(t.language).wrap_mode(egui::TextWrapMode::Extend));
                 self.language_picker(ui);
             });
         });

@@ -196,7 +196,20 @@ fn preset_matches(p: &Preset, tool: Tool, s: &AnnotStyle) -> bool {
 
 /// One entry of the "Formstil" gallery; returns true if clicked.
 fn preset_button(ui: &mut Ui, p: &Preset, label: &str, selected: bool) -> bool {
-    let (rect, resp) = ui.allocate_exact_size(vec2(60.0, 50.0), egui::Sense::click());
+    // The label wraps between words (centred, at most two lines in the
+    // presets) instead of running into its neighbours.
+    let font = egui::FontId::proportional(10.5);
+    let widest_word = label
+        .split_whitespace()
+        .map(|w| ui.painter().layout_no_wrap(w.to_string(), font.clone(), egui::Color32::WHITE).size().x)
+        .fold(0.0, f32::max);
+    let width = (widest_word + 8.0).max(52.0);
+    let mut job =
+        egui::text::LayoutJob::simple(label.to_string(), font, ui.visuals().text_color(), width - 4.0);
+    job.halign = egui::Align::Center;
+    let galley = ui.painter().layout_job(job);
+    let height = (32.0 + galley.size().y + 2.0).max(50.0);
+    let (rect, resp) = ui.allocate_exact_size(vec2(width, height), egui::Sense::click());
     resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, label));
     let painter = ui.painter();
     if selected || resp.hovered() {
@@ -213,13 +226,7 @@ fn preset_button(ui: &mut Ui, p: &Preset, label: &str, selected: bool) -> bool {
     } else {
         painter.rect_stroke(swatch, 2.0, egui::Stroke::new(2.0, c), egui::StrokeKind::Inside);
     }
-    painter.text(
-        rect.center_bottom() - vec2(0.0, 7.0),
-        egui::Align2::CENTER_CENTER,
-        label,
-        egui::FontId::proportional(10.5),
-        ui.visuals().text_color(),
-    );
+    painter.galley(egui::pos2(rect.center().x, rect.top() + 31.0), galley, ui.visuals().text_color());
     resp.on_hover_text(label).clicked()
 }
 
@@ -795,28 +802,33 @@ impl MrPdfApp {
             });
         });
         group(ui, if de { "Linie" } else { "Line" }, |ui| {
-            egui::Grid::new("tool-format-line").num_columns(2).show(ui, |ui| {
-                if tool.has_width() {
-                    ui.label(if de { "Breite:" } else { "Width:" });
-                    ui.add(egui::DragValue::new(&mut style.width).range(0.0..=20.0).speed(0.1).suffix(" pt"));
+            // In a vertical layout the grid stays at the top of the group.
+            ui.vertical(|ui| {
+                egui::Grid::new("tool-format-line").num_columns(2).show(ui, |ui| {
+                    if tool.has_width() {
+                        ui.label(if de { "Breite:" } else { "Width:" });
+                        ui.add(
+                            egui::DragValue::new(&mut style.width).range(0.0..=20.0).speed(0.1).suffix(" pt"),
+                        );
+                        ui.end_row();
+                    }
+                    ui.label(if de { "Deckkraft:" } else { "Opacity:" });
+                    let mut pct = (style.opacity * 100.0).round();
+                    if ui.add(egui::DragValue::new(&mut pct).range(10.0..=100.0).suffix(" %")).changed() {
+                        style.opacity = pct / 100.0;
+                    }
                     ui.end_row();
-                }
-                ui.label(if de { "Deckkraft:" } else { "Opacity:" });
-                let mut pct = (style.opacity * 100.0).round();
-                if ui.add(egui::DragValue::new(&mut pct).range(10.0..=100.0).suffix(" %")).changed() {
-                    style.opacity = pct / 100.0;
-                }
-                ui.end_row();
-                if tool.has_font() {
-                    ui.label(if de { "Schriftgröße:" } else { "Font size:" });
-                    ui.add(
-                        egui::DragValue::new(&mut style.font_size)
-                            .range(4.0..=144.0)
-                            .speed(0.2)
-                            .suffix(" pt"),
-                    );
-                    ui.end_row();
-                }
+                    if tool.has_font() {
+                        ui.label(if de { "Schriftgröße:" } else { "Font size:" });
+                        ui.add(
+                            egui::DragValue::new(&mut style.font_size)
+                                .range(4.0..=144.0)
+                                .speed(0.2)
+                                .suffix(" pt"),
+                        );
+                        ui.end_row();
+                    }
+                });
             });
         });
         group(ui, if de { "Eigenschaften" } else { "Properties" }, |ui| {

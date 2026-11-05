@@ -954,7 +954,12 @@ fn dialog_previews() {
     let button = h
         .get_all_by_role(Role::Button)
         .map(|n| n.rect())
-        .filter(|r| (r.center().y - radio.center().y).abs() < 8.0 && r.min.x > radio.max.x - 2.0)
+        // Close to the right (not a ribbon button at the same height).
+        .filter(|r| {
+            (r.center().y - radio.center().y).abs() < 8.0
+                && r.min.x > radio.max.x - 2.0
+                && r.min.x < radio.max.x + 60.0
+        })
         .min_by(|a, b| a.min.x.total_cmp(&b.min.x));
     let at = button.map_or(radio.right_center() + egui::vec2(20.0, 0.0), |r| r.center());
     click(&mut h, at);

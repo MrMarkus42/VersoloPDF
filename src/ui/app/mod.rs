@@ -322,6 +322,8 @@ pub struct MrPdfApp {
     /// Collapsed ribbon: the commands of the chosen tab are shown over the
     /// document for now.
     ribbon_peek: bool,
+    /// Height of the ribbon panel in the last frame (for tests).
+    ribbon_height: f32,
     /// Shown sub-page of "Öffnen".
     open_view: backstage::OpenView,
     /// Name field of "Aktuelle Sitzung speichern".
@@ -455,6 +457,7 @@ impl MrPdfApp {
             backstage,
             recent_filter: String::new(),
             ribbon_peek: false,
+            ribbon_height: 0.0,
             open_view: backstage::OpenView::Recent,
             session_name: String::new(),
             recent_thumbs: Default::default(),
@@ -545,6 +548,11 @@ impl MrPdfApp {
 
     pub fn settings(&self) -> &Settings {
         &self.settings
+    }
+
+    /// Height of the ribbon (quick access row, tabs and commands).
+    pub fn ribbon_height(&self) -> f32 {
+        self.ribbon_height
     }
 
     pub fn tab_count(&self) -> usize {

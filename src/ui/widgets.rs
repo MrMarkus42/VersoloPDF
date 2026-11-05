@@ -26,7 +26,17 @@ pub struct RibbonFit {
     pub in_popup: bool,
     /// First icon drawn in the current group (icon of its collapsed button).
     pub first_icon: Option<Icon>,
+    /// Drawing the ribbon's commands: icon buttons are as high as small
+    /// buttons, so three rows fit into the fixed ribbon height.
+    pub in_ribbon: bool,
 }
+
+/// Height of the contents of a ribbon group: three rows of small buttons or
+/// input fields, or a large button with a two-line label. Every tab has this
+/// height, so the document does not move when the tab changes.
+pub const RIBBON_CONTENT_HEIGHT: f32 = 70.0;
+/// Height of a ribbon group with its caption.
+pub const RIBBON_GROUP_HEIGHT: f32 = RIBBON_CONTENT_HEIGHT + 14.0;
 
 impl RibbonFit {
     /// Everything at full size (also used outside the ribbon).
@@ -37,6 +47,7 @@ impl RibbonFit {
         next_group: 0,
         in_popup: false,
         first_icon: None,
+        in_ribbon: false,
     };
 
     fn shrunk(self) -> bool {
@@ -50,6 +61,21 @@ impl RibbonFit {
 
 fn fit_id() -> egui::Id {
     egui::Id::new("mrpdf-ribbon-fit")
+}
+
+fn too_tall_id() -> egui::Id {
+    egui::Id::new("mrpdf-ribbon-too-tall")
+}
+
+/// Caption and height of the last ribbon group whose contents were taller
+/// than the ribbon (and were cut off); `None` when all fit. For tests.
+pub fn ribbon_group_too_tall(ctx: &egui::Context) -> Option<String> {
+    ctx.data(|d| d.get_temp(too_tall_id()))
+}
+
+/// Forgets [`ribbon_group_too_tall`] before the ribbon is drawn again.
+pub fn reset_ribbon_group_too_tall(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.remove::<String>(too_tall_id()));
 }
 
 fn command_ran_id() -> egui::Id {
@@ -112,6 +138,25 @@ fn big_metrics(ui: &Ui) -> (FontId, f32) {
     }
 }
 
+/// Width and label of a large ribbon button: wide enough for the longest
+/// word (labels only wrap between words) and for at most two lines, so all
+/// large buttons have the same height.
+fn big_label(ui: &Ui, label: &str, color: Color32) -> (f32, std::sync::Arc<egui::Galley>) {
+    let (font, min_w) = big_metrics(ui);
+    let widest_word = label
+        .split_whitespace()
+        .map(|w| ui.painter().layout_no_wrap(w.to_string(), font.clone(), Color32::WHITE).size().x)
+        .fold(0.0, f32::max);
+    let mut width = (widest_word + 10.0).max(min_w);
+    loop {
+        let galley = ui.painter().layout(label.to_string(), font.clone(), color, width - 4.0);
+        if galley.rows.len() <= 2 || width > 400.0 {
+            return (width, galley);
+        }
+        width += 4.0;
+    }
+}
+
 fn icon_tint(ui: &Ui, enabled: bool) -> Color32 {
     let c = theme::icon_color(ui.visuals().dark_mode);
     // Disabled buttons also lower the painter's opacity; the faded ink makes
@@ -123,14 +168,8 @@ fn icon_tint(ui: &Ui, enabled: bool) -> Color32 {
 pub fn big_button(ui: &mut Ui, icon: Icon, label: &str, selected: bool, enabled: bool) -> Response {
     note_icon(ui, icon);
     // Wide enough for the longest word so labels only wrap between words.
-    let (font, min_w) = big_metrics(ui);
-    let widest_word = label
-        .split_whitespace()
-        .map(|w| ui.painter().layout_no_wrap(w.to_string(), font.clone(), Color32::WHITE).size().x)
-        .fold(0.0, f32::max);
-    let width = (widest_word + 10.0).max(min_w);
     let text_color = if enabled { ui.visuals().text_color() } else { ui.visuals().weak_text_color() };
-    let galley = ui.painter().layout(label.to_string(), font, text_color, width - 4.0);
+    let (width, galley) = big_label(ui, label, text_color);
     // Tall enough for two label lines in any font.
     let size = vec2(width, (31.0 + galley.size().y + 3.0).max(56.0));
     let sense = if enabled { Sense::click() } else { Sense::hover() };
@@ -165,14 +204,8 @@ fn paint_chevron(ui: &Ui, center: egui::Pos2, color: Color32) {
 /// Large ribbon button that opens a drop-down menu (label with ▾ below).
 pub fn big_menu_button(ui: &mut Ui, icon: Icon, label: &str, enabled: bool, open: bool) -> Response {
     note_icon(ui, icon);
-    let (font, min_w) = big_metrics(ui);
-    let widest_word = label
-        .split_whitespace()
-        .map(|w| ui.painter().layout_no_wrap(w.to_string(), font.clone(), Color32::WHITE).size().x)
-        .fold(0.0, f32::max);
-    let width = (widest_word + 10.0).max(min_w);
     let text_color = if enabled { ui.visuals().text_color() } else { ui.visuals().weak_text_color() };
-    let galley = ui.painter().layout(label.to_string(), font, text_color, width - 4.0);
+    let (width, galley) = big_label(ui, label, text_color);
     // Room for the label lines and the arrow below them in any font.
     let size = vec2(width, (30.0 + galley.size().y + 8.0).max(58.0));
     let sense = if enabled { Sense::click() } else { Sense::hover() };
@@ -341,7 +374,7 @@ pub fn icon_button_named(
     enabled: bool,
 ) -> Response {
     note_icon(ui, icon);
-    let size = Vec2::splat(24.0);
+    let size = if ribbon_fit(ui.ctx()).in_ribbon { vec2(24.0, 20.0) } else { Vec2::splat(24.0) };
     let sense = if enabled { Sense::click() } else { Sense::hover() };
     let (rect, response) = ui.allocate_exact_size(size, sense);
     response.widget_info(|| WidgetInfo::selected(WidgetType::Button, enabled, selected, name));
@@ -352,9 +385,37 @@ pub fn icon_button_named(
         if !enabled {
             painter.multiply_opacity(0.4);
         }
-        icons::paint(&painter, rect.shrink(4.0), icon, icon_tint(ui, enabled));
+        let icon_rect = Rect::from_center_size(rect.center(), Vec2::splat(16.0));
+        icons::paint(&painter, icon_rect, icon, icon_tint(ui, enabled));
     }
     response.on_hover_text(tooltip)
+}
+
+/// A ribbon tab name. Unlike egui's frameless buttons (whose text moves by a
+/// pixel when the hover frame appears) its size and text never move.
+pub fn ribbon_tab(ui: &mut Ui, text: egui::RichText, selected: bool) -> Response {
+    let pad = ui.spacing().button_padding;
+    let galley = egui::WidgetText::from(text).into_galley(
+        ui,
+        Some(TextWrapMode::Extend),
+        f32::INFINITY,
+        egui::TextStyle::Button,
+    );
+    let (rect, response) = ui.allocate_exact_size(galley.size() + 2.0 * pad, Sense::click());
+    let enabled = ui.is_enabled();
+    response
+        .widget_info(|| WidgetInfo::selected(WidgetType::SelectableLabel, enabled, selected, galley.text()));
+    if ui.is_rect_visible(rect) {
+        let visuals = ui.style().interact_selectable(&response, selected);
+        let radius = ui.visuals().widgets.hovered.corner_radius;
+        if selected {
+            ui.painter().rect_filled(rect, radius, ui.visuals().selection.bg_fill);
+        } else if response.hovered() || response.has_focus() {
+            ui.painter().rect_filled(rect, radius, ui.visuals().widgets.hovered.weak_bg_fill);
+        }
+        ui.painter().galley(rect.min + pad, galley, visuals.text_color());
+    }
+    response
 }
 
 /// A ribbon group: contents on top, caption below, separator on the right.
@@ -371,7 +432,7 @@ pub fn group(ui: &mut Ui, caption: &str, add: impl FnOnce(&mut Ui)) {
         set_ribbon_fit(&ctx, fit);
         let icon = ctx.data(|d| d.get_temp::<Icon>(icon_id)).unwrap_or(Icon::Gear);
         ui.vertical(|ui| {
-            ui.set_min_height(72.0);
+            ui.set_min_height(RIBBON_GROUP_HEIGHT);
             let response = ui
                 .push_id(("ribbon-group", caption), |ui| big_menu_button(ui, icon, caption, true, false))
                 .inner;
@@ -381,7 +442,7 @@ pub fn group(ui: &mut Ui, caption: &str, add: impl FnOnce(&mut Ui)) {
                     set_ribbon_fit(ui.ctx(), RibbonFit { in_popup: true, ..outer });
                     ui.ctx().data_mut(|d| d.insert_temp(command_ran_id(), false));
                     ui.horizontal(|ui| {
-                        ui.set_min_height(58.0);
+                        ui.set_min_height(RIBBON_CONTENT_HEIGHT);
                         add(ui);
                     });
                     set_ribbon_fit(ui.ctx(), outer);
@@ -397,11 +458,19 @@ pub fn group(ui: &mut Ui, caption: &str, add: impl FnOnce(&mut Ui)) {
     fit.first_icon = None;
     set_ribbon_fit(&ctx, fit);
     ui.vertical(|ui| {
-        ui.set_min_height(72.0);
-        ui.horizontal(|ui| {
-            ui.set_min_height(58.0);
-            add(ui);
-        });
+        ui.set_min_height(RIBBON_GROUP_HEIGHT);
+        let height = ui
+            .horizontal(|ui| {
+                ui.set_min_height(RIBBON_CONTENT_HEIGHT);
+                add(ui);
+            })
+            .response
+            .rect
+            .height();
+        // Taller contents would be cut off (the ribbon has a fixed height).
+        if height > RIBBON_CONTENT_HEIGHT + 0.5 && !fit.in_popup && !ui.is_sizing_pass() {
+            ctx.data_mut(|d| d.insert_temp(too_tall_id(), format!("{caption} ({height:.0})")));
+        }
         // Caption centred under the group (by indenting it: a centred layout
         // would take the whole ribbon width).
         let content_w = ui.min_rect().width();
