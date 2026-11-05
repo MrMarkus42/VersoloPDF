@@ -1,8 +1,8 @@
 # Changelog
 
-## 0.1.0 – unreleased
+## 1.0.0 – 2026-11-05
 
-First version:
+First public release. Everything below is new in this version:
 
 * Viewing (tabs, layouts, zoom, high-zoom tiles, dark mode, full screen)
 * Navigation (thumbnails with drag & drop, bookmarks incl. editing, links)

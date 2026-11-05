@@ -1,12 +1,13 @@
 [package]
 name = "mrpdf"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 rust-version = "1.88"
 description = "MrPDF - a free, open-source PDF viewer and editor"
 license = "MIT OR Apache-2.0"
 authors = ["Mr. M"]
 repository = "https://github.com/MrMarkus42/MrPDF"
+homepage = "https://mrmarkus42.github.io/MrPDF/"
 readme = "README.md"
 keywords = ["pdf", "viewer", "editor", "annotation"]
 categories = ["gui", "text-processing"]
