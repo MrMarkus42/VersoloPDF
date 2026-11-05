@@ -160,15 +160,15 @@ footer a { color: var(--muted); }
     <div class="buttons">
       <a class="btn primary" href="https://github.com/MrMarkus42/VersoloPDF/releases/latest">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 19h16"/></svg>
-        <span lang="de">Für Windows herunterladen</span><span lang="en">Download for Windows</span>
+        <span lang="de">Für Windows und Mac herunterladen</span><span lang="en">Download for Windows and Mac</span>
       </a>
       <a class="btn ghost" href="https://github.com/MrMarkus42/VersoloPDF">
         <span lang="de">Quellcode ansehen</span><span lang="en">View the source</span>
       </a>
     </div>
     <p class="note">
-      <span lang="de">Version 1.1 · Windows 10 und 11 (64 Bit) · keine Installation nötig · MIT/Apache-2.0</span>
-      <span lang="en">Version 1.1 · Windows 10 and 11 (64-bit) · no installation needed · MIT/Apache-2.0</span>
+      <span lang="de">Version 1.2 · Windows 10 und 11 (64 Bit) · macOS 11 und neuer (Apple- und Intel-Chips) · MIT/Apache-2.0</span>
+      <span lang="en">Version 1.2 · Windows 10 and 11 (64-bit) · macOS 11 and later (Apple and Intel chips) · MIT/Apache-2.0</span>
     </p>
     <div class="shot">
       <div class="bar"><i></i><i></i><i></i></div>
@@ -298,6 +298,7 @@ footer a { color: var(--muted); }
   <div class="wrap">
     <h2><span lang="de">In drei Schritten loslegen</span><span lang="en">Get started in three steps</span></h2>
     <p class="sub"><span lang="de">VersoloPDF braucht keine Installation und keine Administratorrechte.</span><span lang="en">VersoloPDF needs no installation and no administrator rights.</span></p>
+    <h3><span lang="de">Unter Windows</span><span lang="en">On Windows</span></h3>
     <ol class="steps">
       <li><b><span lang="de">Herunterladen</span><span lang="en">Download</span></b><br>
         <span lang="de">Die Zip-Datei <code>VersoloPDF-…-windows-x64.zip</code> aus dem <a href="https://github.com/MrMarkus42/VersoloPDF/releases/latest">neuesten Release</a> laden.</span>
@@ -310,8 +311,24 @@ footer a { color: var(--muted); }
         <span lang="en">Open <code>VersoloPDF.exe</code> – done. VersoloPDF installs new versions by itself later.</span></li>
     </ol>
     <p class="req">
-      <span lang="de"><b>Voraussetzungen:</b> Windows 10 oder 11, 64 Bit. Bleibt das Fenster auf alten Grafikkarten schwarz, hilft der Start mit <code>VersoloPDF.exe --opengl</code>. Linux und macOS: aus dem Quellcode bauen (siehe <a href="https://github.com/MrMarkus42/VersoloPDF#building-from-source">Anleitung</a>).</span>
-      <span lang="en"><b>Requirements:</b> Windows 10 or 11, 64-bit. If the window stays black on old graphics cards, start <code>VersoloPDF.exe --opengl</code>. Linux and macOS: build from source (see the <a href="https://github.com/MrMarkus42/VersoloPDF#building-from-source">instructions</a>).</span>
+      <span lang="de"><b>Voraussetzungen:</b> Windows 10 oder 11, 64 Bit. Bleibt das Fenster auf alten Grafikkarten schwarz, hilft der Start mit <code>VersoloPDF.exe --opengl</code>. Linux: aus dem Quellcode bauen (siehe <a href="https://github.com/MrMarkus42/VersoloPDF#building-from-source">Anleitung</a>).</span>
+      <span lang="en"><b>Requirements:</b> Windows 10 or 11, 64-bit. If the window stays black on old graphics cards, start <code>VersoloPDF.exe --opengl</code>. Linux: build from source (see the <a href="https://github.com/MrMarkus42/VersoloPDF#building-from-source">instructions</a>).</span>
+    </p>
+    <h3><span lang="de">Auf dem Mac</span><span lang="en">On the Mac</span></h3>
+    <ol class="steps">
+      <li><b><span lang="de">Herunterladen</span><span lang="en">Download</span></b><br>
+        <span lang="de"><code>VersoloPDF-…-macos.zip</code> aus dem <a href="https://github.com/MrMarkus42/VersoloPDF/releases/latest">neuesten Release</a> laden – ein Programm für Apple- und Intel-Chips, ab macOS 11.</span>
+        <span lang="en">Get <code>VersoloPDF-…-macos.zip</code> from the <a href="https://github.com/MrMarkus42/VersoloPDF/releases/latest">latest release</a> – one app for Apple and Intel chips, macOS 11 or later.</span></li>
+      <li><b><span lang="de">In „Programme“ ziehen</span><span lang="en">Drag to Applications</span></b><br>
+        <span lang="de">Zip öffnen und <code>VersoloPDF.app</code> in den Ordner <i>Programme</i> ziehen.</span>
+        <span lang="en">Open the zip and drag <code>VersoloPDF.app</code> into <i>Applications</i>.</span></li>
+      <li><b><span lang="de">Einmal freigeben</span><span lang="en">Allow it once</span></b><br>
+        <span lang="de">VersoloPDF ist nicht von Apple beglaubigt (dafür wäre ein kostenpflichtiges Entwicklerkonto nötig). Beim ersten Start daher unter <i>Systemeinstellungen › Datenschutz &amp; Sicherheit</i> ganz unten auf <i>Dennoch öffnen</i> klicken.</span>
+        <span lang="en">VersoloPDF is not notarised by Apple (that needs a paid developer account). So on the first start click <i>Open Anyway</i> at the bottom of <i>System Settings › Privacy &amp; Security</i>.</span></li>
+    </ol>
+    <p class="req">
+      <span lang="de">Auf dem Mac druckt VersoloPDF über den Druckdialog von macOS, erkennt Text mit der Texterkennung von macOS, signiert mit digitalen IDs aus dem Schlüsselbund und hängt Dateien an eine neue Nachricht in Apple Mail oder Outlook an.</span>
+      <span lang="en">On the Mac, VersoloPDF prints through the macOS print dialog, recognises text with the text recognition of macOS, signs with digital IDs from the keychain and attaches files to a new message in Apple Mail or Outlook.</span>
     </p>
   </div>
 </section>
