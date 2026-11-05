@@ -233,21 +233,11 @@ impl Cat {
                 "Speicher und Rechenkerne werden automatisch verwaltet.",
                 "Memory and processor cores are managed automatically.",
             ),
-            Cat::Update => tr(
-                de,
-                "MrPDF sucht nicht selbst nach neuen Versionen.",
-                "MrPDF does not look for new versions by itself.",
-            ),
             Cat::Scanner => tr(de, "MrPDF kann nicht scannen.", "MrPDF cannot scan."),
             Cat::SharePoint | Cat::Places => tr(
                 de,
                 "MrPDF arbeitet nur mit Dateien auf diesem Computer.",
                 "MrPDF only works with files on this computer.",
-            ),
-            Cat::Signatures => tr(
-                de,
-                "Digitale Signaturen sind in MrPDF noch nicht vorhanden.",
-                "Digital signatures are not available in MrPDF yet.",
             ),
             Cat::SearchEngines => {
                 tr(de, "MrPDF sucht nicht im Internet.", "MrPDF does not search the internet.")
@@ -303,6 +293,10 @@ fn sanitize(s: &mut Settings) {
     s.identity.department = clean(&s.identity.department, 128);
     s.identity.email = clean(&s.identity.email, 128);
     s.email_subject = clean(&s.email_subject, 200);
+    s.sign_reason = clean(&s.sign_reason, 200);
+    s.sign_location = clean(&s.sign_location, 200);
+    s.sign_contact = clean(&s.sign_contact, 200);
+    s.sign_corner = s.sign_corner.min(3);
     s.ui_scale = s.ui_scale.clamp(0.5, 2.0);
     s.recovery_minutes = s.recovery_minutes.clamp(1, 600);
     if s.snapshot_dpi != 0 {
@@ -384,6 +378,9 @@ impl MrPdfApp {
                 egui::ScrollArea::vertical().id_salt("settings-page").max_height(400.0).show(ui, |ui| {
                     if let Some(reason) = s.page.unavailable(de) {
                         ui.label(format!("❌ {reason}"));
+                    } else if s.page == Cat::Update {
+                        // Needs the program state (running check, found release).
+                        self.update_page(ui, de, &mut draft);
                     } else {
                         settings_page(ui, de, s, &mut draft);
                     }
@@ -738,6 +735,83 @@ fn settings_page(ui: &mut Ui, de: bool, s: &mut SettingsPage, d: &mut Settings) 
                         de,
                         "%[FileName] wird durch den Dateinamen ersetzt.",
                         "%[FileName] is replaced by the file name.",
+                    ),
+                );
+            });
+        }
+        Cat::Signatures => {
+            section(
+                ui,
+                tr(de, "Vorgaben für „Dokument signieren“", "Defaults of \"Sign document\""),
+                |ui| {
+                    egui::Grid::new("sign-defaults").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
+                        for (label, value) in [
+                            (tr(de, "Grund:", "Reason:"), &mut d.sign_reason),
+                            (tr(de, "Ort:", "Location:"), &mut d.sign_location),
+                            (tr(de, "Kontakt:", "Contact:"), &mut d.sign_contact),
+                        ] {
+                            ui.label(label);
+                            ui.add(egui::TextEdit::singleline(value).desired_width(280.0));
+                            ui.end_row();
+                        }
+                        ui.label(tr(de, "Sichtbare Signatur:", "Visible signature:"));
+                        let corners: Vec<(u8, &str)> = super::sign_dialog::corner_names(de)
+                            .into_iter()
+                            .enumerate()
+                            .map(|(i, n)| (i as u8, n))
+                            .collect();
+                        combo(ui, "sign-corner", &mut d.sign_corner, &corners, 180.0);
+                        ui.end_row();
+                    });
+                    hint(
+                        ui,
+                        tr(
+                            de,
+                            "Diese Werte stehen beim Signieren schon im Dialog und lassen sich dort für jede Signatur ändern.",
+                            "These values are filled into the signing dialog and can be changed there for each signature.",
+                        ),
+                    );
+                },
+            );
+            section(ui, tr(de, "Digitale IDs", "Digital IDs"), |ui| match crate::sign::id::ids_dir() {
+                Some(dir) => {
+                    let count = crate::sign::id::list(&dir).len();
+                    ui.label(if de {
+                        format!("Gespeicherte IDs: {count}")
+                    } else {
+                        format!("Stored IDs: {count}")
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label(tr(de, "Ordner:", "Folder:"));
+                        ui.add(
+                            egui::Label::new(RichText::new(dir.display().to_string()).monospace())
+                                .selectable(true),
+                        );
+                    });
+                    hint(
+                        ui,
+                        tr(
+                            de,
+                            "Neue IDs legt „Dokument signieren“ an. Eine vorhandene .pfx- oder .p12-Datei kann dort ebenfalls gewählt werden.",
+                            "\"Sign document\" creates new IDs. An existing .pfx or .p12 file can be chosen there as well.",
+                        ),
+                    );
+                }
+                None => {
+                    ui.label(tr(
+                        de,
+                        "Kein Ordner für digitale IDs gefunden.",
+                        "No folder for digital IDs found.",
+                    ));
+                }
+            });
+            section(ui, tr(de, "Prüfen", "Checking"), |ui| {
+                hint(
+                    ui,
+                    tr(
+                        de,
+                        "Signaturen prüft „Schützen › Signaturen überprüfen“. Zeitstempel und der Zertifikatsspeicher von Windows werden noch nicht verwendet.",
+                        "Signatures are checked with \"Protect › Check signatures\". Timestamps and the Windows certificate store are not used yet.",
                     ),
                 );
             });

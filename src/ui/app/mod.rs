@@ -41,6 +41,7 @@ mod sign_dialog;
 mod statusbar;
 mod structure;
 mod style_flyout;
+mod update_ui;
 pub mod view_cmds;
 pub mod windows;
 
@@ -100,6 +101,8 @@ pub enum AfterSave {
     CloseTab,
     CloseAll,
     Exit,
+    /// "Verschieben: Neues Fenster".
+    NewWindow,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -324,6 +327,13 @@ pub struct MrPdfApp {
     ribbon_peek: bool,
     /// Height of the ribbon panel in the last frame (for tests).
     ribbon_height: f32,
+    /// "Verschieben: Neues Fenster" in progress: the tabs to hand over and
+    /// those whose unsaved changes were already asked about.
+    new_window: Option<(Vec<u64>, Vec<u64>)>,
+    /// Files handed to new MrPDF windows (each start one entry).
+    spawned_windows: Vec<Vec<PathBuf>>,
+    /// "Neue Version": search and installation.
+    update: update_ui::UpdateState,
     /// Shown sub-page of "Öffnen".
     open_view: backstage::OpenView,
     /// Name field of "Aktuelle Sitzung speichern".
@@ -458,6 +468,9 @@ impl MrPdfApp {
             recent_filter: String::new(),
             ribbon_peek: false,
             ribbon_height: 0.0,
+            new_window: None,
+            spawned_windows: Vec::new(),
+            update: update_ui::UpdateState::Idle,
             open_view: backstage::OpenView::Recent,
             session_name: String::new(),
             recent_thumbs: Default::default(),
@@ -553,6 +566,11 @@ impl MrPdfApp {
     /// Height of the ribbon (quick access row, tabs and commands).
     pub fn ribbon_height(&self) -> f32 {
         self.ribbon_height
+    }
+
+    /// Files handed to new MrPDF windows ("Verschieben: Neues Fenster").
+    pub fn spawned_windows(&self) -> &[Vec<PathBuf>] {
+        &self.spawned_windows
     }
 
     pub fn tab_count(&self) -> usize {
@@ -999,6 +1017,8 @@ impl eframe::App for MrPdfApp {
         }
         self.handle_dropped_files(&ctx);
         self.poll_download(&ctx);
+        self.auto_update_check(&ctx);
+        self.poll_update(&ctx);
         self.recovery_tick(&ctx);
         self.view_tick(&ctx);
         self.compare_tick(&ctx);

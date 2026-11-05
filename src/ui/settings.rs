@@ -90,6 +90,17 @@ pub struct Settings {
     pub trusted_hosts: Vec<String>,
     /// E-Mails versenden: subject pattern (%[FileName]).
     pub email_subject: String,
+    /// Signaturen: presets of "Dokument signieren" (reason, location,
+    /// contact) and the corner of a visible signature (0 bottom right,
+    /// 1 bottom left, 2 top right, 3 top left).
+    pub sign_reason: String,
+    pub sign_location: String,
+    pub sign_contact: String,
+    pub sign_corner: u8,
+    /// Neue Version: look for a new release at start (at most once a day).
+    pub update_check: bool,
+    /// Neue Version: time of the last automatic check (seconds since 1970).
+    pub update_last_check: u64,
     /// Identität (the name is `author`).
     pub identity: Identity,
     /// Bildschirmfotos: resolution (0: twice the screen resolution), greyscale.
@@ -313,6 +324,12 @@ impl Default for Settings {
             link_policy: LinkPolicy::Ask,
             trusted_hosts: Vec::new(),
             email_subject: "%[FileName]".into(),
+            sign_reason: String::new(),
+            sign_location: String::new(),
+            sign_contact: String::new(),
+            sign_corner: 0,
+            update_check: true,
+            update_last_check: 0,
             identity: Identity::default(),
             snapshot_dpi: 0,
             snapshot_gray: false,
@@ -498,6 +515,7 @@ impl Settings {
         self.url_history = old.url_history;
         self.last_pages = old.last_pages;
         self.presets = old.presets;
+        self.update_last_check = old.update_last_check;
     }
 
     /// Keeps the values of the view options in a sensible range.

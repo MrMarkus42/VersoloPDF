@@ -713,13 +713,52 @@ impl MrPdfApp {
         if ok || cancel { Outcome::Close } else { Outcome::Keep }
     }
 
-    /// A push button was clicked while filling in: "Bild" fields load an image.
-    pub(super) fn press_button(&mut self, ctx: &Context, page: usize, annot_index: usize) {
+    /// A push button was clicked while filling in: runs its action; "Bild"
+    /// fields load an image.
+    pub fn press_button(&mut self, ctx: &Context, page: usize, annot_index: usize) {
+        use crate::forms::ButtonAction;
         let t = self.t();
+        let de = self.fc_de();
         let extras =
             self.tab().and_then(|tab| tab.doc.field_extras(page, annot_index).ok()).unwrap_or_default();
         if !extras.image {
-            self.set_status(ctx, t.field_not_supported);
+            match extras.action {
+                ButtonAction::ResetForm => self.edit(ctx, |tab| tab.doc.reset_form()),
+                ButtonAction::Uri(uri) => self.open_uri(ctx, uri),
+                ButtonAction::Page(p) => {
+                    if let Some(tab) = self.tab()
+                        && p < tab.doc.page_count()
+                    {
+                        tab.jump_to_page(p);
+                    }
+                }
+                ButtonAction::Named(name) => {
+                    let (count, cur) =
+                        self.active_tab().map_or((0, 0), |t| (t.doc.page_count(), t.current_page));
+                    let target = match name.as_str() {
+                        _ if count == 0 => None,
+                        "NextPage" => Some((cur + 1).min(count - 1)),
+                        "PrevPage" => Some(cur.saturating_sub(1)),
+                        "FirstPage" => Some(0),
+                        "LastPage" => Some(count - 1),
+                        _ => None,
+                    };
+                    match target {
+                        Some(p) => {
+                            if let Some(tab) = self.tab() {
+                                tab.jump_to_page(p);
+                            }
+                        }
+                        None => self.set_status(ctx, t.field_not_supported),
+                    }
+                }
+                ButtonAction::None => self.set_status(
+                    ctx,
+                    tr(de, "Diese Schaltfläche hat keine Aktion.", "This button has no action."),
+                ),
+                _ => self.set_status(ctx, t.field_not_supported),
+            }
+            ctx.request_repaint();
             return;
         }
         let Some(path) = rfd::FileDialog::new()

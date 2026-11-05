@@ -2,8 +2,9 @@
 
 ## Reporting a vulnerability
 
-Please report security problems privately to **mr.m@users.noreply.github.com** instead of
-opening a public issue. You will get an answer within a few days.
+Please report security problems privately through GitHub ("Security" tab of
+the repository, "Report a vulnerability") instead of opening a public issue.
+You will get an answer within a few days.
 
 ## Security design
 

@@ -50,3 +50,16 @@ First version:
   a tab's commands over the document until one is used
 * The ribbon has the same height on every tab and in every window width (the
   document no longer jumps); the tab names no longer move on hover
+* "Move to: New window" starts a separate MrPDF with the full ribbon for the
+  document (unsaved changes are asked about first)
+* Form buttons: name, caption and action (reset form, open a web address,
+  go to a page, next/previous page) are chosen when the button is drawn, and
+  a click while filling in runs the action; umlauts in field captions and
+  list entries are written correctly (they appeared as garbage before)
+* Saving own dialog settings: the list stays open while the name is typed;
+  Enter saves, ✕ deletes an entry
+* Settings › Signatures: defaults for reason, location, contact and the
+  corner of a visible signature
+* Settings › Updates: looks for the newest release on GitHub (by hand or once
+  a day at start); on Windows it downloads the package, checks its SHA-256
+  checksum, installs it and restarts MrPDF

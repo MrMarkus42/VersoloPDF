@@ -372,8 +372,10 @@ pub enum NewFieldKind {
     ListBox {
         options: Vec<String>,
     },
-    ResetButton {
+    /// Push button with a caption and what it does when clicked.
+    Button {
         caption: String,
+        action: ButtonAction,
     },
     Signature {
         label: String,
@@ -386,6 +388,85 @@ pub enum NewFieldKind {
     Image,
 }
 
+/// What a push button does when it is clicked.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ButtonAction {
+    /// Nothing (or only a script, which MrPDF never runs).
+    #[default]
+    None,
+    /// "Formular zurücksetzen".
+    ResetForm,
+    /// Opens a web address.
+    Uri(String),
+    /// Shows a page (zero-based).
+    Page(usize),
+    /// A named viewer action ("NextPage", "PrevPage", "FirstPage", "LastPage", ...).
+    Named(String),
+    /// Another kind of action (submitting, launching, ...), not supported.
+    Unsupported,
+}
+
+impl ButtonAction {
+    /// The action dictionary written into the widget (None: no action).
+    fn to_dict(&self, edit: &Edit) -> Result<Option<Dictionary>> {
+        let mut a = Dictionary::new();
+        a.set("Type", Object::Name(b"Action".to_vec()));
+        match self {
+            ButtonAction::None | ButtonAction::Unsupported => return Ok(None),
+            ButtonAction::ResetForm => a.set("S", Object::Name(b"ResetForm".to_vec())),
+            ButtonAction::Uri(uri) => {
+                a.set("S", Object::Name(b"URI".to_vec()));
+                a.set("URI", Object::string_literal(uri.trim().as_bytes().to_vec()));
+            }
+            ButtonAction::Page(page) => {
+                let target = edit.page_id(*page)?;
+                a.set("S", Object::Name(b"GoTo".to_vec()));
+                a.set("D", Object::Array(vec![Object::Reference(target), Object::Name(b"Fit".to_vec())]));
+            }
+            ButtonAction::Named(name) => {
+                a.set("S", Object::Name(b"Named".to_vec()));
+                a.set("N", Object::Name(name.as_bytes().to_vec()));
+            }
+        }
+        Ok(Some(a))
+    }
+
+    /// Reads the action of a widget's `/A` entry.
+    fn read(edit: &Edit, action: &Object) -> ButtonAction {
+        let Some(a) = edit.resolve(action).ok().and_then(|o| o.as_dict().ok()) else {
+            return ButtonAction::None;
+        };
+        let name = |key: &[u8]| a.get(key).ok().and_then(|o| o.as_name().ok()).map(<[u8]>::to_vec);
+        match name(b"S").as_deref() {
+            Some(b"ResetForm") => ButtonAction::ResetForm,
+            Some(b"URI") => match a.get(b"URI").ok().and_then(|o| edit.resolve(o).ok()) {
+                Some(Object::String(s, _)) => ButtonAction::Uri(String::from_utf8_lossy(s).into_owned()),
+                _ => ButtonAction::Unsupported,
+            },
+            Some(b"GoTo") => {
+                let target = a
+                    .get(b"D")
+                    .ok()
+                    .and_then(|d| edit.resolve(d).ok())
+                    .and_then(|d| d.as_array().ok())
+                    .and_then(|d| d.first())
+                    .and_then(|p| p.as_reference().ok());
+                let pages = edit.prev().get_pages();
+                match target.and_then(|t| pages.iter().position(|(_, id)| *id == t)) {
+                    Some(index) => ButtonAction::Page(index),
+                    None => ButtonAction::Unsupported,
+                }
+            }
+            Some(b"Named") => match name(b"N") {
+                Some(n) => ButtonAction::Named(String::from_utf8_lossy(&n).into_owned()),
+                None => ButtonAction::Unsupported,
+            },
+            Some(b"JavaScript") | None => ButtonAction::None,
+            Some(_) => ButtonAction::Unsupported,
+        }
+    }
+}
+
 impl NewFieldKind {
     /// Prefix of automatically numbered field names.
     pub fn default_name(&self) -> &'static str {
@@ -395,7 +476,7 @@ impl NewFieldKind {
             NewFieldKind::Radio { .. } => "RadioGroup",
             NewFieldKind::ComboBox { .. } => "ComboBox",
             NewFieldKind::ListBox { .. } => "ListBox",
-            NewFieldKind::ResetButton { .. } => "Button",
+            NewFieldKind::Button { .. } => "Button",
             NewFieldKind::Signature { .. } => "Signature",
             NewFieldKind::Date { .. } => "Date",
             NewFieldKind::Image => "Image",
@@ -462,7 +543,15 @@ fn form_stream(w: f32, h: f32, content: String, font: bool) -> Stream {
         resources.set("Font", Object::Dictionary(fonts));
     }
     dict.set("Resources", Object::Dictionary(resources));
-    Stream::new(dict, content.into_bytes())
+    // Text pieces are WinAnsi bytes kept as chars U+0000..U+00FF (`latin1`).
+    let bytes = content.chars().map(|c| u8::try_from(u32::from(c)).unwrap_or(b'?')).collect();
+    Stream::new(dict, bytes)
+}
+
+/// WinAnsi bytes as chars U+0000..U+00FF, so `form_stream` writes them back
+/// unchanged ("ü" stays one byte instead of becoming UTF-8 or "�").
+fn latin1(bytes: &[u8]) -> String {
+    bytes.iter().map(|&b| char::from(b)).collect()
 }
 
 fn box_border(w: f32, h: f32) -> String {
@@ -474,7 +563,7 @@ fn centered_text(w: f32, h: f32, text: &str, size: f32) -> String {
     let tw = StdFont::Helvetica.text_width(&bytes, size);
     let mut s =
         format!("BT /Helv {} Tf 0 g {} {} Td (", num(size), num((w - tw) / 2.0), num((h - size * 0.7) / 2.0));
-    s.push_str(&String::from_utf8_lossy(&escape(&bytes)));
+    s.push_str(&latin1(&escape(&bytes)));
     s.push_str(") Tj ET\n");
     s
 }
@@ -660,7 +749,7 @@ pub fn create_field(
                         }
                         let bytes = escape(&win_ansi(o));
                         content.push_str(&format!("BT /Helv {} Tf 0 g 3 {} Td (", num(size), num(y + 1.0)));
-                        content.push_str(&String::from_utf8_lossy(&bytes));
+                        content.push_str(&latin1(&bytes));
                         content.push_str(") Tj ET\n");
                     }
                     let id = edit.add(form_stream(w, h, content, true));
@@ -771,14 +860,14 @@ pub fn create_field(
                 edit.annots_mut(page_id)?.push(Object::Reference(wid));
                 return Ok((edit.finish()?, group));
             }
-            NewFieldKind::ResetButton { caption } => {
+            NewFieldKind::Button { caption, action } => {
                 widget.set("FT", Object::Name(b"Btn".to_vec()));
                 widget.set("Ff", Object::Integer(i64::from(FLAG_PUSHBUTTON)));
                 mk.set("BG", Object::Array(vec![Object::Real(0.85), Object::Real(0.85), Object::Real(0.85)]));
                 mk.set("CA", text_string(caption));
-                let mut action = Dictionary::new();
-                action.set("S", Object::Name(b"ResetForm".to_vec()));
-                widget.set("A", Object::Dictionary(action));
+                if let Some(action) = action.to_dict(&edit)? {
+                    widget.set("A", Object::Dictionary(action));
+                }
                 let content = format!(
                     "0.85 g 0 0 {} {} re f 0.4 G 1 w 0.5 0.5 {} {} re S\n{}",
                     num(w),
@@ -804,7 +893,7 @@ pub fn create_field(
                 );
                 let bytes = escape(&win_ansi(label));
                 content.push_str(&format!("BT /Helv 7 Tf 0.4 g 8 {} Td (", num(h * 0.3 - 9.0)));
-                content.push_str(&String::from_utf8_lossy(&bytes));
+                content.push_str(&latin1(&bytes));
                 content.push_str(") Tj ET\n");
                 let id = edit.add(form_stream(w, h, content, true));
                 ap.set("N", Object::Reference(id));
@@ -1017,6 +1106,8 @@ pub struct FieldExtras {
     pub image: bool,
     /// "Erforderlich".
     pub required: bool,
+    /// What a push button does when clicked.
+    pub action: ButtonAction,
 }
 
 pub fn field_extras(bytes: &[u8], password: Option<&str>, page: usize, index: usize) -> Result<FieldExtras> {
@@ -1058,6 +1149,9 @@ pub fn field_extras(bytes: &[u8], password: Option<&str>, page: usize, index: us
             == Some(1);
         let imports = widget.get(b"A").ok().and_then(js_of).is_some_and(|c| c.contains("buttonImportIcon"));
         extras.image = pushbutton && (icon_only || imports);
+        if pushbutton && let Ok(a) = widget.get(b"A") {
+            extras.action = ButtonAction::read(&edit, a);
+        }
         Ok(extras)
     })
 }

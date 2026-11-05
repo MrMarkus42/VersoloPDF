@@ -1178,7 +1178,10 @@ fn form_fields_can_be_created_reset_and_exchanged() {
     doc.create_field(
         0,
         r(300.0, 460.0, 80.0, 24.0),
-        &NewFieldKind::ResetButton { caption: "Reset".into() },
+        &NewFieldKind::Button {
+            caption: "Zurücksetzen".into(),
+            action: mrpdf::forms::ButtonAction::ResetForm,
+        },
         "",
     )
     .unwrap();
@@ -1192,6 +1195,17 @@ fn form_fields_can_be_created_reset_and_exchanged() {
     assert_eq!(kinds.iter().filter(|k| **k == FieldKind::RadioButton).count(), 2);
     assert!(kinds.contains(&FieldKind::ComboBox) && kinds.contains(&FieldKind::ListBox));
     assert!(kinds.contains(&FieldKind::PushButton) && kinds.contains(&FieldKind::Signature));
+    // The button keeps its action, and "ü" of its caption is one WinAnsi byte.
+    let button = fields.iter().find(|f| f.kind == FieldKind::PushButton).unwrap().annot_index;
+    assert_eq!(doc.field_extras(0, button).unwrap().action, mrpdf::forms::ButtonAction::ResetForm);
+    let saved = lopdf::Document::load_mem(&doc.to_bytes().unwrap()).unwrap();
+    let caption_ok = saved.objects.values().any(|o| {
+        o.as_stream()
+            .ok()
+            .and_then(|s| s.decompressed_content().ok().or(Some(s.content.clone())))
+            .is_some_and(|c| c.windows(13).any(|w| w == b"(Zur\xFCcksetzen"))
+    });
+    assert!(caption_ok, "caption written as WinAnsi");
 
     // The new fields can be filled through the normal API.
     let text1 = fields.iter().find(|f| f.name == "Text1").unwrap().annot_index;

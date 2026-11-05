@@ -430,7 +430,7 @@ impl MrPdfApp {
                     _ => MoveTarget::MainWindow,
                 };
                 if let Some(id) = self.tabs.get(self.active).map(|t| t.id) {
-                    self.move_tabs(&[id], target);
+                    self.move_tabs_to(ctx, &[id], target);
                 }
             }
             MoveTabs => self.open_move_tabs(),

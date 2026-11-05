@@ -7,7 +7,7 @@ use egui::{Context, Ui};
 use super::commands::Cmd;
 use super::dialogs::{Action, Outcome, buttons};
 use super::{Dialog, MrPdfApp};
-use crate::forms::NewFieldKind;
+use crate::forms::{ButtonAction, NewFieldKind};
 use crate::geometry::RectF;
 use crate::pdf_edit::format_pdf_date;
 use crate::report::Line;
@@ -17,7 +17,7 @@ use crate::ui::tools::Tool;
 /// Resolution of pages that are turned into images by redaction.
 const REDACTION_DPI: f32 = 200.0;
 
-/// Input of the dialog for new radio buttons, list and combo boxes.
+/// Input of the dialog for new buttons, radio buttons, list and combo boxes.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FieldForm {
     pub page: usize,
@@ -28,6 +28,99 @@ pub struct FieldForm {
     pub export: String,
     /// One option per line.
     pub options: String,
+    /// Button: caption.
+    pub caption: String,
+    /// Button: what a click does.
+    pub action: ButtonChoice,
+    /// Button: web address or page number of the action.
+    pub target: String,
+}
+
+/// The actions offered for a new button.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ButtonChoice {
+    Nothing,
+    Reset,
+    Uri,
+    Page,
+    NextPage,
+    PrevPage,
+}
+
+impl ButtonChoice {
+    pub const ALL: [ButtonChoice; 6] = [
+        ButtonChoice::Nothing,
+        ButtonChoice::Reset,
+        ButtonChoice::Uri,
+        ButtonChoice::Page,
+        ButtonChoice::NextPage,
+        ButtonChoice::PrevPage,
+    ];
+
+    pub fn names(self) -> (&'static str, &'static str) {
+        match self {
+            ButtonChoice::Nothing => ("Keine Aktion", "No action"),
+            ButtonChoice::Reset => ("Formular zurücksetzen", "Reset form"),
+            ButtonChoice::Uri => ("Webadresse öffnen", "Open a web address"),
+            ButtonChoice::Page => ("Zu Seite springen", "Go to page"),
+            ButtonChoice::NextPage => ("Nächste Seite", "Next page"),
+            ButtonChoice::PrevPage => ("Vorherige Seite", "Previous page"),
+        }
+    }
+}
+
+impl FieldForm {
+    /// A new dialog for a field drawn with `tool`.
+    pub fn new(page: usize, rect: RectF, tool: Tool, (group, n): (String, u32), de: bool) -> Self {
+        FieldForm {
+            page,
+            rect,
+            tool,
+            name: String::new(),
+            group,
+            export: format!("Option{}", n + 1),
+            options: "Option 1\nOption 2\nOption 3".into(),
+            caption: if de { "Schaltfläche".into() } else { "Button".into() },
+            action: ButtonChoice::Nothing,
+            target: String::new(),
+        }
+    }
+
+    /// The button action, or an error text for a missing/invalid target.
+    fn button_action(&self, de: bool, page_count: usize) -> Result<ButtonAction, &'static str> {
+        Ok(match self.action {
+            ButtonChoice::Nothing => ButtonAction::None,
+            ButtonChoice::Reset => ButtonAction::ResetForm,
+            ButtonChoice::NextPage => ButtonAction::Named("NextPage".into()),
+            ButtonChoice::PrevPage => ButtonAction::Named("PrevPage".into()),
+            ButtonChoice::Uri => {
+                let uri = self.target.trim();
+                let lower = uri.to_ascii_lowercase();
+                let ok = ["http://", "https://", "mailto:"].iter().any(|p| lower.starts_with(p))
+                    && uri.len() > 8
+                    && uri.is_ascii()
+                    && !uri.contains(char::is_whitespace);
+                if !ok {
+                    return Err(if de {
+                        "Bitte eine Adresse mit http://, https:// oder mailto: eingeben."
+                    } else {
+                        "Please enter an address starting with http://, https:// or mailto:."
+                    });
+                }
+                ButtonAction::Uri(uri.to_string())
+            }
+            ButtonChoice::Page => match self.target.trim().parse::<usize>() {
+                Ok(n) if (1..=page_count).contains(&n) => ButtonAction::Page(n - 1),
+                _ => {
+                    return Err(if de {
+                        "Bitte eine vorhandene Seitenzahl eingeben."
+                    } else {
+                        "Please enter an existing page number."
+                    });
+                }
+            },
+        })
+    }
 }
 
 impl MrPdfApp {
@@ -255,9 +348,6 @@ impl MrPdfApp {
         let kind = match tool {
             Tool::FieldText => NewFieldKind::Text { multiline: rect.height().abs() > 40.0 },
             Tool::FieldCheckBox => NewFieldKind::CheckBox,
-            Tool::FieldButton => NewFieldKind::ResetButton {
-                caption: if de { "Zurücksetzen".into() } else { "Reset".into() },
-            },
             Tool::FieldSignature => {
                 NewFieldKind::Signature { label: if de { "Unterschrift".into() } else { "Signature".into() } }
             }
@@ -265,17 +355,9 @@ impl MrPdfApp {
                 NewFieldKind::Date { format: if de { "dd.mm.yyyy".into() } else { "mm/dd/yyyy".into() } }
             }
             Tool::FieldImage => NewFieldKind::Image,
-            Tool::FieldRadio | Tool::FieldList | Tool::FieldCombo => {
-                let (group, n) = self.last_radio.clone();
-                self.dialog = Some(Dialog::NewField(Box::new(FieldForm {
-                    page,
-                    rect,
-                    tool,
-                    name: String::new(),
-                    group,
-                    export: format!("Option{}", n + 1),
-                    options: "Option 1\nOption 2\nOption 3".into(),
-                })));
+            Tool::FieldRadio | Tool::FieldList | Tool::FieldCombo | Tool::FieldButton => {
+                let form = FieldForm::new(page, rect, tool, self.last_radio.clone(), de);
+                self.dialog = Some(Dialog::NewField(Box::new(form)));
                 return;
             }
             _ => return,
@@ -311,6 +393,82 @@ impl MrPdfApp {
                 if ok {
                     let cmd = *cmd;
                     action = Some(Box::new(move |app, ctx| app.run_confirmed(ctx, cmd)));
+                    outcome = Outcome::Close;
+                } else if cancel {
+                    outcome = Outcome::Close;
+                }
+            }
+            Dialog::NewField(form) if form.tool == Tool::FieldButton => {
+                super::dialogs::set_title(ui, Cmd::Tool(form.tool).label(lang));
+                let page_count = self.active_tab().map_or(0, |t| t.doc.page_count());
+                egui::Grid::new("new-button").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
+                    ui.label(if de {
+                        "Feldname (leer = automatisch):"
+                    } else {
+                        "Field name (empty = automatic):"
+                    });
+                    ui.text_edit_singleline(&mut form.name);
+                    ui.end_row();
+                    ui.label(if de { "Beschriftung:" } else { "Caption:" });
+                    ui.text_edit_singleline(&mut form.caption);
+                    ui.end_row();
+                    ui.label(if de { "Beim Klicken:" } else { "On click:" });
+                    let (g, e) = form.action.names();
+                    egui::ComboBox::from_id_salt("new-button-action")
+                        .selected_text(if de { g } else { e })
+                        .width(220.0)
+                        .show_ui(ui, |ui| {
+                            for choice in ButtonChoice::ALL {
+                                let (g, e) = choice.names();
+                                ui.selectable_value(&mut form.action, choice, if de { g } else { e });
+                            }
+                        });
+                    ui.end_row();
+                    match form.action {
+                        ButtonChoice::Uri => {
+                            ui.label(if de { "Adresse:" } else { "Address:" });
+                            ui.add(
+                                egui::TextEdit::singleline(&mut form.target)
+                                    .hint_text("https://")
+                                    .desired_width(220.0),
+                            );
+                            ui.end_row();
+                        }
+                        ButtonChoice::Page => {
+                            ui.label(if de { "Seite:" } else { "Page:" });
+                            ui.add(
+                                egui::TextEdit::singleline(&mut form.target)
+                                    .hint_text(format!("1 – {page_count}"))
+                                    .desired_width(80.0),
+                            );
+                            ui.end_row();
+                        }
+                        _ => {}
+                    }
+                });
+                let check = form.button_action(de, page_count);
+                if let Err(hint) = check
+                    && !form.target.trim().is_empty()
+                {
+                    ui.label(egui::RichText::new(hint).color(ui.visuals().warn_fg_color));
+                }
+                ui.add_space(8.0);
+                let mut ok = false;
+                let mut cancel = false;
+                ui.horizontal(|ui| {
+                    ok = ui
+                        .add_enabled(check.is_ok(), egui::Button::new(egui::RichText::new(t.ok).strong()))
+                        .clicked();
+                    cancel = ui.button(t.cancel).clicked();
+                });
+                ok |= check.is_ok() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                cancel |= ui.input(|i| i.key_pressed(egui::Key::Escape));
+                if ok && let Ok(act) = check {
+                    let f = (**form).clone();
+                    let kind = NewFieldKind::Button { caption: f.caption.trim().to_string(), action: act };
+                    action = Some(Box::new(move |app: &mut MrPdfApp, ctx: &Context| {
+                        app.add_field(ctx, f.page, f.rect, kind, f.name.trim().to_string());
+                    }));
                     outcome = Outcome::Close;
                 } else if cancel {
                     outcome = Outcome::Close;

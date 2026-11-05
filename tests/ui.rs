@@ -938,6 +938,33 @@ fn form_designer_and_comment_commands() {
     h.run_steps(4);
     assert!(!kinds(&mut h).contains(&AnnotKind::Note));
     assert_eq!(fields(&mut h).len(), 3, "form fields are kept");
+
+    // Button: name, caption and action are asked first.
+    tab(&mut h, "Formular");
+    h.get_all_by_label("Schaltfläche").next().unwrap().click();
+    h.run_steps(3);
+    let (a, b) = (at(&h, 350.0, 500.0), at(&h, 450.0, 476.0));
+    drag(&mut h, a, b);
+    h.run_steps(4);
+    assert!(
+        matches!(h.state().dialog(), Some(mrpdf::ui::app::Dialog::NewField(f)) if f.caption == "Schaltfläche"),
+        "button dialog"
+    );
+    assert!(h.query_by_label("Beim Klicken:").is_some());
+    save(&mut h, "24-new-button-dialog");
+    h.get_by_label("OK").click();
+    h.run_steps(6);
+    assert!(fields(&mut h).contains(&mrpdf::model::FieldKind::PushButton));
+    // A click on a button without an action says so instead of failing silently.
+    let index = {
+        let tab = h.state_mut().active_tab_mut().unwrap();
+        let fields = tab.doc.form_fields(0).unwrap();
+        fields.iter().find(|f| f.kind == mrpdf::model::FieldKind::PushButton).unwrap().annot_index
+    };
+    let ctx = h.ctx.clone();
+    h.state_mut().press_button(&ctx, 0, index);
+    h.run_steps(2);
+    assert!(h.query_by_label_contains("keine Aktion").is_some(), "status shown");
 }
 
 #[test]
@@ -1679,6 +1706,24 @@ fn page_dialogs_ui() {
     quick(&mut h, "Leere Seiten einfügen");
     assert!(h.state().dialog().is_some());
     save(&mut h, "32-insert-blank-dialog");
+    // Own settings: a click into the name field keeps the list open, Enter
+    // saves and leaves the dialog open.
+    h.get_all_by_role(egui::accesskit::Role::ComboBox)
+        .find(|n| n.value().as_deref() == Some("<Benutzerdefiniert>"))
+        .expect("preset list")
+        .click();
+    h.run_steps(3);
+    let save_label = "Aktuelle Einstellungen speichern als:";
+    assert!(h.query_by_label(save_label).is_some(), "preset list open");
+    h.get_all_by_role(egui::accesskit::Role::TextInput).last().unwrap().click();
+    h.run_steps(3);
+    assert!(h.query_by_label(save_label).is_some(), "still open after clicking into the name field");
+    h.get_all_by_role(egui::accesskit::Role::TextInput).last().unwrap().type_text("Zwei Seiten");
+    h.run_steps(2);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+    assert!(h.state().settings().presets.iter().any(|p| p.0 == "insert-blank" && p.1 == "Zwei Seiten"));
+    assert!(h.state().dialog().is_some(), "Enter saved the settings, not the dialog");
     ok(&mut h);
     assert_eq!(count(&h), 4);
 
@@ -2365,6 +2410,20 @@ fn settings_dialog() {
     h.get_by_label("Lizenz").click();
     h.run_steps(3);
     assert!(h.query_by_label("❌ MrPDF ist freie Software und braucht keine Lizenz.").is_some());
+    // Signaturen and Neue Version have pages now.
+    h.get_by_label("Signaturen").scroll_to_me();
+    h.run_steps(6);
+    h.get_by_label("Signaturen").click();
+    h.run_steps(3);
+    assert!(h.query_by_label("Sichtbare Signatur:").is_some(), "signature page shown");
+    save(&mut h, "89-settings-signatures");
+    h.state_mut().settings_draft_mut().unwrap().sign_reason = "Geprüft".into();
+    h.get_by_label("Neue Version").scroll_to_me();
+    h.run_steps(6);
+    h.get_by_label("Neue Version").click();
+    h.run_steps(3);
+    assert!(h.query_by_label_contains("Installierte Version:").is_some(), "update page shown");
+    save(&mut h, "89-settings-update");
     // "Farben im Dokument ersetzen" and OK.
     let draft = h.state_mut().settings_draft_mut().unwrap();
     draft.recolor = true;
@@ -2374,6 +2433,7 @@ fn settings_dialog() {
     h.run_steps(5);
     assert!(h.state().dialog().is_none());
     assert_eq!(h.state().settings().identity.organisation, "Firma", "control characters removed");
+    assert_eq!(h.state().settings().sign_reason, "Geprüft");
     assert_eq!(h.state().active_tab().unwrap().recolor, Some(([0, 0, 0], [255, 255, 0])));
     save(&mut h, "90-settings-recolor");
     // Abbrechen discards the changes.
@@ -2466,7 +2526,7 @@ fn transitions_tab_windows_and_portfolio() {
     let file = sample_file(&dir, 3);
     let other = dir.path().join("Zweites.pdf");
     std::fs::write(&other, common::text_pdf(1)).unwrap();
-    let mut h = harness(vec![file, other], false);
+    let mut h = harness(vec![file, other.clone()], false);
     h.run_steps(12);
     h.state_mut().set_active_tab(0);
     h.run_steps(3);
@@ -2511,13 +2571,24 @@ fn transitions_tab_windows_and_portfolio() {
     save(&mut h, "106-tab-groups");
     run(&mut h, Cmd::View(V::MergeGroups));
     assert!((0..2).all(|i| h.state().tab_at(i).unwrap().group == 0));
-    // A document in its own window, then back.
+    // "Neues Fenster": a changed document asks first (Abbrechen keeps it) ...
     run(&mut h, Cmd::View(V::MoveTabNewWindow));
-    assert!((0..2).any(|i| h.state().tab_at(i).unwrap().window != 0));
-    save(&mut h, "107-tab-window");
-    run(&mut h, Cmd::View(V::MergeWindows));
-    let w = h.state().active_tab().unwrap().window;
-    assert!((0..2).all(|i| h.state().tab_at(i).unwrap().window == w));
+    assert!(matches!(h.state().dialog(), Some(Dialog::Unsaved { .. })));
+    save(&mut h, "107-tab-window-unsaved");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    assert_eq!(h.state().tab_count(), 2);
+    assert!(h.state().spawned_windows().is_empty());
+    // ... a saved one goes to a separate MrPDF and leaves this window.
+    h.state_mut().set_active_tab(1);
+    h.run_steps(2);
+    run(&mut h, Cmd::View(V::MoveTabNewWindow));
+    assert_eq!(h.state().tab_count(), 1);
+    assert_eq!(h.state().spawned_windows(), &[vec![other.clone()]]);
+    let ctx = h.ctx.clone();
+    h.state_mut().open_path(&ctx, other.clone(), None);
+    h.run_steps(6);
+    assert_eq!(h.state().tab_count(), 2);
     // Mehrere Tabs verschieben.
     run(&mut h, Cmd::View(V::MoveTabs));
     assert!(matches!(h.state().dialog(), Some(Dialog::MoveTabs(_))));

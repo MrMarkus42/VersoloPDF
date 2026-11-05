@@ -278,6 +278,21 @@ impl MrPdfApp {
         }
     }
 
+    /// Opens a web address of a link or button (asking first, as set in
+    /// the options).
+    pub(super) fn open_uri(&mut self, ctx: &Context, uri: String) {
+        use crate::ui::settings::{LinkPolicy, url_host};
+        let trusted = url_host(&uri).is_some_and(|h| self.settings.trusted_hosts.contains(&h));
+        if !is_safe_uri(&uri) || self.settings.link_policy == LinkPolicy::Block {
+            let t = self.t();
+            self.set_status(ctx, t.link_blocked);
+        } else if self.settings.link_policy == LinkPolicy::Allow || trusted {
+            ctx.open_url(egui::OpenUrl::new_tab(uri));
+        } else {
+            self.dialog = Some(Dialog::ConfirmLink { uri, trust: false });
+        }
+    }
+
     pub fn request_close_tab(&mut self, ctx: &Context, index: usize) {
         let Some(tab) = self.tabs.get(index) else { return };
         if tab.doc.is_modified() {
@@ -337,6 +352,12 @@ impl MrPdfApp {
             return;
         }
         match then {
+            AfterSave::NewWindow => {
+                if let Some((_, asked)) = self.new_window.as_mut() {
+                    asked.push(tab_id);
+                }
+                self.continue_new_window(ctx);
+            }
             AfterSave::CloseTab => self.close_tab(ctx, tab_id),
             AfterSave::CloseAll => {
                 self.close_tab(ctx, tab_id);
@@ -654,18 +675,7 @@ impl MrPdfApp {
                     tab.doc.update_annotation(annot.page, annot.index, &update)
                 });
             }
-            CanvasEvent::OpenUri(uri) => {
-                use crate::ui::settings::{LinkPolicy, url_host};
-                let trusted = url_host(&uri).is_some_and(|h| self.settings.trusted_hosts.contains(&h));
-                if !is_safe_uri(&uri) || self.settings.link_policy == LinkPolicy::Block {
-                    let t = self.t();
-                    self.set_status(ctx, t.link_blocked);
-                } else if self.settings.link_policy == LinkPolicy::Allow || trusted {
-                    ctx.open_url(egui::OpenUrl::new_tab(uri));
-                } else {
-                    self.dialog = Some(Dialog::ConfirmLink { uri, trust: false });
-                }
-            }
+            CanvasEvent::OpenUri(uri) => self.open_uri(ctx, uri),
             CanvasEvent::CommitField { page, annot_index, mut value } => {
                 // "Datum": the input is checked and written in the field's format.
                 let format = self

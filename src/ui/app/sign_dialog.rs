@@ -41,6 +41,11 @@ pub enum Corner {
     TopLeft,
 }
 
+/// Names of the corners in the order of `Settings::sign_corner`.
+pub(super) fn corner_names(de: bool) -> Vec<&'static str> {
+    Corner::ALL.iter().map(|c| c.label(de)).collect()
+}
+
 impl Corner {
     const ALL: [Corner; 4] = [Corner::BottomRight, Corner::BottomLeft, Corner::TopRight, Corner::TopLeft];
 
@@ -189,13 +194,17 @@ impl MrPdfApp {
             new_email: String::new(),
             new_org: String::new(),
             new_repeat: String::new(),
-            reason: String::new(),
-            location: String::new(),
-            contact: String::new(),
+            // Presets from Einstellungen › Signaturen.
+            reason: self.settings.sign_reason.clone(),
+            location: self.settings.sign_location.clone(),
+            contact: self.settings.sign_contact.clone(),
             placement,
             page,
             pages,
-            corner: Corner::BottomRight,
+            corner: Corner::ALL
+                .get(usize::from(self.settings.sign_corner))
+                .copied()
+                .unwrap_or(Corner::BottomRight),
             field: fields.first().cloned().unwrap_or_default(),
             fields,
             modified,

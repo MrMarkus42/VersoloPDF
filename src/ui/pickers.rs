@@ -426,48 +426,80 @@ pub fn preset_combo<T: Serialize + DeserializeOwned>(
     let custom = if de { "<Benutzerdefiniert>" } else { "<Custom>" };
     ui.horizontal(|ui| {
         ui.label(if de { "Einstellungen:" } else { "Settings:" });
-        egui::ComboBox::from_id_salt(("preset", key)).selected_text(custom).width(150.0).show_ui(ui, |ui| {
-            for name in &names {
-                if ui.selectable_label(false, name).clicked()
-                    && let Some((_, _, data)) = settings.presets.iter().find(|p| p.0 == key && &p.1 == name)
-                    && let Ok(loaded) = ron::from_str::<T>(data)
-                {
-                    *form = loaded;
-                    action = PresetAction::Loaded;
-                }
-            }
-            if !names.is_empty() {
-                ui.separator();
-            }
-            ui.horizontal(|ui| {
-                ui.add(egui::TextEdit::singleline(name_buffer).hint_text("Name").desired_width(110.0));
-                let can_save = !name_buffer.trim().is_empty();
-                if ui
-                    .add_enabled(can_save, egui::Button::new(if de { "Speichern" } else { "Save" }))
-                    .on_hover_text(if de { "Eigene Einstellungen speichern" } else { "Save own settings" })
-                    .clicked()
-                    && let Ok(data) = ron::to_string(form)
-                {
-                    let name: String = name_buffer.trim().chars().take(60).collect();
-                    settings.presets.retain(|p| !(p.0 == key && p.1 == name));
-                    if settings.presets.iter().filter(|p| p.0 == key).count() < MAX_PRESETS {
-                        settings.presets.push((key.to_string(), name, data));
-                    }
-                    name_buffer.clear();
-                    action = PresetAction::Saved;
-                }
-            });
-            if !names.is_empty() {
-                ui.menu_button(if de { "Löschen" } else { "Delete" }, |ui| {
-                    for name in &names {
-                        if ui.button(name).clicked() {
-                            settings.presets.retain(|p| !(p.0 == key && &p.1 == name));
+        // The list stays open while the name is typed (a click into the
+        // name field closed it before); it closes on a click outside, after
+        // loading and after saving.
+        egui::ComboBox::from_id_salt(("preset", key))
+            .selected_text(custom)
+            .width(150.0)
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+            .show_ui(ui, |ui| {
+                let mut delete = None;
+                for name in &names {
+                    ui.horizontal(|ui| {
+                        if ui
+                            .small_button("✕")
+                            .on_hover_text(if de {
+                                "Diese Einstellungen löschen"
+                            } else {
+                                "Delete these settings"
+                            })
+                            .clicked()
+                        {
+                            delete = Some(name.clone());
+                        }
+                        if ui.selectable_label(false, name).clicked()
+                            && let Some((_, _, data)) =
+                                settings.presets.iter().find(|p| p.0 == key && &p.1 == name)
+                            && let Ok(loaded) = ron::from_str::<T>(data)
+                        {
+                            *form = loaded;
+                            action = PresetAction::Loaded;
                             ui.close();
                         }
+                    });
+                }
+                if let Some(name) = delete {
+                    settings.presets.retain(|p| !(p.0 == key && p.1 == name));
+                }
+                if !names.is_empty() {
+                    ui.separator();
+                }
+                ui.label(if de {
+                    "Aktuelle Einstellungen speichern als:"
+                } else {
+                    "Save the current settings as:"
+                });
+                ui.horizontal(|ui| {
+                    let field = ui
+                        .add(egui::TextEdit::singleline(name_buffer).hint_text("Name").desired_width(140.0));
+                    let can_save = !name_buffer.trim().is_empty();
+                    // Enter in the name field saves (and does not confirm the dialog).
+                    let enter = field.lost_focus()
+                        && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+                    let clicked = ui
+                        .add_enabled(can_save, egui::Button::new(if de { "Speichern" } else { "Save" }))
+                        .on_hover_text(if de {
+                            "Eigene Einstellungen speichern"
+                        } else {
+                            "Save own settings"
+                        })
+                        .clicked();
+                    if (clicked || enter)
+                        && can_save
+                        && let Ok(data) = ron::to_string(form)
+                    {
+                        let name: String = name_buffer.trim().chars().take(60).collect();
+                        settings.presets.retain(|p| !(p.0 == key && p.1 == name));
+                        if settings.presets.iter().filter(|p| p.0 == key).count() < MAX_PRESETS {
+                            settings.presets.push((key.to_string(), name, data));
+                        }
+                        name_buffer.clear();
+                        action = PresetAction::Saved;
+                        ui.close();
                     }
                 });
-            }
-        });
+            });
     });
     action
 }

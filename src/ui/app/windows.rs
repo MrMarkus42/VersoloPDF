@@ -95,6 +95,69 @@ impl MrPdfApp {
         }
     }
 
+    /// Moves tabs to a target; "Neues Fenster" starts a separate MrPDF with
+    /// the full ribbon for them.
+    pub(super) fn move_tabs_to(&mut self, ctx: &Context, ids: &[u64], target: MoveTarget) {
+        if target == MoveTarget::NewWindow {
+            self.new_window = Some((ids.to_vec(), Vec::new()));
+            self.continue_new_window(ctx);
+        } else {
+            self.move_tabs(ids, target);
+        }
+    }
+
+    /// Next step of "Neues Fenster": asks about unsaved changes one document
+    /// at a time, then starts the new MrPDF and closes the tabs here.
+    pub(super) fn continue_new_window(&mut self, ctx: &Context) {
+        let Some((ids, asked)) = self.new_window.clone() else { return };
+        let ask =
+            self.tabs.iter().find(|t| ids.contains(&t.id) && t.doc.is_modified() && !asked.contains(&t.id));
+        if let Some(tab) = ask {
+            self.active = self.tabs.iter().position(|t| t.id == tab.id).unwrap_or(self.active);
+            self.dialog = Some(Dialog::Unsaved { tab_id: tab.id, then: super::AfterSave::NewWindow });
+            return;
+        }
+        self.new_window = None;
+        // Documents without a file (never saved) stay here.
+        let moved: Vec<(u64, std::path::PathBuf)> = self
+            .tabs
+            .iter()
+            .filter(|t| ids.contains(&t.id))
+            .filter_map(|t| t.doc.path().map(|p| (t.id, p.to_path_buf())))
+            .collect();
+        let de = self.wn_de();
+        if moved.is_empty() {
+            self.set_status(
+                ctx,
+                tr(
+                    de,
+                    "Nur gespeicherte Dokumente lassen sich in ein neues Fenster verschieben.",
+                    "Only saved documents can be moved to a new window.",
+                ),
+            );
+            return;
+        }
+        let paths: Vec<std::path::PathBuf> = moved.iter().map(|(_, p)| p.clone()).collect();
+        if let Err(err) = start_new_window(&paths) {
+            log::error!("Neues Fenster nicht gestartet: {err}");
+            self.dialog = Some(Dialog::Message {
+                title: tr(de, "Neues Fenster", "New window").into(),
+                text: if de {
+                    format!("MrPDF konnte kein neues Fenster starten:\n{err}")
+                } else {
+                    format!("MrPDF could not start a new window:\n{err}")
+                },
+            });
+            return;
+        }
+        for (id, path) in &moved {
+            // Changes not saved on purpose are dropped with the tab here.
+            self.close_tab(ctx, *id);
+            self.closed_files.retain(|p| p != path);
+        }
+        self.spawned_windows.push(paths);
+    }
+
     /// Moves tabs (by id) to another group or window.
     pub(super) fn move_tabs(&mut self, ids: &[u64], target: MoveTarget) {
         let active_window = self.tabs.get(self.active).map_or(0, |t| t.window);
@@ -257,7 +320,7 @@ impl MrPdfApp {
             Some(StripAction::Close(i)) => self.request_close_tab(ctx, i),
             Some(StripAction::Move(i, target)) => {
                 let id = self.tabs[i].id;
-                self.move_tabs(&[id], target);
+                self.move_tabs_to(ctx, &[id], target);
             }
             None => {}
         }
@@ -492,6 +555,22 @@ impl MrPdfApp {
             return (Outcome::Keep, None);
         }
         let (ids, target) = (s.selected.clone(), s.target);
-        (Outcome::Close, Some(Box::new(move |app, _| app.move_tabs(&ids, target))))
+        (Outcome::Close, Some(Box::new(move |app, ctx| app.move_tabs_to(ctx, &ids, target))))
     }
+}
+
+/// Starts a separate MrPDF window with the files (not handed to this one).
+/// Automated tests (`MRPDF_NO_EXTERNAL`) start nothing.
+fn start_new_window(paths: &[std::path::PathBuf]) -> std::io::Result<()> {
+    if crate::mail::no_external() {
+        return Ok(());
+    }
+    let exe = std::env::current_exe()?;
+    let mut cmd = std::process::Command::new(exe);
+    cmd.arg("--new-window");
+    if std::env::args_os().any(|a| a == "--opengl") {
+        cmd.arg("--opengl");
+    }
+    cmd.args(paths);
+    cmd.spawn().map(drop)
 }

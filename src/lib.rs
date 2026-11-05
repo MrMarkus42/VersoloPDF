@@ -56,6 +56,7 @@ pub mod spell;
 pub mod text;
 pub mod transitions;
 pub mod ui;
+pub mod update;
 pub mod xfdf;
 
 pub use document::Document;
