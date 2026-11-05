@@ -46,10 +46,10 @@ pub fn compose(subject: &str, files: Vec<PathBuf>) -> bool {
     }
 }
 
-/// Automated tests set `MRPDF_NO_EXTERNAL`: then no mail program, file
+/// Automated tests set `VERSOLOPDF_NO_EXTERNAL`: then no mail program, file
 /// manager or browser is started.
 pub fn no_external() -> bool {
-    std::env::var_os("MRPDF_NO_EXTERNAL").is_some()
+    std::env::var_os("VERSOLOPDF_NO_EXTERNAL").is_some()
 }
 
 /// `mailto:` address with the subject, percent-encoded.

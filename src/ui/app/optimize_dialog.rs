@@ -6,7 +6,7 @@ use egui::{Context, RichText, Ui, vec2};
 use super::commands::Cmd;
 use super::dialogs::{Action, Outcome};
 use super::page_dialogs::{footer, tr};
-use super::{Dialog, MrPdfApp};
+use super::{Dialog, VersoloPdfApp};
 use crate::optimize::{
     Compression, Downsample, EmbedAnnots, FontInfo, FontRemoval, ImageClass, OptimizeOptions, Quality, Usage,
     UsageKind, is_standard_font,
@@ -106,8 +106,8 @@ fn image_class_ui(ui: &mut Ui, de: bool, id: &str, title: &str, class: &mut Imag
                     )
                     .on_disabled_hover_text(tr(
                         de,
-                        "Diese Verfahren werden von MrPDF nicht erzeugt.",
-                        "MrPDF does not create these encodings.",
+                        "Diese Verfahren werden von VersoloPDF nicht erzeugt.",
+                        "VersoloPDF does not create these encodings.",
                     ));
                 },
             );
@@ -162,7 +162,7 @@ fn removes(o: &OptimizeOptions, f: &FontInfo) -> bool {
         }
 }
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     fn opt_de(&self) -> bool {
         self.settings.language == crate::ui::i18n::Language::German
     }
@@ -467,7 +467,7 @@ impl MrPdfApp {
                         });
                         let mut merge = false;
                         ui.add_enabled(false, egui::Checkbox::new(&mut merge, tr(de, "Schriftteilmengen zusammenführen", "Merge font subsets")))
-                            .on_disabled_hover_text(tr(de, "Wird von MrPDF nicht unterstützt.", "Not supported by MrPDF."));
+                            .on_disabled_hover_text(tr(de, "Wird von VersoloPDF nicht unterstützt.", "Not supported by VersoloPDF."));
                     }),
                     2 => ui.add_enabled_ui(o.objects, |ui| {
                         section(ui, tr(de, "Objekteinstellungen entfernen", "Remove object settings"), |ui| {
@@ -492,7 +492,7 @@ impl MrPdfApp {
                             ui.checkbox(&mut o.thumbnails, tr(de, "Alle eingebetteten Seitenvorschaubilder entfernen", "Remove all embedded page thumbnails"));
                             let mut fragments = false;
                             ui.add_enabled(false, egui::Checkbox::new(&mut fragments, tr(de, "Bildfragmente erkennen und zusammenfassen", "Detect and merge image fragments")))
-                                .on_disabled_hover_text(tr(de, "Wird von MrPDF nicht unterstützt.", "Not supported by MrPDF."));
+                                .on_disabled_hover_text(tr(de, "Wird von VersoloPDF nicht unterstützt.", "Not supported by VersoloPDF."));
                             ui.checkbox(&mut o.print_settings, tr(de, "Eingebettete Druckeinstellungen entfernen", "Remove embedded print settings"));
                             ui.checkbox(&mut o.bookmarks, tr(de, "Lesezeichen entfernen", "Remove bookmarks"));
                         });

@@ -3,7 +3,7 @@
 use egui::Context;
 
 use super::commands::Cmd;
-use super::{Dialog, MrPdfApp};
+use super::{Dialog, VersoloPdfApp};
 use crate::geometry::RectF;
 use crate::model::AnnotKind;
 use crate::pdf_edit::{LinkSpec, NewAnnotation};
@@ -18,7 +18,7 @@ pub const PENDING: &[Cmd] = &[];
 /// Files above this size are refused as attachments.
 const MAX_ATTACHMENT: u64 = 100 * 1024 * 1024;
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     fn german(&self) -> bool {
         self.settings.language == Language::German
     }
@@ -77,9 +77,9 @@ impl MrPdfApp {
             }
             Cmd::CommandLineHelp => {
                 let text = if de {
-                    "Aufruf:\n  mrpdf [Optionen] [DATEI.pdf ...]\n\nAlle angegebenen PDF-Dateien werden in eigenen Tabs geöffnet. Läuft MrPDF schon, öffnet das laufende Programm sie.\n\nOptionen:\n  --new-window   eigenes Fenster, auch wenn MrPDF schon läuft\n  --opengl       Darstellung mit OpenGL statt DirectX/Vulkan/Metal\n\nUmgebungsvariablen:\n  MRPDF_PDFIUM_DIR: Ordner mit der PDFium-Bibliothek (absoluter Pfad)\n  MRPDF_RENDERER=opengl: wie --opengl\n  RUST_LOG=info: ausführliche Protokollausgabe"
+                    "Aufruf:\n  versolopdf [Optionen] [DATEI.pdf ...]\n\nAlle angegebenen PDF-Dateien werden in eigenen Tabs geöffnet. Läuft VersoloPDF schon, öffnet das laufende Programm sie.\n\nOptionen:\n  --new-window   eigenes Fenster, auch wenn VersoloPDF schon läuft\n  --opengl       Darstellung mit OpenGL statt DirectX/Vulkan/Metal\n\nUmgebungsvariablen:\n  VERSOLOPDF_PDFIUM_DIR: Ordner mit der PDFium-Bibliothek (absoluter Pfad)\n  VERSOLOPDF_RENDERER=opengl: wie --opengl\n  RUST_LOG=info: ausführliche Protokollausgabe"
                 } else {
-                    "Usage:\n  mrpdf [options] [FILE.pdf ...]\n\nAll given PDF files are opened in tabs. If MrPDF is running already, the running program opens them.\n\nOptions:\n  --new-window   a window of its own even if MrPDF is running\n  --opengl       draw with OpenGL instead of DirectX/Vulkan/Metal\n\nEnvironment variables:\n  MRPDF_PDFIUM_DIR: folder of the PDFium library (absolute path)\n  MRPDF_RENDERER=opengl: same as --opengl\n  RUST_LOG=info: verbose logging"
+                    "Usage:\n  versolopdf [options] [FILE.pdf ...]\n\nAll given PDF files are opened in tabs. If VersoloPDF is running already, the running program opens them.\n\nOptions:\n  --new-window   a window of its own even if VersoloPDF is running\n  --opengl       draw with OpenGL instead of DirectX/Vulkan/Metal\n\nEnvironment variables:\n  VERSOLOPDF_PDFIUM_DIR: folder of the PDFium library (absolute path)\n  VERSOLOPDF_RENDERER=opengl: same as --opengl\n  RUST_LOG=info: verbose logging"
                 };
                 self.info(Cmd::CommandLineHelp.label(self.settings.language), text.to_string());
             }
@@ -89,9 +89,9 @@ impl MrPdfApp {
                     let _ = std::process::Command::new("explorer").arg("ms-settings:defaultapps").spawn();
                 }
                 let text = if de {
-                    "Um MrPDF als Standardprogramm für PDF-Dateien festzulegen:\nWindows-Einstellungen > Apps > Standard-Apps > „.pdf“ > MrPDF auswählen.\n(Unter Linux/macOS über die Dateieigenschaften „Öffnen mit“.)"
+                    "Um VersoloPDF als Standardprogramm für PDF-Dateien festzulegen:\nWindows-Einstellungen > Apps > Standard-Apps > „.pdf“ > VersoloPDF auswählen.\n(Unter Linux/macOS über die Dateieigenschaften „Öffnen mit“.)"
                 } else {
-                    "To make MrPDF the default program for PDF files:\nWindows Settings > Apps > Default apps > \".pdf\" > choose MrPDF.\n(On Linux/macOS use \"Open with\" in the file properties.)"
+                    "To make VersoloPDF the default program for PDF files:\nWindows Settings > Apps > Default apps > \".pdf\" > choose VersoloPDF.\n(On Linux/macOS use \"Open with\" in the file properties.)"
                 };
                 self.info(Cmd::FileAssociation.label(self.settings.language), text.to_string());
             }
@@ -382,7 +382,7 @@ fn mail_file(tab: &mut crate::ui::tab::DocTab) -> crate::Result<std::path::PathB
     {
         return Ok(p.to_path_buf());
     }
-    let dir = std::env::temp_dir().join("mrpdf-mail").join(tab.id.to_string());
+    let dir = std::env::temp_dir().join("versolopdf-mail").join(tab.id.to_string());
     let mut name = tab.doc.display_name().replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_");
     if !name.to_lowercase().ends_with(".pdf") {
         name.push_str(".pdf");

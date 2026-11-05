@@ -1,4 +1,4 @@
-//! MrPDF – a free, open-source PDF viewer and editor.
+//! VersoloPDF – a free, open-source PDF viewer and editor.
 //!
 //! The crate is split into a toolkit independent document core
 //! ([`document`], [`pdf_edit`], [`appearance`], [`text`], [`search`]) and the
@@ -30,6 +30,7 @@ pub mod forms;
 pub mod geometry;
 pub mod import;
 pub mod instance;
+pub mod layers;
 pub mod mail;
 pub mod marks;
 pub mod media;
@@ -46,6 +47,7 @@ pub mod pdf_edit;
 pub mod portfolio;
 pub mod print;
 pub mod print_layout;
+pub mod qr;
 pub mod redact;
 pub mod report;
 pub mod search;

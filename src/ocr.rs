@@ -1,6 +1,6 @@
-//! "Text auf Seiten erkennen" (OCR). MrPDF uses the free program Tesseract
+//! "Text auf Seiten erkennen" (OCR). VersoloPDF uses the free program Tesseract
 //! (Apache-2.0) if it is installed: each page is rendered, Tesseract finds
-//! the words and their places, and MrPDF adds them as an invisible text
+//! the words and their places, and VersoloPDF adds them as an invisible text
 //! layer over the page, so scanned pages can be searched and copied.
 
 use std::path::{Path, PathBuf};

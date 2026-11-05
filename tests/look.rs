@@ -1,6 +1,6 @@
 //! Before/after pictures of the look: the same scenes with the classic and
 //! the modern look (and the modern one at 125 % interface size). Pictures
-//! go to `MRPDF_SHOT_DIR` (default target/look). Run on Windows to see the
+//! go to `VERSOLOPDF_SHOT_DIR` (default target/look). Run on Windows to see the
 //! system font: `look-tests.exe --ignored --nocapture`.
 
 mod common;
@@ -9,19 +9,19 @@ use std::path::PathBuf;
 
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
-use mrpdf::ui::MrPdfApp;
-use mrpdf::ui::app::commands::Cmd;
-use mrpdf::ui::i18n::Language;
-use mrpdf::ui::settings::Settings;
+use versolopdf::ui::VersoloPdfApp;
+use versolopdf::ui::app::commands::Cmd;
+use versolopdf::ui::i18n::Language;
+use versolopdf::ui::settings::Settings;
 
 fn out_dir() -> PathBuf {
-    let dir = std::env::var_os("MRPDF_SHOT_DIR")
+    let dir = std::env::var_os("VERSOLOPDF_SHOT_DIR")
         .map_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/look"), PathBuf::from);
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }
 
-fn harness(files: Vec<PathBuf>, modern: bool, scale: f32) -> Harness<'static, MrPdfApp> {
+fn harness(files: Vec<PathBuf>, modern: bool, scale: f32) -> Harness<'static, VersoloPdfApp> {
     let settings = Settings {
         language: Language::German,
         author: "Tester".into(),
@@ -33,7 +33,7 @@ fn harness(files: Vec<PathBuf>, modern: bool, scale: f32) -> Harness<'static, Mr
     let mut h =
         Harness::builder().with_size(egui::vec2(1280.0, 800.0)).with_max_steps(64).wgpu().build_eframe(
             move |cc| {
-                let mut app = MrPdfApp::with_settings(&cc.egui_ctx, settings, files);
+                let mut app = VersoloPdfApp::with_settings(&cc.egui_ctx, settings, files);
                 app.set_recovery_dir(None);
                 app
             },
@@ -42,7 +42,7 @@ fn harness(files: Vec<PathBuf>, modern: bool, scale: f32) -> Harness<'static, Mr
     h
 }
 
-fn shot(h: &mut Harness<'_, MrPdfApp>, name: &str) {
+fn shot(h: &mut Harness<'_, VersoloPdfApp>, name: &str) {
     h.event(egui::Event::PointerGone);
     h.run_steps(4);
     match h.render() {

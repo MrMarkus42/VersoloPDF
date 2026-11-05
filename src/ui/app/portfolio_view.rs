@@ -7,7 +7,7 @@ use egui::{Context, RichText, Ui};
 
 use super::dialogs::{Action, Outcome};
 use super::page_dialogs::tr;
-use super::{Dialog, MrPdfApp};
+use super::{Dialog, VersoloPdfApp};
 use crate::portfolio::{Entry, NewFile};
 use crate::ui::i18n::Language;
 
@@ -38,12 +38,12 @@ fn folder_files(dir: &std::path::Path) -> Vec<PathBuf> {
     files
 }
 
-/// Files that MrPDF can show itself (others are only saved).
+/// Files that VersoloPDF can show itself (others are only saved).
 fn openable_here(name: &str) -> bool {
     super::page_dialogs::openable(std::path::Path::new(name))
 }
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     fn pf_de(&self) -> bool {
         self.settings.language == Language::German
     }
@@ -190,7 +190,7 @@ impl MrPdfApp {
         self.active = previous.min(self.tabs.len().saturating_sub(1));
     }
 
-    /// "Öffnen": PDFs and files MrPDF can convert open in a new tab (from a
+    /// "Öffnen": PDFs and files VersoloPDF can convert open in a new tab (from a
     /// temporary copy); nothing is ever executed.
     fn portfolio_open(&mut self, ctx: &Context, index: usize, name: &str) {
         if !openable_here(name) {
@@ -198,7 +198,7 @@ impl MrPdfApp {
             return;
         }
         let Some(a) = self.tabs[index].doc.attachment_index(name) else { return };
-        let dir = std::env::temp_dir().join(format!("mrpdf-portfolio-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("versolopdf-portfolio-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         // Only the file name part is used (no folders from the PDF).
         let safe: String = std::path::Path::new(name)

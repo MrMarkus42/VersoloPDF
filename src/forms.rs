@@ -386,12 +386,16 @@ pub enum NewFieldKind {
     },
     /// Button that shows an image chosen when it is clicked ("Bild").
     Image,
+    /// "Barcode": a read-only field showing `text` as a QR code.
+    Barcode {
+        text: String,
+    },
 }
 
 /// What a push button does when it is clicked.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum ButtonAction {
-    /// Nothing (or only a script, which MrPDF never runs).
+    /// Nothing (or only a script, which VersoloPDF never runs).
     #[default]
     None,
     /// "Formular zurücksetzen".
@@ -480,6 +484,7 @@ impl NewFieldKind {
             NewFieldKind::Signature { .. } => "Signature",
             NewFieldKind::Date { .. } => "Date",
             NewFieldKind::Image => "Image",
+            NewFieldKind::Barcode { .. } => "Barcode",
         }
     }
 }
@@ -687,7 +692,7 @@ pub fn create_field(
                 widget.set("FT", Object::Name(b"Tx".to_vec()));
                 widget.set("V", text_string(""));
                 // The usual format scripts, so other programs check the
-                // date too (MrPDF never runs them; see `normalize_date`).
+                // date too (VersoloPDF never runs them; see `normalize_date`).
                 let fmt = date_format_clean(format);
                 let js = |code: String| {
                     let mut a = Dictionary::new();
@@ -877,6 +882,16 @@ pub fn create_field(
                     centered_text(w, h, caption, (h * 0.5).clamp(6.0, 14.0))
                 );
                 let id = edit.add(form_stream(w, h, content, true));
+                ap.set("N", Object::Reference(id));
+            }
+            NewFieldKind::Barcode { text } => {
+                let code = crate::qr::encode(text)?;
+                // A read-only push button: nothing to fill in, the code is its look.
+                widget.set("FT", Object::Name(b"Btn".to_vec()));
+                widget.set("Ff", Object::Integer(i64::from(FLAG_PUSHBUTTON | 1)));
+                widget.set("TU", text_string(text));
+                mk.remove(b"BC");
+                let id = edit.add(form_stream(w, h, crate::qr::pdf_content(&code, w, h), false));
                 ap.set("N", Object::Reference(id));
             }
             NewFieldKind::Signature { label } => {
@@ -1097,7 +1112,7 @@ pub fn normalize_date(input: &str, format: &str) -> Option<String> {
     Some(out)
 }
 
-/// What MrPDF needs to know about a widget beyond PDFium's field info.
+/// What VersoloPDF needs to know about a widget beyond PDFium's field info.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct FieldExtras {
     /// Date format of a date field.

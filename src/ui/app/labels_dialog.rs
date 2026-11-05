@@ -6,7 +6,7 @@ use egui::{Align2, Color32, FontId, Rect, RichText, Sense, Stroke, StrokeKind, U
 use super::commands::Cmd;
 use super::dialogs::{Action, Outcome};
 use super::page_dialogs::{footer, tr};
-use super::{Dialog, MrPdfApp};
+use super::{Dialog, VersoloPdfApp};
 use crate::pages::{LabelRange, LabelStyle};
 use crate::ui::i18n::Language;
 use crate::ui::icons::Icon;
@@ -59,7 +59,7 @@ fn preview(ranges: &[LabelRange], n: usize) -> Vec<(String, bool)> {
     out
 }
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     /// Opens the page label dialog for `Cmd::PageLabels`.
     pub(super) fn run_labels(&mut self, cmd: Cmd) -> bool {
         if cmd != Cmd::PageLabels {

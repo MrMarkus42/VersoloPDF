@@ -1,6 +1,6 @@
 //! Generation of annotation appearance streams.
 //!
-//! Every annotation MrPDF creates carries its own appearance stream so it
+//! Every annotation VersoloPDF creates carries its own appearance stream so it
 //! looks identical in all PDF viewers. Coordinates in the generated content
 //! are absolute PDF user space coordinates; the form's `/BBox` equals the
 //! annotation `/Rect` and its matrix is the identity.

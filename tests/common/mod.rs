@@ -18,7 +18,7 @@ pub fn lock() -> MutexGuard<'static, ()> {
 #[allow(dead_code)]
 pub fn lines_pdf(pages: &[&[&str]], box_on: Option<usize>) -> Vec<u8> {
     use pdfium_render::prelude::{PdfColor, PdfRect};
-    let pdfium = mrpdf::engine::pdfium().expect("PDFium must be available for tests");
+    let pdfium = versolopdf::engine::pdfium().expect("PDFium must be available for tests");
     let mut doc = pdfium.create_new_pdf().unwrap();
     let font = doc.fonts_mut().helvetica();
     for (i, lines) in pages.iter().enumerate() {
@@ -50,7 +50,7 @@ pub fn lines_pdf(pages: &[&[&str]], box_on: Option<usize>) -> Vec<u8> {
 
 /// A PDF with `pages` A4 pages, each containing the line `Page N Hello World`.
 pub fn text_pdf(pages: usize) -> Vec<u8> {
-    let pdfium = mrpdf::engine::pdfium().expect("PDFium must be available for tests");
+    let pdfium = versolopdf::engine::pdfium().expect("PDFium must be available for tests");
     let mut doc = pdfium.create_new_pdf().unwrap();
     let font = doc.fonts_mut().helvetica();
     for i in 0..pages {
@@ -90,6 +90,44 @@ pub fn encrypted_pdf(user: &str, owner: &str, permissions: lopdf::Permissions) -
     };
     let state = lopdf::EncryptionState::try_from(version).unwrap();
     doc.encrypt(&state).unwrap();
+    let mut out = Vec::new();
+    doc.save_to(&mut out).unwrap();
+    out
+}
+
+/// A page with a blue square on layer "Grundriss" and an (empty) second
+/// layer "Bemaßung" that starts hidden.
+pub fn layered_pdf() -> Vec<u8> {
+    use lopdf::Object;
+    let mut doc = lopdf::Document::with_version("1.7");
+    let pages_id = doc.new_object_id();
+    let ocg1 = doc.add_object(dictionary! { "Type" => "OCG", "Name" => Object::string_literal("Grundriss") });
+    // PDFDocEncoding: "ß" is the byte 0xDF.
+    let ocg2 = doc.add_object(
+        dictionary! { "Type" => "OCG", "Name" => Object::string_literal(b"Bema\xDFung".to_vec()) },
+    );
+    let content = b"/OC /oc1 BDC 0 0 1 rg 100 600 200 200 re f EMC\n".to_vec();
+    let content_id = doc.add_object(Stream::new(Dictionary::new(), content));
+    let page_id = doc.add_object(dictionary! {
+        "Type" => "Page",
+        "Parent" => pages_id,
+        "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+        "Contents" => content_id,
+        "Resources" => dictionary! { "Properties" => dictionary! { "oc1" => ocg1 } },
+    });
+    doc.objects.insert(
+        pages_id,
+        Object::Dictionary(dictionary! { "Type" => "Pages", "Kids" => vec![page_id.into()], "Count" => 1 }),
+    );
+    let catalog = doc.add_object(dictionary! {
+        "Type" => "Catalog",
+        "Pages" => pages_id,
+        "OCProperties" => dictionary! {
+            "OCGs" => vec![ocg1.into(), ocg2.into()],
+            "D" => dictionary! { "Order" => vec![ocg1.into(), ocg2.into()], "OFF" => vec![ocg2.into()] },
+        },
+    });
+    doc.trailer.set("Root", catalog);
     let mut out = Vec::new();
     doc.save_to(&mut out).unwrap();
     out
@@ -173,7 +211,7 @@ pub fn form_pdf() -> Vec<u8> {
 }
 
 /// Average colour of a rectangular pixel area of an RGBA image.
-pub fn average(img: &mrpdf::document::RenderedImage, x0: u32, y0: u32, x1: u32, y1: u32) -> [f32; 3] {
+pub fn average(img: &versolopdf::document::RenderedImage, x0: u32, y0: u32, x1: u32, y1: u32) -> [f32; 3] {
     let mut sum = [0f64; 3];
     let mut n = 0f64;
     for y in y0..y1.min(img.height) {

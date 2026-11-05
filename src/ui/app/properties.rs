@@ -2,7 +2,7 @@
 
 use egui::{Panel, RichText, Ui};
 
-use super::MrPdfApp;
+use super::VersoloPdfApp;
 use super::commands::Cmd;
 use crate::model::{AnnotKind, AnnotStyle, Rgba};
 use crate::pdf_edit::AnnotUpdate;
@@ -67,7 +67,7 @@ pub(super) fn style_editor(ui: &mut Ui, t: &Strings, tool: Tool, style: &mut Ann
     changed
 }
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     pub(super) fn properties_panel(&mut self, ui: &mut Ui) {
         let t = self.t();
         Panel::right("properties").resizable(true).default_size(230.0).size_range(180.0..=420.0).show(

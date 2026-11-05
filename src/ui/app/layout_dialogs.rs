@@ -13,7 +13,7 @@ use super::page_dialogs::{
     unique_path,
 };
 use super::preview::{doc_preview, page_strip};
-use super::{Dialog, MrPdfApp, PaperChoice};
+use super::{Dialog, PaperChoice, VersoloPdfApp};
 use crate::document::ExtractOptions;
 use crate::import::{Blend, NUpLayout, OverlayOptions, PageOrder, SheetSize};
 use crate::pages::SplitMethod;
@@ -92,9 +92,32 @@ pub struct LayoutState {
 /// Every dialog shows the target pages as "Seitenbereich" with these modes.
 const ALL_CUSTOM: [RangeMode; 2] = [RangeMode::All, RangeMode::Custom];
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     fn ld_de(&self) -> bool {
         self.settings.language == Language::German
+    }
+
+    /// The guides ("Hilfslinien") of the active document as split lines:
+    /// their position relative to the size of the current page.
+    fn guide_split_lines(&self) -> Vec<SplitLine> {
+        let Some(tab) = self.active_tab() else { return Vec::new() };
+        let Some((w, h)) = tab.doc.geometry(tab.current_page).map(|g| g.view_size()) else {
+            return Vec::new();
+        };
+        let mut lines: Vec<SplitLine> = tab
+            .guides
+            .iter()
+            .filter_map(|g| {
+                let size = if g.vertical { w } else { h };
+                let at = g.pos / size.max(1.0);
+                (at > 0.01 && at < 0.99).then_some(SplitLine { vertical: g.vertical, at })
+            })
+            .collect();
+        lines.sort_by(|a, b| {
+            (a.vertical, a.at).partial_cmp(&(b.vertical, b.at)).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        lines.dedup_by(|a, b| a.vertical == b.vertical && (a.at - b.at).abs() < 0.005);
+        lines
     }
 
     /// Opens a dialog of step C. Returns false if `cmd` has none.
@@ -125,8 +148,8 @@ impl MrPdfApp {
                 options: ExtractOptions::default(),
                 show_settings: false,
             },
-            Cmd::SplitPages => LayoutDialog::SplitPages {
-                lines: Vec::new(),
+            Cmd::SplitPages | Cmd::SplitAtGuides => LayoutDialog::SplitPages {
+                lines: if cmd == Cmd::SplitAtGuides { self.guide_split_lines() } else { Vec::new() },
                 selected: None,
                 from_top: false,
                 from_right: false,

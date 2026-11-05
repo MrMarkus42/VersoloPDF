@@ -10,8 +10,8 @@ use std::cell::{Cell, RefCell};
 
 use egui::{Color32, Context, Event, Id, Key, LayerId, Order, Rect, Ui};
 
-use super::MrPdfApp;
 use super::RibbonTab;
+use super::VersoloPdfApp;
 
 /// What the letters are shown on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -143,7 +143,7 @@ impl KeyTips {
     }
 }
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     /// The keyboard letters shown now (label, letters) and their level.
     pub fn keytip_codes(&self) -> (Option<Level>, Vec<(String, String)>) {
         (self.keytips.level(), self.keytips.codes())
@@ -277,7 +277,7 @@ impl MrPdfApp {
         let labels: Vec<String> = items.iter().map(|t| t.label.clone()).collect();
         let codes = assign(&labels);
         k.shown = items.into_iter().zip(codes).collect();
-        let painter = ctx.layer_painter(LayerId::new(Order::Tooltip, Id::new("mrpdf-keytips")));
+        let painter = ctx.layer_painter(LayerId::new(Order::Tooltip, Id::new("versolopdf-keytips")));
         let font = egui::FontId::proportional(12.0);
         for (tip, code) in &k.shown {
             if !code.starts_with(&k.typed) {

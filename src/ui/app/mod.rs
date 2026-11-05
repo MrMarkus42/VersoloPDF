@@ -60,7 +60,7 @@ use crate::ui::tab::{AnnotRef, DocTab};
 use crate::ui::theme;
 use crate::ui::tools::Tool;
 
-const SETTINGS_KEY: &str = "mrpdf-settings";
+const SETTINGS_KEY: &str = "versolopdf-settings";
 
 /// What a rendered picture shows: tab, page, document revision, size.
 type PictureKey = (u64, usize, u64, [u32; 2]);
@@ -94,6 +94,8 @@ pub enum SidePanel {
     /// "Formular": all form fields of the document.
     Fields,
     Search,
+    /// "Ebenen": switching the layers of the document.
+    Layers,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -280,7 +282,7 @@ pub enum RangePurpose {
     ToImages,
 }
 
-pub struct MrPdfApp {
+pub struct VersoloPdfApp {
     settings: Settings,
     tabs: Vec<DocTab>,
     active: usize,
@@ -290,7 +292,7 @@ pub struct MrPdfApp {
     dialog: Option<Dialog>,
     status: Option<(String, f64)>,
     pending_open: VecDeque<PathBuf>,
-    /// Files handed over by later starts of MrPDF (see crate::instance).
+    /// Files handed over by later starts of VersoloPDF (see crate::instance).
     inbox: Option<crate::instance::Inbox>,
     exit_confirmed: bool,
     search_query: String,
@@ -330,7 +332,7 @@ pub struct MrPdfApp {
     /// "Verschieben: Neues Fenster" in progress: the tabs to hand over and
     /// those whose unsaved changes were already asked about.
     new_window: Option<(Vec<u64>, Vec<u64>)>,
-    /// Files handed to new MrPDF windows (each start one entry).
+    /// Files handed to new VersoloPDF windows (each start one entry).
     spawned_windows: Vec<Vec<PathBuf>>,
     /// "Neue Version": search and installation.
     update: update_ui::UpdateState,
@@ -399,7 +401,7 @@ pub struct MrPdfApp {
     content_format: Option<content_cmds::FormatUi>,
 }
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     pub fn new(cc: &eframe::CreationContext<'_>, files: Vec<PathBuf>) -> Self {
         let mut settings: Settings =
             cc.storage.and_then(|s| eframe::get_value(s, SETTINGS_KEY)).unwrap_or_default();
@@ -407,7 +409,7 @@ impl MrPdfApp {
         Self::with_settings(&cc.egui_ctx, settings, files)
     }
 
-    /// Receives the files of later starts of MrPDF (one program window).
+    /// Receives the files of later starts of VersoloPDF (one program window).
     pub fn set_inbox(&mut self, ctx: &Context, inbox: crate::instance::Inbox) {
         inbox.set_context(ctx);
         self.inbox = Some(inbox);
@@ -568,7 +570,7 @@ impl MrPdfApp {
         self.ribbon_height
     }
 
-    /// Files handed to new MrPDF windows ("Verschieben: Neues Fenster").
+    /// Files handed to new VersoloPDF windows ("Verschieben: Neues Fenster").
     pub fn spawned_windows(&self) -> &[Vec<PathBuf>] {
         &self.spawned_windows
     }
@@ -866,8 +868,8 @@ impl MrPdfApp {
 
     fn update_title(&mut self, ctx: &Context) {
         let title = match self.active_tab() {
-            Some(tab) => format!("{} - MrPDF", tab.title()),
-            None => "MrPDF".to_string(),
+            Some(tab) => format!("{} - VersoloPDF", tab.title()),
+            None => "VersoloPDF".to_string(),
         };
         if title != self.last_title {
             ctx.send_viewport_cmd(ViewportCommand::Title(title.clone()));
@@ -962,7 +964,7 @@ impl MrPdfApp {
             guides: s.show_guides,
             transparency: s.transparency_grid,
             highlight_links: s.highlight_links,
-            snap: s.snap.then_some((s.snap_grid, s.snap_guides)),
+            snap: s.snap.then_some((s.snap_grid, s.snap_guides, s.snap_objects)),
             rulers: s.show_rulers,
             unit: s.unit,
             loupe: (s.show_loupe || self.tool == Tool::Loupe).then_some(s.loupe_factor),
@@ -975,7 +977,7 @@ impl MrPdfApp {
             ui.add_space(ui.available_height() * 0.2);
             let (rect, _) = ui.allocate_exact_size(egui::vec2(72.0, 72.0), egui::Sense::hover());
             crate::ui::icons::paint(ui.painter(), rect, crate::ui::icons::Icon::Logo, theme::BRAND);
-            ui.heading("MrPDF");
+            ui.heading("VersoloPDF");
             ui.label(t.welcome);
             ui.add_space(12.0);
             if ui.button(t.open_file).clicked() {
@@ -1007,7 +1009,7 @@ impl MrPdfApp {
     }
 }
 
-impl eframe::App for MrPdfApp {
+impl eframe::App for VersoloPdfApp {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.apply_view_settings(&ctx);
@@ -1019,6 +1021,10 @@ impl eframe::App for MrPdfApp {
         self.poll_download(&ctx);
         self.auto_update_check(&ctx);
         self.poll_update(&ctx);
+        // Layers are read once per change (they decide whether "Ebenen" is offered).
+        if let Some(tab) = self.tabs.get_mut(self.active) {
+            let _ = tab.layers();
+        }
         self.recovery_tick(&ctx);
         self.view_tick(&ctx);
         self.compare_tick(&ctx);

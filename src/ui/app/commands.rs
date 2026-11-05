@@ -1,13 +1,13 @@
 //! Central command table: every action of the ribbon, the quick start search
 //! and keyboard shortcuts is a [`Cmd`]. Each command has a label, an icon and
-//! an availability state; [`MrPdfApp::run`] executes it.
+//! an availability state; [`VersoloPdfApp::run`] executes it.
 
 use egui::Context;
 
 use super::comment_cmds::CommentCmd;
 use super::structure::MarkKind;
 use super::view_cmds::ViewCmd;
-use super::{Dialog, InsertPosition, MrPdfApp, RangePurpose, SidePanel};
+use super::{Dialog, InsertPosition, RangePurpose, SidePanel, VersoloPdfApp};
 use crate::ui::i18n::Language;
 use crate::ui::icons::Icon;
 use crate::ui::tools::Tool;
@@ -21,85 +21,6 @@ pub enum Side {
     Right,
     Top,
     Bottom,
-}
-
-/// Why a command is not offered.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Unavailable {
-    Signatures,
-    JavaScript,
-    Scanner,
-    Media,
-    Speech,
-    Barcodes,
-    Guides,
-    Cloud,
-    WebImport,
-    ThinLines,
-    SnapObjects,
-    Pane,
-    Highlighting,
-    Layers,
-    ScanCleanup,
-}
-
-impl Unavailable {
-    pub fn reason(self, lang: Language) -> &'static str {
-        let (de, en) = match self {
-            Unavailable::Signatures => (
-                "Noch nicht enthalten. Signieren geht mit „Dokument signieren“, Prüfen mit „Signaturen überprüfen“.",
-                "Not included yet. Sign with “Sign document”, check with “Check signatures”.",
-            ),
-            Unavailable::JavaScript => (
-                "JavaScript in PDF-Dateien wird aus Sicherheitsgründen bewusst nicht ausgeführt.",
-                "JavaScript in PDF files is deliberately not executed for security reasons.",
-            ),
-            Unavailable::Scanner => {
-                ("Scannen wird noch nicht unterstützt.", "Scanning is not supported yet.")
-            }
-            Unavailable::Media => {
-                ("Video, Audio und 3D werden nicht unterstützt.", "Video, audio and 3D are not supported.")
-            }
-            Unavailable::Speech => {
-                ("Vorlesen wird noch nicht unterstützt.", "Read aloud is not supported yet.")
-            }
-            Unavailable::Barcodes => ("Barcodes werden nicht unterstützt.", "Barcodes are not supported."),
-            Unavailable::Guides => (
-                "MrPDF hat keine Hilfslinien. Bitte „Seiten aufteilen“ verwenden und die Trennlinien dort setzen.",
-                "MrPDF has no guides. Please use \"Split pages\" and set the split lines there.",
-            ),
-            Unavailable::Cloud => (
-                "Cloud-Speicher und SharePoint werden nicht unterstützt. Bitte lokale Dateien verwenden.",
-                "Cloud storage and SharePoint are not supported. Please use local files.",
-            ),
-            Unavailable::WebImport => (
-                "Das Umwandeln von Web-Seiten und E-Mails in PDF wird nicht unterstützt.",
-                "Converting web pages and e-mails to PDF is not supported.",
-            ),
-            Unavailable::ThinLines => (
-                "Die Darstellung mit dünnen Linien bietet die verwendete PDF-Bibliothek nicht an.",
-                "The PDF library used does not offer thin line display.",
-            ),
-            Unavailable::SnapObjects => (
-                "Einrasten ist am Gitter und an Hilfslinien möglich, nicht an Objekten.",
-                "Snapping works at the grid and guides, not at objects.",
-            ),
-            Unavailable::Pane => ("Diese Leiste gibt es in MrPDF nicht.", "MrPDF does not have this pane."),
-            Unavailable::Highlighting => (
-                "Wörter und Sätze können beim Vorlesen nicht hervorgehoben werden.",
-                "Words and sentences cannot be highlighted while reading aloud.",
-            ),
-            Unavailable::Layers => (
-                "Ebenen (optionale Inhalte) werden noch nicht unterstützt.",
-                "Layers (optional content) are not supported yet.",
-            ),
-            Unavailable::ScanCleanup => (
-                "Das Aufbereiten gescannter Seiten (begradigen, säubern) ist noch nicht enthalten.",
-                "Cleaning up scanned pages (deskew, despeckle) is not included yet.",
-            ),
-        };
-        if lang == Language::German { de } else { en }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -180,6 +101,10 @@ pub enum Cmd {
     SearchRedact,
     /// "Dokument signieren" (digital signature with a digital ID).
     SignDocument,
+    /// "Zertifizieren" (visible or invisible) and "Zeitstempel".
+    Certify,
+    CertifyInvisible,
+    TimeStampDocument,
     /// "Signaturen überprüfen".
     VerifySignatures,
     // Form
@@ -223,6 +148,8 @@ pub enum Cmd {
     /// Several pages per sheet (Seiten zusammenfuehren).
     NUp,
     SplitPages,
+    /// "Seiten an Hilfslinien aufteilen": the split dialog with the guides as lines.
+    SplitAtGuides,
     Overlay,
     Rotate180,
     RemoveCropped,
@@ -286,8 +213,6 @@ pub enum Cmd {
     About,
     FileAssociation,
     Homepage,
-    /// A command that MrPDF does not offer.
-    Unavailable(Unavailable, &'static str, &'static str, Icon),
     /// Commands of the ribbon tab "Ansicht" (see `view_cmds.rs`).
     View(super::view_cmds::ViewCmd),
     /// Commands of the ribbon tab "Anmerkungen" (see `comment_cmds.rs`).
@@ -298,7 +223,7 @@ pub enum Cmd {
     Content(crate::ui::content_state::ContentCmd),
 }
 
-pub const HOMEPAGE: &str = "https://github.com/MrMarkus42/MrPDF";
+pub const HOMEPAGE: &str = "https://github.com/MrMarkus42/VersoloPDF";
 
 /// Commands offered by the quick start search.
 pub const SEARCHABLE: &[Cmd] = &[
@@ -349,6 +274,7 @@ pub const SEARCHABLE: &[Cmd] = &[
     Cmd::Comment(CommentCmd::Calculator),
     Cmd::Comment(CommentCmd::CommentStyles),
     Cmd::Tool(Tool::FieldDate),
+    Cmd::Tool(Tool::FieldBarcode),
     Cmd::Tool(Tool::FieldImage),
     Cmd::Form(super::form_cmds::FormCmd::FormPane),
     Cmd::Form(super::form_cmds::FormCmd::DetectForms),
@@ -429,6 +355,9 @@ pub const SEARCHABLE: &[Cmd] = &[
     Cmd::ApplyRedactions,
     Cmd::SearchRedact,
     Cmd::SignDocument,
+    Cmd::Certify,
+    Cmd::CertifyInvisible,
+    Cmd::TimeStampDocument,
     Cmd::VerifySignatures,
     Cmd::HighlightFields,
     Cmd::ResetForm,
@@ -468,6 +397,7 @@ pub const SEARCHABLE: &[Cmd] = &[
     Cmd::MovePages,
     Cmd::NUp,
     Cmd::SplitPages,
+    Cmd::SplitAtGuides,
     Cmd::Overlay,
     Cmd::Rotate180,
     Cmd::Tool(Tool::Crop),
@@ -632,6 +562,7 @@ impl Cmd {
             Panel(SidePanel::Comments) => ("Kommentare", "Comments"),
             Panel(SidePanel::Attachments) => ("Anhänge", "Attachments"),
             Panel(SidePanel::Fields) => ("Formular", "Form"),
+            Panel(SidePanel::Layers) => ("Ebenen", "Layers"),
             Panel(SidePanel::Search) => ("Suchen", "Search"),
             CommentList => ("Kommentarliste", "Comment list"),
             ToggleAnnotations => ("Anzeigen", "Show"),
@@ -648,6 +579,9 @@ impl Cmd {
             ApplyRedactions => ("Übernehmen", "Apply"),
             SearchRedact => ("Suchen und schwärzen", "Search and redact"),
             SignDocument => ("Dokument signieren", "Sign document"),
+            Certify => ("Zertifizieren", "Certify"),
+            CertifyInvisible => ("Zertifizieren (unsichtbar)", "Certify (invisible)"),
+            TimeStampDocument => ("Zeitstempel", "Time stamp"),
             VerifySignatures => ("Signaturen überprüfen", "Check signatures"),
             HighlightFields => ("Felder hervorheben", "Highlight fields"),
             ResetForm => ("Formular zurücksetzen", "Reset form"),
@@ -670,6 +604,7 @@ impl Cmd {
             MovePages => ("Seiten verschieben", "Move pages"),
             NUp => ("Seiten zusammenführen", "Combine pages (n-up)"),
             SplitPages => ("Seiten aufteilen", "Split pages"),
+            SplitAtGuides => ("Seiten an Hilfslinien aufteilen", "Split pages at guides"),
             Overlay => ("Überlagern", "Overlay"),
             Rotate180 => ("Um 180° drehen", "Rotate 180°"),
             RemoveCropped => ("Abgeschnittene Inhalte entfernen", "Remove cropped content"),
@@ -766,7 +701,6 @@ impl Cmd {
             About => ("Über", "About"),
             FileAssociation => ("Dateizuordnung", "File association"),
             Homepage => ("Homepage", "Homepage"),
-            Unavailable(_, de, en, _) => (de, en),
             View(v) => v.names(),
             Comment(c) => c.names(),
             Form(f) => f.names(),
@@ -839,6 +773,7 @@ impl Cmd {
             Panel(SidePanel::Comments) => Icon::Comments,
             Panel(SidePanel::Attachments) => Icon::Attachment,
             Panel(SidePanel::Fields) => Icon::Form,
+            Panel(SidePanel::Layers) => Icon::Background,
             Panel(SidePanel::Search) => Icon::Search,
             CommentList => Icon::Comments,
             ToggleAnnotations => Icon::Eye,
@@ -855,6 +790,8 @@ impl Cmd {
             ApplyRedactions => Icon::Redact,
             SearchRedact => Icon::Search,
             SignDocument => Icon::Signature,
+            Certify | CertifyInvisible => Icon::Lock,
+            TimeStampDocument => Icon::Info,
             VerifySignatures => Icon::Accessibility,
             HighlightFields => Icon::Form,
             ResetForm => Icon::Undo,
@@ -942,6 +879,7 @@ impl Cmd {
             MovePages => Icon::MoveDown,
             NUp => Icon::Merge,
             SplitPages => Icon::Split,
+            SplitAtGuides => Icon::Split,
             Overlay => Icon::Background,
             Rotate180 => Icon::Rotate180,
             RemoveCropped => Icon::Crop,
@@ -950,7 +888,6 @@ impl Cmd {
             ManageMarks(_) => Icon::Gear,
             BatesFiles => Icon::InsertFile,
             FitContent => Icon::FitPage,
-            Unavailable(_, _, _, icon) => icon,
             View(v) => v.icon(),
             Comment(c) => c.icon(),
             Form(f) => f.icon(),
@@ -986,6 +923,7 @@ impl Cmd {
             DeleteBlankPages => ("Leere Seiten löschen…", "Delete blank pages…"),
             SplitDocument => ("Dokument aufteilen…", "Split document…"),
             SplitPages => ("Seiten aufteilen…", "Split pages…"),
+            SplitAtGuides => ("Seiten an Hilfslinien aufteilen…", "Split pages at guides…"),
             CropPages => ("Seiten zuschneiden…", "Crop pages…"),
             RotatePages => ("Seiten drehen…", "Rotate pages…"),
             FitPage => ("An Seitengröße anpassen", "Fit page"),
@@ -1079,6 +1017,14 @@ fn explain(cmd: Cmd) -> Option<(&'static str, &'static str)> {
         Flatten => (
             "Anmerkungen fest in die Seite einbrennen; sie sind danach nicht mehr änderbar.",
             "Burn comments into the page; they can no longer be changed.",
+        ),
+        Certify | CertifyInvisible => (
+            "Als erste Signatur festlegen, welche Änderungen am Dokument danach noch erlaubt sind.",
+            "As the first signature, set which changes to the document are allowed afterwards.",
+        ),
+        TimeStampDocument => (
+            "Von einem Zeitstempeldienst bestätigen lassen, dass das Dokument jetzt in diesem Zustand vorliegt.",
+            "Have a time stamp authority confirm that the document exists in this state now.",
         ),
         PasswordProtect => (
             "Kennwort zum Öffnen oder Einschränkungen für Drucken und Ändern festlegen.",
@@ -1201,6 +1147,7 @@ pub fn tool_names(tool: Tool) -> (&'static str, &'static str) {
         Tool::FieldCombo => ("Menü", "Combo box"),
         Tool::FieldSignature => ("Signatur", "Signature field"),
         Tool::FieldDate => ("Datum", "Date"),
+        Tool::FieldBarcode => ("Barcode (QR-Code)", "Barcode (QR code)"),
         Tool::FieldImage => ("Bild", "Image"),
         Tool::Crop => ("Seite zuschneiden (Werkzeug)", "Crop page (tool)"),
         Tool::DynamicZoom => ("Stufenlose Vergrößerung", "Dynamic zoom"),
@@ -1216,15 +1163,14 @@ pub fn tool_names(tool: Tool) -> (&'static str, &'static str) {
     }
 }
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     fn lang(&self) -> Language {
         self.settings.language
     }
 
     /// Whether the command is implemented.
     pub fn cmd_implemented(&self, cmd: Cmd) -> bool {
-        use Cmd::*;
-        !matches!(cmd, Unavailable(..)) && !super::features::PENDING.contains(&cmd)
+        !super::features::PENDING.contains(&cmd)
     }
 
     /// Whether the command can be executed right now.
@@ -1247,10 +1193,13 @@ impl MrPdfApp {
             FirstPage | PrevPage => tab.is_some_and(|t| t.current_page > 0),
             NextPage | LastPage => tab.is_some_and(|t| t.current_page + 1 < t.doc.page_count()),
             CopyText => tab.is_some_and(|t| t.selection.is_some()),
+            Panel(SidePanel::Layers) => tab.is_some_and(|t| t.has_layers()),
             DeleteComment => tab.is_some_and(|t| t.selected_annot.is_some()),
             RemoveProtection => tab.is_some_and(|t| t.doc.is_encrypted() && t.doc.has_full_access()),
             PasswordProtect => tab.is_some_and(|t| t.doc.has_full_access()),
             SignDocument => tab.is_some_and(|t| !t.doc.is_encrypted()),
+            Certify | CertifyInvisible | TimeStampDocument => tab.is_some_and(|t| !t.doc.is_encrypted()),
+            SplitAtGuides => tab.is_some_and(|t| !t.guides.is_empty()),
             MovePageUp => tab.is_some_and(|t| t.current_page > 0),
             MovePageDown => tab.is_some_and(|t| t.current_page + 1 < t.doc.page_count()),
             DeletePages | SwapPages => tab.is_some_and(|t| t.doc.page_count() > 1),
@@ -1318,7 +1267,6 @@ impl MrPdfApp {
     pub fn cmd_tooltip(&self, cmd: Cmd) -> String {
         let lang = self.lang();
         match cmd {
-            Cmd::Unavailable(reason, ..) => format!("{}\n{}", cmd.label(lang), reason.reason(lang)),
             _ if !self.cmd_implemented(cmd) => format!(
                 "{}\n{}",
                 cmd.label(lang),
@@ -1507,7 +1455,10 @@ impl MrPdfApp {
                     error: None,
                 })
             }
-            SignDocument => self.open_sign_dialog(),
+            SignDocument => self.open_sign_dialog(None, false),
+            Certify => self.open_sign_dialog(Some(2), false),
+            CertifyInvisible => self.open_sign_dialog(Some(2), true),
+            TimeStampDocument => self.ask_time_stamp(),
             VerifySignatures => self.show_signatures(ctx),
             RemoveProtection => {
                 self.edit(ctx, |tab| tab.doc.unprotect());

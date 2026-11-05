@@ -4,7 +4,7 @@
 
 use egui::{Color32, Context, Pos2, Rect, Response, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 
-use super::{Dialog, MrPdfApp};
+use super::{Dialog, VersoloPdfApp};
 use crate::model::{AnnotStyle, Rgba};
 use crate::ui::i18n::Language;
 use crate::ui::tools::Tool;
@@ -175,7 +175,7 @@ fn sample(ui: &Ui, r: Rect, look: Look, preset: &Preset) {
     }
 }
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     /// Adds the hold-down palette to a tool button: draws the corner arrow,
     /// opens the palette after a long press and returns whether the click
     /// should still run the tool (not after a long press).

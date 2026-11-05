@@ -15,4 +15,4 @@ pub mod undo_names;
 pub mod view;
 pub mod widgets;
 
-pub use app::MrPdfApp;
+pub use app::VersoloPdfApp;

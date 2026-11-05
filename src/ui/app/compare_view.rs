@@ -12,7 +12,7 @@ use super::dialogs::{Action, Outcome};
 use super::page_dialogs::{footer, tr};
 use super::preview::{PreviewOpts, doc_preview, page_strip};
 use super::windows::MoveTarget;
-use super::{Dialog, MrPdfApp};
+use super::{Dialog, VersoloPdfApp};
 use crate::Document;
 use crate::compare::{self, DiffKind, Difference, Mark, Word};
 use crate::geometry::{PointF, RectF};
@@ -27,7 +27,7 @@ use crate::ui::tab::{CompareMark, ScrollRequest};
 pub enum Source {
     /// An open document (tab id).
     Tab(u64),
-    /// A file chosen in the dialog (loaded into `MrPdfApp::compare_files`).
+    /// A file chosen in the dialog (loaded into `VersoloPdfApp::compare_files`).
     File(PathBuf),
 }
 
@@ -141,7 +141,7 @@ impl Comparison {
     }
 }
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     /// The comparison shown, if any.
     pub fn comparison(&self) -> Option<&Comparison> {
         self.compare.as_deref()

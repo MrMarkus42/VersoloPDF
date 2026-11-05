@@ -189,7 +189,7 @@ pub fn create(files: &[NewFile], title: &str, de: bool) -> Result<Vec<u8>> {
     doc.trailer.set("Root", Object::Reference(catalog_id));
     let mut info = Dictionary::new();
     info.set("Title", text_string(title));
-    info.set("Producer", text_string("MrPDF"));
+    info.set("Producer", text_string("VersoloPDF"));
     let info_id = doc.add_object(info);
     doc.trailer.set("Info", Object::Reference(info_id));
     let mut out = Vec::new();

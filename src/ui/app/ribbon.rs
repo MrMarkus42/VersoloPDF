@@ -5,10 +5,10 @@
 use egui::{Context, Frame, Margin, Panel, RichText, Ui};
 
 use super::commands::Side;
-use super::commands::{Cmd, SEARCHABLE, Unavailable};
+use super::commands::{Cmd, SEARCHABLE};
 use super::keytips::Kind as KeyKind;
 use super::structure::MarkKind;
-use super::{MrPdfApp, RibbonTab, SidePanel};
+use super::{RibbonTab, SidePanel, VersoloPdfApp};
 use crate::model::{Rgba, StampPreset};
 use crate::pdf_edit::AnnotUpdate;
 use crate::ui::i18n::Language;
@@ -19,8 +19,6 @@ use crate::ui::widgets::{
     RibbonFit, big_button, big_menu_button, group, icon_button_named, menu_item, ribbon_fit, set_ribbon_fit,
     small_button, small_menu_button, swatch,
 };
-
-const UA: fn(Unavailable, &'static str, &'static str, Icon) -> Cmd = Cmd::Unavailable;
 
 /// An entry of a ribbon drop-down menu.
 pub(super) enum Entry {
@@ -45,7 +43,7 @@ fn tab_color(tab: RibbonTab) -> egui::Color32 {
     }
 }
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     pub(super) fn big(&mut self, ui: &mut Ui, ctx: &Context, cmd: Cmd) {
         let label = cmd.label(self.settings.language);
         let resp = big_button(ui, cmd.icon(), label, self.cmd_selected(cmd), self.cmd_enabled(cmd));
@@ -951,20 +949,7 @@ impl MrPdfApp {
         });
         group(ui, if de { "Verweise" } else { "Links" }, |ui| {
             self.big(ui, ctx, Cmd::Tool(Tool::Link));
-            self.smalls(
-                ui,
-                ctx,
-                &[
-                    Cmd::WebLinksCreate,
-                    Cmd::WebLinksRemove,
-                    UA(
-                        Unavailable::Barcodes,
-                        "Web-Links zu Barcodes erstellen",
-                        "Web links to barcodes",
-                        Icon::Link,
-                    ),
-                ],
-            );
+            self.smalls(ui, ctx, &[Cmd::WebLinksCreate, Cmd::WebLinksRemove]);
         });
         group(ui, t.tab_protect, |ui| {
             self.big(ui, ctx, Cmd::SignDocument);
@@ -1040,15 +1025,7 @@ impl MrPdfApp {
                 });
             });
             self.smalls(ui, ctx, &[v(V::Rulers), v(V::Grid), v(V::Guides)]);
-            self.smalls(
-                ui,
-                ctx,
-                &[
-                    UA(Unavailable::ThinLines, "Dünne Linien", "Thin lines", Icon::Line),
-                    v(V::Transparency),
-                    v(V::PageInfo),
-                ],
-            );
+            self.smalls(ui, ctx, &[v(V::Transparency), v(V::PageInfo)]);
             ui.vertical(|ui| {
                 let resp = crate::ui::widgets::small_menu_button(ui, Icon::Margins, "", true, false)
                     .on_hover_text(if de { "Einrasten" } else { "Snap" });
@@ -1060,7 +1037,7 @@ impl MrPdfApp {
                         Entry::Sep,
                         Entry::C(v(V::SnapGrid)),
                         Entry::C(v(V::SnapGuides)),
-                        Entry::C(UA(Unavailable::SnapObjects, "An Objekten", "To objects", Icon::Margins)),
+                        Entry::C(v(V::SnapObjects)),
                         Entry::Sep,
                         Entry::C(v(V::SnapSettings)),
                     ],
@@ -1121,9 +1098,6 @@ impl MrPdfApp {
                         Entry::C(v(V::ReopenClosed)),
                     ],
                 );
-                let pane = |de: &'static str, en: &'static str, icon: Icon| {
-                    Entry::C(UA(Unavailable::Pane, de, en, icon))
-                };
                 self.small_menu(
                     ui,
                     ctx,
@@ -1135,21 +1109,10 @@ impl MrPdfApp {
                         Entry::C(Cmd::Panel(SidePanel::Comments)),
                         Entry::C(Cmd::Panel(SidePanel::Attachments)),
                         Entry::C(Cmd::Panel(SidePanel::Search)),
-                        pane("Digitale Signaturen", "Digital signatures", Icon::Signature),
-                        pane("Ebenen", "Layers", Icon::Thumbnails),
-                        pane("Inhalt", "Content", Icon::TextBox),
-                        pane("Sprungmarken", "Destinations", Icon::Bookmarks),
-                        pane("3D-Modellbaum", "3D model tree", Icon::Thumbnails),
-                        Entry::Sep,
-                        pane("Struktur", "Structure", Icon::Accessibility),
-                        pane("Strukturreihenfolge", "Structure order", Icon::Accessibility),
+                        Entry::C(Cmd::Panel(SidePanel::Layers)),
                         Entry::Sep,
                         Entry::C(v(V::LoupeWindow)),
                         Entry::C(v(V::PanZoom)),
-                        pane("Stempelpalette", "Stamp palette", Icon::Stamp),
-                        Entry::Sep,
-                        pane("Rechtschreibprüfung", "Spell checking", Icon::SpellCheck),
-                        pane("Verlauf", "History", Icon::Undo),
                         Entry::Sep,
                         Entry::C(Cmd::ToggleProperties),
                         Entry::C(Cmd::ToggleSidebar),
@@ -1221,16 +1184,6 @@ impl MrPdfApp {
                 ui.horizontal(|ui| {
                     self.icon(ui, ctx, v(V::ReadFields));
                     self.icon(ui, ctx, v(V::ReadAnnots));
-                    self.icon(
-                        ui,
-                        ctx,
-                        UA(
-                            Unavailable::Highlighting,
-                            "Wörter hervorheben",
-                            "Highlight words",
-                            Icon::Highlight,
-                        ),
-                    );
                     self.icon(ui, ctx, v(V::ReadFollow));
                 });
             });
@@ -1267,29 +1220,8 @@ impl MrPdfApp {
         let de = self.settings.language == Language::German;
         self.tools_group(ui, ctx);
         group(ui, if de { "Digitale Signatur" } else { "Digital signature" }, |ui| {
-            self.smalls(
-                ui,
-                ctx,
-                &[
-                    Cmd::SignDocument,
-                    Cmd::VerifySignatures,
-                    UA(Unavailable::Signatures, "Signaturen einfügen", "Insert signatures", Icon::Signature),
-                ],
-            );
-            self.smalls(
-                ui,
-                ctx,
-                &[
-                    UA(Unavailable::Signatures, "Zertifizieren", "Certify", Icon::Lock),
-                    UA(
-                        Unavailable::Signatures,
-                        "Zertifizieren (unsichtbar)",
-                        "Certify (invisible)",
-                        Icon::Lock,
-                    ),
-                    UA(Unavailable::Signatures, "Zeitstempel", "Time stamp", Icon::Info),
-                ],
-            );
+            self.smalls(ui, ctx, &[Cmd::SignDocument, Cmd::VerifySignatures]);
+            self.smalls(ui, ctx, &[Cmd::Certify, Cmd::CertifyInvisible, Cmd::TimeStampDocument]);
         });
         group(ui, if de { "Unterschrift und Initialen" } else { "Signature and initials" }, |ui| {
             self.big(ui, ctx, Cmd::Tool(Tool::Signature));
@@ -1319,12 +1251,6 @@ impl MrPdfApp {
                     Entry::C(Cmd::InsertBlank),
                     Entry::C(Cmd::InsertClipboard),
                     Entry::C(Cmd::InsertImages),
-                    Entry::C(UA(
-                        Unavailable::Scanner,
-                        "Gescannte Seiten einfügen…",
-                        "Insert scanned pages…",
-                        Icon::Camera,
-                    )),
                     Entry::C(Cmd::InsertText),
                     Entry::C(Cmd::InsertRtf),
                 ],
@@ -1345,16 +1271,7 @@ impl MrPdfApp {
                     ctx,
                     Icon::Split,
                     ("Aufteilen", "Split"),
-                    &[
-                        Entry::C(Cmd::SplitDocument),
-                        Entry::C(Cmd::SplitPages),
-                        Entry::C(UA(
-                            Unavailable::Guides,
-                            "Seiten an Hilfslinien aufteilen",
-                            "Split pages at guides",
-                            Icon::Split,
-                        )),
-                    ],
+                    &[Entry::C(Cmd::SplitDocument), Entry::C(Cmd::SplitPages), Entry::C(Cmd::SplitAtGuides)],
                 );
                 self.small(ui, ctx, Cmd::DuplicatePages);
             });
@@ -1445,7 +1362,6 @@ impl MrPdfApp {
         let de = self.settings.language == Language::German;
         self.tools_group(ui, ctx);
         group(ui, if de { "Erstellen" } else { "Create" }, |ui| {
-            self.big(ui, ctx, UA(Unavailable::Scanner, "Scannen", "Scan", Icon::Camera));
             self.big_menu(
                 ui,
                 ctx,
@@ -1470,15 +1386,6 @@ impl MrPdfApp {
         group(ui, if de { "Texterkennung" } else { "Text recognition" }, |ui| {
             self.big(ui, ctx, Cmd::RecognizeText);
         });
-        group(ui, if de { "Seiten erweitern" } else { "Enhance pages" }, |ui| {
-            for (de_label, en) in [
-                ("Gescannte Seiten optimieren", "Optimize scanned pages"),
-                ("Seiten begradigen", "Deskew pages"),
-                ("Gescannte Seiten korrigieren", "Correct scanned pages"),
-            ] {
-                self.big(ui, ctx, UA(Unavailable::ScanCleanup, de_label, en, Icon::Image));
-            }
-        });
         group(ui, if de { "Farben umwandeln" } else { "Convert colours" }, |ui| {
             self.big(ui, ctx, Cmd::Grayscale);
             self.big(ui, ctx, Cmd::RecolorPages);
@@ -1498,7 +1405,22 @@ impl MrPdfApp {
         let de = self.settings.language == Language::German;
         group(ui, if de { "Barrierefreiheit" } else { "Accessibility" }, |ui| {
             self.big(ui, ctx, Cmd::AccessibilityCheck);
-            self.big(ui, ctx, UA(Unavailable::Speech, "Vorlesen", "Read aloud", Icon::Accessibility));
+            // The same read aloud commands as in "Ansicht".
+            use super::view_cmds::ViewCmd as R;
+            self.big_menu(
+                ui,
+                ctx,
+                Icon::Accessibility,
+                ("Vorlesen", "Read aloud"),
+                &[
+                    Entry::C(Cmd::View(R::ReadStart)),
+                    Entry::C(Cmd::View(R::ReadPage)),
+                    Entry::C(Cmd::View(R::ReadToEnd)),
+                    Entry::C(Cmd::View(R::ReadSelection)),
+                    Entry::Sep,
+                    Entry::C(Cmd::View(R::ReadStop)),
+                ],
+            );
         });
     }
 

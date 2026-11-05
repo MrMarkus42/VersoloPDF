@@ -49,7 +49,7 @@ impl Rgba {
     }
 }
 
-/// Annotation sub types MrPDF knows about.
+/// Annotation sub types VersoloPDF knows about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AnnotKind {
     Note,

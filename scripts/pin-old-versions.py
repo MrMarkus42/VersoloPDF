@@ -16,7 +16,7 @@ import time
 import tomllib
 import urllib.request
 
-USER_AGENT = "mrpdf-release-age-check (https://github.com/MrMarkus42/MrPDF)"
+USER_AGENT = "versolopdf-release-age-check (https://github.com/MrMarkus42/VersoloPDF)"
 
 
 def versions(name):

@@ -8,7 +8,7 @@ use super::bookmark_dialogs::{
 };
 use super::dialogs::{Action, Outcome};
 use super::page_dialogs::{footer, tr};
-use super::{Dialog, MrPdfApp, PaperChoice};
+use super::{Dialog, PaperChoice, VersoloPdfApp};
 use crate::document::{LinkOptions, TextBookmarkOptions, TocLevel, TocOptions, TocPageNumbers};
 use crate::model::Rgba;
 use crate::outline_edit::{Appearance, Finding, Placement, Problem};
@@ -116,7 +116,7 @@ fn rule_summary(de: bool, r: &TextRule) -> String {
     parts.join("\n")
 }
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     pub(super) fn new_text_rules_state(&mut self) -> FromTextState {
         let rules = self
             .tab()
@@ -445,7 +445,7 @@ impl MrPdfApp {
                 stop_words: s.stop_on.then(|| super::bookmark_dialogs::word_list(&s.stop_words)),
                 skip_repeated: s.skip_repeated,
             };
-            action = Some(Box::new(move |app: &mut MrPdfApp, ctx: &egui::Context| {
+            action = Some(Box::new(move |app: &mut VersoloPdfApp, ctx: &egui::Context| {
                 let result = app.tab().map(|t| t.doc.add_text_bookmarks(&opts));
                 let label = if app.bm_de() { "Neue Lesezeichen" } else { "New bookmarks" };
                 app.outline_result(ctx, result, label);
@@ -475,7 +475,7 @@ impl Default for CheckState {
     }
 }
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     pub(super) fn check_dialog(&mut self, ui: &mut Ui, s: &mut CheckState) -> (Outcome, Option<Action>) {
         let de = self.bm_de();
         let ctx = ui.ctx().clone();
@@ -678,7 +678,7 @@ const LEADERS: [(Option<Leader>, &str); 4] = [
     (None, "Kapitel"),
 ];
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     pub(super) fn toc_dialog(&mut self, ui: &mut Ui, s: &mut TocState) -> (Outcome, Option<Action>) {
         let de = self.bm_de();
         let n = self.active_tab().map_or(0, |t| t.doc.page_count());
@@ -983,7 +983,7 @@ impl MrPdfApp {
                 TocSize::Standard => Some(orient(s.paper.size().unwrap_or(crate::report::A4))),
                 TocSize::Custom => Some(orient(s.custom)),
             };
-            action = Some(Box::new(move |app: &mut MrPdfApp, ctx: &egui::Context| {
+            action = Some(Box::new(move |app: &mut VersoloPdfApp, ctx: &egui::Context| {
                 let result = app.tab().map(|t| t.doc.insert_toc_with(&opts));
                 let label = if app.bm_de() { "Eingefügte Seiten" } else { "Inserted pages" };
                 app.outline_result(ctx, result, label);
@@ -1037,7 +1037,7 @@ impl Default for LinksState {
     }
 }
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     pub(super) fn links_dialog(&mut self, ui: &mut Ui, s: &mut LinksState) -> (Outcome, Option<Action>) {
         let de = self.bm_de();
         let (n, cur) = self.active_tab().map_or((0, 0), |t| (t.doc.page_count(), t.current_page));

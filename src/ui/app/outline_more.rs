@@ -5,7 +5,7 @@ use egui::{Context, RichText, Ui};
 
 use super::commands::Cmd;
 use super::dialogs::{Action, Outcome, buttons};
-use super::{Dialog, MrPdfApp};
+use super::{Dialog, VersoloPdfApp};
 use crate::outline_edit::Zoom;
 use crate::ui::pickers::parse_pages;
 
@@ -23,7 +23,7 @@ fn same_kind(a: Zoom, b: Zoom) -> bool {
     std::mem::discriminant(&a) == std::mem::discriminant(&b)
 }
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     fn ol_de(&self) -> bool {
         self.settings.language == crate::ui::i18n::Language::German
     }

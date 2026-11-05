@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use egui::Context;
 
-use super::{AfterSave, Dialog, InsertPosition, MrPdfApp, RangePurpose};
+use super::{AfterSave, Dialog, InsertPosition, RangePurpose, VersoloPdfApp};
 use crate::document::Document;
 use crate::error::Error;
 use crate::model::AnnotKind;
@@ -59,7 +59,7 @@ pub fn is_safe_uri(uri: &str) -> bool {
         && uri.len() <= 4096
 }
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     pub(super) fn show_error(&mut self, err: &Error) {
         let t = self.t();
         let text = error_text(t, err);
@@ -73,12 +73,12 @@ impl MrPdfApp {
         let de = self.settings.language == crate::ui::i18n::Language::German;
         let text = if de {
             format!(
-                "MrPDF wurde beim letzten Mal unerwartet beendet. Dafür wurde ein Fehlerbericht gespeichert:\n\n{}\n\nÜber Hilfe › Fehlerprotokoll öffnen finden Sie ihn wieder; Sie können ihn dem Entwickler schicken. Er enthält keine Inhalte Ihrer Dokumente. Nicht gespeicherte Änderungen bietet MrPDF zur Wiederherstellung an, sofern vorhanden.",
+                "VersoloPDF wurde beim letzten Mal unerwartet beendet. Dafür wurde ein Fehlerbericht gespeichert:\n\n{}\n\nÜber Hilfe › Fehlerprotokoll öffnen finden Sie ihn wieder; Sie können ihn dem Entwickler schicken. Er enthält keine Inhalte Ihrer Dokumente. Nicht gespeicherte Änderungen bietet VersoloPDF zur Wiederherstellung an, sofern vorhanden.",
                 report.display()
             )
         } else {
             format!(
-                "MrPDF closed unexpectedly last time. An error report was saved:\n\n{}\n\nHelp › Open error log shows it again; you can send it to the developer. It contains nothing of your documents. Unsaved changes are offered for recovery where available.",
+                "VersoloPDF closed unexpectedly last time. An error report was saved:\n\n{}\n\nHelp › Open error log shows it again; you can send it to the developer. It contains nothing of your documents. Unsaved changes are offered for recovery where available.",
                 report.display()
             )
         };
@@ -225,7 +225,7 @@ impl MrPdfApp {
         let t = self.t();
         let de = self.settings.language == crate::ui::i18n::Language::German;
         let name = self.tabs[index].doc.display_name().to_string();
-        // File types that MrPDF can write; the type is taken
+        // File types that VersoloPDF can write; the type is taken
         // from the extension of the chosen name.
         let mut dialog = rfd::FileDialog::new()
             .set_title(t.save_as)
@@ -509,7 +509,7 @@ impl MrPdfApp {
         });
     }
 
-    /// MrPDF's print dialog ("Drucken").
+    /// VersoloPDF's print dialog ("Drucken").
     pub fn open_print_dialog(&mut self, _ctx: &Context) {
         self.open_print_dialog_for(false);
     }

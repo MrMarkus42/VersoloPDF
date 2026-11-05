@@ -1,5 +1,5 @@
 //! "Medien" of the ribbon tab "Anmerkungen": video, audio and 3D files are
-//! embedded as screen and 3D annotations, recordings as sound notes. MrPDF
+//! embedded as screen and 3D annotations, recordings as sound notes. VersoloPDF
 //! does not play media itself; "Abspielen" hands the embedded file to the
 //! program the system uses for it.
 

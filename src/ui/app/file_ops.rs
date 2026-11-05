@@ -8,11 +8,11 @@ use egui::{Context, RichText, Ui};
 
 use super::commands::Cmd;
 use super::dialogs::{Action, Outcome, buttons};
-use super::{Dialog, MrPdfApp};
+use super::{Dialog, VersoloPdfApp};
 use crate::files::{self, RecoveryEntry};
 use crate::ui::i18n::Language;
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     fn fo_de(&self) -> bool {
         self.settings.language == Language::German
     }

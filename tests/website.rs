@@ -2,7 +2,7 @@
 //! normal test run:
 //!
 //! ```text
-//! MRPDF_SCREENSHOT_DIR=website/img cargo test --test website -- --ignored
+//! VERSOLOPDF_SCREENSHOT_DIR=website/img cargo test --test website -- --ignored
 //! ```
 //!
 //! The sample document is generated here (a made-up annual report), so no
@@ -14,29 +14,29 @@ use std::path::{Path, PathBuf};
 
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
-use mrpdf::geometry::{PointF, RectF};
-use mrpdf::model::{AnnotKind, AnnotStyle, Rgba};
-use mrpdf::pdf_edit::NewAnnotation;
-use mrpdf::ui::MrPdfApp;
-use mrpdf::ui::app::commands::Cmd;
-use mrpdf::ui::i18n::Language;
-use mrpdf::ui::settings::Settings;
 use pdfium_render::prelude::*;
+use versolopdf::geometry::{PointF, RectF};
+use versolopdf::model::{AnnotKind, AnnotStyle, Rgba};
+use versolopdf::pdf_edit::NewAnnotation;
+use versolopdf::ui::VersoloPdfApp;
+use versolopdf::ui::app::commands::Cmd;
+use versolopdf::ui::i18n::Language;
+use versolopdf::ui::settings::Settings;
 
 fn out_dir() -> PathBuf {
-    let dir = std::env::var_os("MRPDF_SCREENSHOT_DIR")
+    let dir = std::env::var_os("VERSOLOPDF_SCREENSHOT_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/website-screenshots"));
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }
 
-fn save(h: &mut Harness<'_, MrPdfApp>, name: &str) {
+fn save(h: &mut Harness<'_, VersoloPdfApp>, name: &str) {
     let img = h.render().expect("rendering");
     img.save(out_dir().join(format!("{name}.png"))).unwrap();
 }
 
-fn harness(files: Vec<PathBuf>, dark: bool, language: Language) -> Harness<'static, MrPdfApp> {
+fn harness(files: Vec<PathBuf>, dark: bool, language: Language) -> Harness<'static, VersoloPdfApp> {
     let settings = Settings {
         language,
         author: "Mr. M".into(),
@@ -46,19 +46,19 @@ fn harness(files: Vec<PathBuf>, dark: bool, language: Language) -> Harness<'stat
     };
     Harness::builder().with_size(egui::vec2(1360.0, 860.0)).with_max_steps(64).wgpu().build_eframe(
         move |cc| {
-            let mut app = MrPdfApp::with_settings(&cc.egui_ctx, settings, files);
+            let mut app = VersoloPdfApp::with_settings(&cc.egui_ctx, settings, files);
             app.set_recovery_dir(None);
             app
         },
     )
 }
 
-fn tab(h: &mut Harness<'_, MrPdfApp>, label: &str) {
+fn tab(h: &mut Harness<'_, VersoloPdfApp>, label: &str) {
     h.get_all_by_label(label).next().unwrap().click();
     h.run_steps(4);
 }
 
-fn quick(h: &mut Harness<'_, MrPdfApp>, query: &str) {
+fn quick(h: &mut Harness<'_, VersoloPdfApp>, query: &str) {
     h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Period);
     h.run_steps(3);
     h.input_mut().events.push(egui::Event::Text(query.into()));
@@ -67,14 +67,14 @@ fn quick(h: &mut Harness<'_, MrPdfApp>, query: &str) {
     h.run_steps(8);
 }
 
-fn fit_page(h: &mut Harness<'_, MrPdfApp>) {
-    h.state_mut().active_tab_mut().unwrap().zoom_mode = mrpdf::ui::view::ZoomMode::FitPage;
+fn fit_page(h: &mut Harness<'_, VersoloPdfApp>) {
+    h.state_mut().active_tab_mut().unwrap().zoom_mode = versolopdf::ui::view::ZoomMode::FitPage;
     h.run_steps(8);
 }
 
 /// A registration form with labels; the fields are added by `add_form_fields`.
 fn form_page_pdf() -> Vec<u8> {
-    let pdfium = mrpdf::engine::pdfium().unwrap();
+    let pdfium = versolopdf::engine::pdfium().unwrap();
     let mut doc = pdfium.create_new_pdf().unwrap();
     let regular = doc.fonts_mut().helvetica();
     let bold = doc.fonts_mut().helvetica_bold();
@@ -127,9 +127,9 @@ fn form_page_pdf() -> Vec<u8> {
     doc.save_to_bytes().unwrap()
 }
 
-fn add_form_fields(h: &mut Harness<'_, MrPdfApp>) {
-    use mrpdf::forms::{ButtonAction, NewFieldKind};
-    use mrpdf::model::FieldKind;
+fn add_form_fields(h: &mut Harness<'_, VersoloPdfApp>) {
+    use versolopdf::forms::{ButtonAction, NewFieldKind};
+    use versolopdf::model::FieldKind;
     let tab = h.state_mut().active_tab_mut().unwrap();
     let r = |x: f32, y: f32, w: f32, hh: f32| RectF::new(x, y, x + w, y + hh);
     let d = &mut tab.doc;
@@ -180,7 +180,7 @@ fn add_form_fields(h: &mut Harness<'_, MrPdfApp>) {
     h.run_steps(8);
 }
 
-fn run(h: &mut Harness<'_, MrPdfApp>, cmd: Cmd) {
+fn run(h: &mut Harness<'_, VersoloPdfApp>, cmd: Cmd) {
     let ctx = h.ctx.clone();
     h.state_mut().run(&ctx, cmd);
     h.run_steps(6);
@@ -207,7 +207,7 @@ fn wrap(text: &str, width: usize) -> Vec<String> {
 
 /// A three-page sample report with a chart, figures and a table.
 fn report_pdf() -> Vec<u8> {
-    let pdfium = mrpdf::engine::pdfium().unwrap();
+    let pdfium = versolopdf::engine::pdfium().unwrap();
     let mut doc = pdfium.create_new_pdf().unwrap();
     let regular = doc.fonts_mut().helvetica();
     let bold = doc.fonts_mut().helvetica_bold();
@@ -404,7 +404,7 @@ fn style(color: Rgba) -> AnnotStyle {
 }
 
 /// Comments as a reviewer would add them.
-fn annotate(h: &mut Harness<'_, MrPdfApp>) {
+fn annotate(h: &mut Harness<'_, VersoloPdfApp>) {
     let tab = h.state_mut().active_tab_mut().unwrap();
     let mut hl = NewAnnotation::new(AnnotKind::Highlight, style(Rgba { r: 255, g: 226, b: 52, a: 255 }));
     // Second line of the first paragraph.

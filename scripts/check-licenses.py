@@ -110,7 +110,7 @@ def main():
         with open("THIRD_PARTY_NOTICES.md", "w", encoding="utf-8") as f:
             f.write("# Third-party software\n\n")
             f.write(
-                "MrPDF uses the following components. Their licence texts are\n"
+                "VersoloPDF uses the following components. Their licence texts are\n"
                 "included in their source distributions (crates.io) and, for\n"
                 "PDFium, in the `licenses/` folder shipped next to the program.\n\n"
             )

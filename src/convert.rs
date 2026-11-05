@@ -824,7 +824,7 @@ pub(crate) fn docx_package(title: &str, body: &str, images: &[&[u8]], password: 
     }
     doc_rels.push_str("</Relationships>");
     let core = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<cp:coreProperties xmlns:cp=\"http://schemas.openxmlformats.org/package/2006/metadata/core-properties\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:title>{}</dc:title><dc:creator>MrPDF</dc:creator></cp:coreProperties>",
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<cp:coreProperties xmlns:cp=\"http://schemas.openxmlformats.org/package/2006/metadata/core-properties\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:title>{}</dc:title><dc:creator>VersoloPDF</dc:creator></cp:coreProperties>",
         xml_escape(title)
     );
     let mut zip = ZipWriter::default();

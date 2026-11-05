@@ -6,10 +6,10 @@ use std::path::PathBuf;
 
 use egui::{Context, RichText, Ui};
 
-use super::commands::{Cmd, Unavailable};
+use super::commands::Cmd;
 use super::dialogs::{Action, Outcome};
 use super::view_cmds::ViewCmd;
-use super::{Dialog, MrPdfApp, SidePanel};
+use super::{Dialog, SidePanel, VersoloPdfApp};
 use crate::form_fill;
 use crate::ui::i18n::Language;
 use crate::ui::icons::Icon;
@@ -17,8 +17,6 @@ use crate::ui::settings::FieldGroup;
 use crate::ui::tab::AnnotRef;
 use crate::ui::tools::Tool;
 use crate::ui::widgets::{group, small_menu_button};
-
-const UA: fn(Unavailable, &'static str, &'static str, Icon) -> Cmd = Cmd::Unavailable;
 
 /// The commands; used as `Cmd::Form(..)`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -101,7 +99,7 @@ fn tr(de: bool, g: &'static str, e: &'static str) -> &'static str {
     if de { g } else { e }
 }
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     fn fc_de(&self) -> bool {
         self.settings.language == Language::German
     }
@@ -185,7 +183,7 @@ impl MrPdfApp {
             ] {
                 self.big(ui, ctx, Cmd::Tool(tool));
             }
-            self.big(ui, ctx, UA(Unavailable::Barcodes, "Barcode", "Barcode", Icon::Barcode));
+            self.big(ui, ctx, Cmd::Tool(Tool::FieldBarcode));
             self.big(ui, ctx, Cmd::Tool(Tool::FieldDate));
             self.big(ui, ctx, Cmd::Tool(Tool::FieldImage));
             ui.vertical(|ui| {
@@ -207,16 +205,6 @@ impl MrPdfApp {
             self.big(ui, ctx, Cmd::Form(FormCmd::FillForms));
         });
         group(ui, "JavaScript", |ui| {
-            self.big(
-                ui,
-                ctx,
-                UA(Unavailable::JavaScript, "JavaScript-Konsole", "JavaScript console", Icon::Console),
-            );
-            self.big(
-                ui,
-                ctx,
-                UA(Unavailable::JavaScript, "JavaScript-Einstellungen", "JavaScript settings", Icon::Gear),
-            );
             self.smalls(
                 ui,
                 ctx,
@@ -249,7 +237,6 @@ impl MrPdfApp {
                     chosen = Some(cmd);
                 }
             }
-            self.menu_row(ui, UA(Unavailable::Barcodes, "Barcodes", "Barcodes", Icon::Barcode));
             ui.separator();
             let cmd = Cmd::Form(FormCmd::RequiredOnly);
             if self.menu_row(ui, cmd) {
@@ -361,7 +348,7 @@ impl MrPdfApp {
     fn email_form_data(&mut self, ctx: &Context) {
         let Some(tab) = self.tab() else { return };
         let stem = tab.doc.display_name().trim_end_matches(".pdf").trim_end_matches(".PDF").to_string();
-        let dir = std::env::temp_dir().join("mrpdf-formdata");
+        let dir = std::env::temp_dir().join("versolopdf-formdata");
         let path = dir.join(format!("{}.xfdf", stem.replace(['/', '\\', ':'], "_")));
         let result = std::fs::create_dir_all(&dir)
             .map_err(|e| crate::Error::Io { path: dir.clone(), source: e })
@@ -674,8 +661,8 @@ impl MrPdfApp {
         ui.label(
             RichText::new(tr(
                 de,
-                "MrPDF führt kein JavaScript aus. Hier sehen Sie, welche Skripte das Dokument enthält.",
-                "MrPDF does not run JavaScript. This shows which scripts the document contains.",
+                "VersoloPDF führt kein JavaScript aus. Hier sehen Sie, welche Skripte das Dokument enthält.",
+                "VersoloPDF does not run JavaScript. This shows which scripts the document contains.",
             ))
             .weak(),
         );

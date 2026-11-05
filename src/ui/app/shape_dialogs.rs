@@ -10,7 +10,7 @@ use super::commands::{Cmd, Side};
 use super::dialogs::{Action, Outcome};
 use super::page_dialogs::{footer, paper_combo, tr};
 use super::preview::{doc_preview, page_strip};
-use super::{Dialog, MrPdfApp, PaperChoice};
+use super::{Dialog, PaperChoice, VersoloPdfApp};
 use crate::pages::{BoxKind, CropOptions, Margins, ResizeSpec, SizeMode};
 use crate::ui::i18n::Language;
 use crate::ui::pickers::{
@@ -159,7 +159,7 @@ fn anchor_grid(ui: &mut Ui, anchor: &mut u8) {
     }
 }
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     fn sd_de(&self) -> bool {
         self.settings.language == Language::German
     }

@@ -2,7 +2,7 @@
 //!
 //! All edits are written as *incremental updates*: the original bytes are
 //! kept unchanged and the modified objects are appended. This keeps the file
-//! intact even for constructs MrPDF does not understand.
+//! intact even for constructs VersoloPDF does not understand.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -111,7 +111,7 @@ pub struct AnnotDetails {
     pub opacity: f32,
     pub font_size: f32,
     pub subject: String,
-    /// True if MrPDF can regenerate the appearance of this annotation.
+    /// True if VersoloPDF can regenerate the appearance of this annotation.
     pub restylable: bool,
     /// Ends of a line, vertices of a polygon or polyline (PDF space).
     pub points: Vec<PointF>,
@@ -304,7 +304,7 @@ pub fn format_pdf_date(raw: &str) -> String {
 fn unique_name() -> String {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
-    format!("mrpdf-{nanos:x}-{}", COUNTER.fetch_add(1, Ordering::Relaxed))
+    format!("versolopdf-{nanos:x}-{}", COUNTER.fetch_add(1, Ordering::Relaxed))
 }
 
 pub(crate) fn real(v: f32) -> Object {
@@ -505,7 +505,7 @@ fn ap_input_from_dict(dict: &Dictionary) -> Option<ApInput> {
         _ => string(dict, b"Contents").unwrap_or_default(),
     };
     if kind == AnnotKind::FreeText {
-        // MrPDF stores the text box background in /IC like other shapes.
+        // VersoloPDF stores the text box background in /IC like other shapes.
         input.fill = read_color(dict, b"IC");
         let leader = read_points(&numbers(dict.get(b"CL").ok()));
         if leader.len() >= 2 {

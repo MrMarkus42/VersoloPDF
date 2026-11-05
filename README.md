@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="assets/mrpdf.png" width="96" alt="MrPDF">
+  <img src="assets/versolopdf.png" width="96" alt="VersoloPDF">
 </p>
 
-<h1 align="center">MrPDF</h1>
+<h1 align="center">VersoloPDF</h1>
 
 <p align="center">
   <b>The free PDF editor with a familiar ribbon.</b><br>
@@ -10,32 +10,35 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/MrMarkus42/MrPDF/releases/latest"><b>Download for Windows</b></a> ·
-  <a href="https://mrmarkus42.github.io/MrPDF/">Website</a> ·
+  <a href="https://github.com/MrMarkus42/VersoloPDF/releases/latest"><b>Download for Windows</b></a> ·
+  <a href="https://mrmarkus42.github.io/VersoloPDF/">Website</a> ·
   <a href="CHANGELOG.md">What's new</a> ·
   <a href="#deutsch">Deutsch</a>
 </p>
 
 <p align="center">
-  <img src="website/img/hero.png" width="860" alt="MrPDF with an annual report, comments and the ribbon">
+  <img src="website/img/hero.png" width="860" alt="VersoloPDF with an annual report, comments and the ribbon">
 </p>
 
 ## Features
 
 * **Viewing** – fast rendering with PDFium, tabs and tab groups, separate
   windows, continuous / single / two-page layouts, zoom from 5 % to 6400 %,
-  rulers and grid, dark mode, full screen and presentations, read aloud
+  rulers and grid, layers, dark mode, full screen and presentations, read
+  aloud
 * **Comments** – highlight, underline, strike-out, notes, text boxes,
   typewriter, callouts, shapes, clouds, freehand, measurements, stamps and
   image stamps, file attachments; comment list, summary as PDF, XFDF exchange,
   flattening. Every comment has its own appearance, so it looks the same in
   every PDF viewer
 * **Forms** – fill in all common field types; design forms with text,
-  check box, radio, list, combo, date, image, button and signature fields;
+  check box, radio, list, combo, date, image, button, QR code and signature
+  fields;
   detect fields automatically; reset, import and export form data; fill one
   form per row of a CSV file
 * **Digital signatures** – sign with your own digital ID (.pfx/.p12, or a new
-  one created in MrPDF), visible or invisible, PAdES; check signatures
+  one created in VersoloPDF), visible or invisible, PAdES; certify documents;
+  time stamps from a time stamp authority (RFC 3161); check signatures
 * **Pages** – insert, delete, extract, rotate, move, duplicate, replace, crop,
   resize, merge and split documents, several pages per sheet, watermarks,
   backgrounds, headers and footers, Bates numbering, page labels – with live
@@ -60,13 +63,13 @@
 
 ## Installation (Windows)
 
-1. Download `MrPDF-<version>-windows-x64.zip` from the
-   [latest release](https://github.com/MrMarkus42/MrPDF/releases/latest).
-2. Unpack it into a folder of your choice, e.g. `Documents\MrPDF`.
-3. Start `MrPDF.exe`. No installation and no administrator rights needed.
+1. Download `VersoloPDF-<version>-windows-x64.zip` from the
+   [latest release](https://github.com/MrMarkus42/VersoloPDF/releases/latest).
+2. Unpack it into a folder of your choice, e.g. `Documents\VersoloPDF`.
+3. Start `VersoloPDF.exe`. No installation and no administrator rights needed.
 
-If the window stays black on older graphics cards, start MrPDF with
-`MrPDF.exe --opengl`. New versions can be installed from
+If the window stays black on older graphics cards, start VersoloPDF with
+`VersoloPDF.exe --opengl`. New versions can be installed from
 *File › Settings › Updates*.
 
 ## Building from source
@@ -85,7 +88,7 @@ Cross-compiling and packaging for Windows on Linux (MinGW):
 
 ```bash
 rustup target add x86_64-pc-windows-gnu
-scripts/package-windows.sh      # creates dist/MrPDF-<version>-windows-x64.zip
+scripts/package-windows.sh      # creates dist/VersoloPDF-<version>-windows-x64.zip
 ```
 
 ### Tests
@@ -107,10 +110,10 @@ library next to the binary. Printing uses CUPS (`lp`).
 
 ## Licence
 
-MrPDF is dual-licensed under the [MIT](LICENSE-MIT) or
+VersoloPDF is dual-licensed under the [MIT](LICENSE-MIT) or
 [Apache 2.0](LICENSE-APACHE) licence, at your option. All dependencies use
 permissive licences (see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md));
-PDFium is licensed under BSD-3-Clause / Apache-2.0. MrPDF is an independent
+PDFium is licensed under BSD-3-Clause / Apache-2.0. VersoloPDF is an independent
 project and not affiliated with any commercial PDF software vendor.
 
 See [SECURITY.md](SECURITY.md) for the security design and how to report
@@ -120,15 +123,16 @@ vulnerabilities.
 
 ## Deutsch
 
-**MrPDF ist ein freier PDF-Editor mit vertrautem Menüband** – zum Ansehen,
+**VersoloPDF ist ein freier PDF-Editor mit vertrautem Menüband** – zum Ansehen,
 Kommentieren, Ausfüllen, Signieren, Organisieren und Umwandeln von
 PDF-Dateien. Quelloffen, ohne Konto und ohne Cloud.
 
 **Funktionen:** Tabs und eigene Fenster, verschiedene Seitenlayouts,
 Dunkelmodus, Vollbild und Vorlesen; Kommentare aller Art mit Stempeln,
 Messungen und Kommentarübersicht; Formulare ausfüllen und gestalten
-(inklusive Datums-, Bild-, Schaltflächen- und Signaturfeldern, automatischer
-Felderkennung und Serienausfüllung aus CSV); digitale Signaturen; Seiten
+(inklusive Datums-, Bild-, Schaltflächen-, QR-Code- und Signaturfeldern,
+automatischer Felderkennung und Serienausfüllung aus CSV); digitale Signaturen,
+Zertifizieren und Zeitstempel; Ebenen; Seiten
 einfügen, löschen, drehen, zuschneiden, zusammenfügen und aufteilen,
 Wasserzeichen, Kopf- und Fußzeilen, Bates-Nummern; Texte und Objekte
 bearbeiten; Lesezeichen-Werkzeuge; Dokumente vergleichen,
@@ -138,11 +142,11 @@ Befehlen (Strg+.), Tastaturbedienung des Menübands, Wiederherstellung nach
 Abstürzen, Updates direkt aus GitHub.
 
 **Installation:** Zip-Datei aus dem
-[neuesten Release](https://github.com/MrMarkus42/MrPDF/releases/latest)
-herunterladen, in einen beliebigen Ordner entpacken und `MrPDF.exe` starten –
+[neuesten Release](https://github.com/MrMarkus42/VersoloPDF/releases/latest)
+herunterladen, in einen beliebigen Ordner entpacken und `VersoloPDF.exe` starten –
 keine Installation und keine Administratorrechte nötig.
 
-**Webseite:** <https://mrmarkus42.github.io/MrPDF/>
+**Webseite:** <https://mrmarkus42.github.io/VersoloPDF/>
 
 **Lizenz:** MIT oder Apache-2.0 (nach Wahl). Alle verwendeten Bibliotheken
 stehen unter freizügigen Lizenzen.

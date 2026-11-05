@@ -1,4 +1,4 @@
-//! One program window: when MrPDF is started while it already runs (for
+//! One program window: when VersoloPDF is started while it already runs (for
 //! example by opening a second PDF in the Explorer), the new start hands its
 //! files to the running program, which opens them as tabs, and ends.
 //!
@@ -6,7 +6,7 @@
 //! operating system that only the same user on the same computer can use:
 //! a named pipe on Windows (remote clients rejected, other users may not
 //! write to it) and a Unix socket in a private folder (mode 0700) of
-//! MrPDF's data folder on Linux and macOS.
+//! VersoloPDF's data folder on Linux and macOS.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -14,7 +14,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-const MAGIC: &str = "MRPDF-OPEN-1";
+const MAGIC: &str = "VERSOLOPDF-OPEN-1";
 /// At most this many files per message (protects against floods).
 const MAX_FILES: usize = 200;
 /// How long a start waits for the running program to confirm.
@@ -47,14 +47,14 @@ impl Inbox {
 
 /// Result of [`start`].
 pub enum Start {
-    /// This is the only MrPDF: open the window.
+    /// This is the only VersoloPDF: open the window.
     First(Option<Inbox>),
-    /// The files were handed to the running MrPDF; this start ends.
+    /// The files were handed to the running VersoloPDF; this start ends.
     Forwarded,
 }
 
-/// Hands `files` to a running MrPDF, or prepares this start to receive the
-/// files of later starts. `dir` is MrPDF's data folder.
+/// Hands `files` to a running VersoloPDF, or prepares this start to receive the
+/// files of later starts. `dir` is VersoloPDF's data folder.
 pub fn start(dir: Option<&Path>, files: &[PathBuf]) -> Start {
     let Some(dir) = dir else { return Start::First(None) };
     if forward(dir, files).is_ok() {
@@ -105,7 +105,7 @@ fn listen(dir: &Path) -> std::io::Result<Inbox> {
     let (tx, rx) = channel();
     let waker: Arc<Mutex<Option<egui::Context>>> = Arc::default();
     let wake = waker.clone();
-    std::thread::Builder::new().name("mrpdf-instance".into()).spawn(move || {
+    std::thread::Builder::new().name("versolopdf-instance".into()).spawn(move || {
         loop {
             match listener.accept() {
                 Ok(conn) => {
@@ -168,7 +168,7 @@ fn allow_foreground() {
 
 #[cfg(unix)]
 mod transport {
-    //! Unix socket in a private folder of MrPDF's data folder.
+    //! Unix socket in a private folder of VersoloPDF's data folder.
 
     use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
     use std::os::unix::net::{UnixListener, UnixStream};
@@ -212,7 +212,7 @@ mod transport {
 #[cfg(windows)]
 #[allow(unsafe_code)]
 mod transport {
-    //! Named pipe `\\.\pipe\MrPDF-<hash of the data folder>`. All `unsafe`
+    //! Named pipe `\\.\pipe\VersoloPDF-<hash of the data folder>`. All `unsafe`
     //! blocks call documented Win32 functions with valid handles and
     //! buffers and check every result.
 
@@ -236,7 +236,7 @@ mod transport {
     fn pipe_name(dir: &Path) -> Vec<u16> {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         dir.hash(&mut h);
-        format!(r"\\.\pipe\MrPDF-{:016x}", h.finish()).encode_utf16().chain(std::iter::once(0)).collect()
+        format!(r"\\.\pipe\VersoloPDF-{:016x}", h.finish()).encode_utf16().chain(std::iter::once(0)).collect()
     }
 
     fn last_error() -> std::io::Error {
@@ -328,7 +328,7 @@ mod transport {
     }
 
     /// The server side. One instance of the pipe always waits, so a new
-    /// start never finds the name missing while MrPDF runs.
+    /// start never finds the name missing while VersoloPDF runs.
     pub struct Listener {
         name: Vec<u16>,
         next: HANDLE,

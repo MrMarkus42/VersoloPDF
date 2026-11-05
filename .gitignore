@@ -1,7 +1,7 @@
 /target
 /vendor/
 /dist/
-*.mrpdf-tmp
+*.versolopdf-tmp
 # Private working notes, not part of the repository.
 /docs/ANMERKUNGEN.md
 /docs/ANSICHT.md

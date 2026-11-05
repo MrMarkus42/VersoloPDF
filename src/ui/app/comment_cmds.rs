@@ -4,8 +4,8 @@
 
 use egui::{Context, RichText, Ui, vec2};
 
-use super::MrPdfApp;
-use super::commands::{Cmd, Unavailable};
+use super::VersoloPdfApp;
+use super::commands::Cmd;
 use super::dialogs::Outcome;
 use crate::model::{AnnotKind, AnnotStyle, Rgba};
 use crate::pdf_edit::NewAnnotation;
@@ -14,8 +14,6 @@ use crate::ui::icons::Icon;
 use crate::ui::tab::AnnotRef;
 use crate::ui::tools::Tool;
 use crate::ui::widgets::{big_menu_button, group, small_menu_button};
-
-const UA: fn(Unavailable, &'static str, &'static str, Icon) -> Cmd = Cmd::Unavailable;
 
 /// Tools listed in "Formate für Anmerkungen".
 const STYLE_TOOLS: [Tool; 25] = [
@@ -136,7 +134,7 @@ fn write_media_temp(name: &str, data: &[u8]) -> Option<std::path::PathBuf> {
     if !known {
         return None;
     }
-    let dir = std::env::temp_dir().join("mrpdf-media");
+    let dir = std::env::temp_dir().join("versolopdf-media");
     std::fs::create_dir_all(&dir).ok()?;
     let path = dir.join(format!("{}-{clean}", std::process::id()));
     std::fs::write(&path, data).ok()?;
@@ -230,7 +228,7 @@ fn preset_button(ui: &mut Ui, p: &Preset, label: &str, selected: bool) -> bool {
     resp.on_hover_text(label).clicked()
 }
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     fn cm_de(&self) -> bool {
         self.settings.language == Language::German
     }
@@ -639,7 +637,7 @@ impl MrPdfApp {
         let t = self.t();
         egui::Popup::menu(&resp).show(|ui| {
             ui.set_min_width(300.0);
-            let mut row = |app: &MrPdfApp, ui: &mut Ui, c: CommentCmd| {
+            let mut row = |app: &VersoloPdfApp, ui: &mut Ui, c: CommentCmd| {
                 if app.menu_row(ui, Cmd::Comment(c)) {
                     chosen = Some(c);
                 }
@@ -648,13 +646,6 @@ impl MrPdfApp {
             row(self, ui, CommentCmd::HideAll);
             ui.separator();
             row(self, ui, CommentCmd::ShowFlagged);
-            let layers = UA(
-                Unavailable::Layers,
-                "Anmerkungen aus versteckten Ebenen anzeigen",
-                "Show comments of hidden layers",
-                Icon::Eye,
-            );
-            self.menu_row(ui, layers);
             ui.separator();
             // Kinds and authors that occur in the document.
             let (kinds, authors) = self.comment_kinds_and_authors();
@@ -712,9 +703,9 @@ impl MrPdfApp {
             })
             .response
             .on_disabled_hover_text(if de {
-                "MrPDF kennt noch keinen Prüfstatus für Anmerkungen."
+                "VersoloPDF kennt noch keinen Prüfstatus für Anmerkungen."
             } else {
-                "MrPDF does not know review states of comments yet."
+                "VersoloPDF does not know review states of comments yet."
             });
             ui.separator();
             row(self, ui, CommentCmd::OpenPopups);

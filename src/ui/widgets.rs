@@ -60,11 +60,11 @@ impl RibbonFit {
 }
 
 fn fit_id() -> egui::Id {
-    egui::Id::new("mrpdf-ribbon-fit")
+    egui::Id::new("versolopdf-ribbon-fit")
 }
 
 fn too_tall_id() -> egui::Id {
-    egui::Id::new("mrpdf-ribbon-too-tall")
+    egui::Id::new("versolopdf-ribbon-too-tall")
 }
 
 /// Caption and height of the last ribbon group whose contents were taller
@@ -79,7 +79,7 @@ pub fn reset_ribbon_group_too_tall(ctx: &egui::Context) {
 }
 
 fn command_ran_id() -> egui::Id {
-    egui::Id::new("mrpdf-ribbon-command-ran")
+    egui::Id::new("versolopdf-ribbon-command-ran")
 }
 
 pub fn ribbon_fit(ctx: &egui::Context) -> RibbonFit {
@@ -427,7 +427,7 @@ pub fn group(ui: &mut Ui, caption: &str, add: impl FnOnce(&mut Ui)) {
     let mut fit = ribbon_fit(&ctx);
     let index = fit.next_group;
     fit.next_group += 1;
-    let icon_id = egui::Id::new(("mrpdf-ribbon-group-icon", caption));
+    let icon_id = egui::Id::new(("versolopdf-ribbon-group-icon", caption));
     if !fit.in_popup && index >= fit.collapse_from {
         set_ribbon_fit(&ctx, fit);
         let icon = ctx.data(|d| d.get_temp::<Icon>(icon_id)).unwrap_or(Icon::Gear);

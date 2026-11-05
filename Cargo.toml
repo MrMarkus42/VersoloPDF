@@ -1,23 +1,23 @@
 [package]
-name = "mrpdf"
-version = "1.0.0"
+name = "versolopdf"
+version = "1.1.0"
 edition = "2024"
 rust-version = "1.88"
-description = "MrPDF - a free, open-source PDF viewer and editor"
+description = "VersoloPDF - a free, open-source PDF viewer and editor"
 license = "MIT OR Apache-2.0"
 authors = ["Mr. M"]
-repository = "https://github.com/MrMarkus42/MrPDF"
-homepage = "https://mrmarkus42.github.io/MrPDF/"
+repository = "https://github.com/MrMarkus42/VersoloPDF"
+homepage = "https://mrmarkus42.github.io/VersoloPDF/"
 readme = "README.md"
 keywords = ["pdf", "viewer", "editor", "annotation"]
 categories = ["gui", "text-processing"]
 
 [lib]
-name = "mrpdf"
+name = "versolopdf"
 path = "src/lib.rs"
 
 [[bin]]
-name = "mrpdf"
+name = "versolopdf"
 path = "src/main.rs"
 
 [dependencies]
@@ -85,7 +85,7 @@ strip = "debuginfo"
 [profile.dev.package."*"]
 opt-level = 2
 
-# Prepares assets/mrpdf.png and assets/mrpdf.ico from the icon drawing.
+# Prepares assets/versolopdf.png and assets/versolopdf.ico from the icon drawing.
 [[example]]
 name = "make_icon"
 path = "scripts/make_icon.rs"

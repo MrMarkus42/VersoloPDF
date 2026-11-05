@@ -6,7 +6,7 @@ use egui::{Context, Ui};
 
 use super::commands::Cmd;
 use super::dialogs::{Action, Outcome, buttons};
-use super::{Dialog, MrPdfApp};
+use super::{Dialog, VersoloPdfApp};
 use crate::forms::{ButtonAction, NewFieldKind};
 use crate::geometry::RectF;
 use crate::pdf_edit::format_pdf_date;
@@ -123,7 +123,7 @@ impl FieldForm {
     }
 }
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     fn lang_de(&self) -> bool {
         self.settings.language == Language::German
     }
@@ -190,6 +190,7 @@ impl MrPdfApp {
                 );
             }
             Cmd::ResetForm => self.edit(ctx, |tab| tab.doc.reset_form()),
+            Cmd::TimeStampDocument => self.time_stamp_active(ctx),
             Cmd::BookmarkDeleteAll => self.edit(ctx, |tab| tab.doc.delete_all_bookmarks()),
             Cmd::Grayscale => self.edit(ctx, |tab| tab.doc.to_grayscale()),
             Cmd::RemoveMarks(kind) => self.remove_all_marks(ctx, kind),
@@ -355,7 +356,11 @@ impl MrPdfApp {
                 NewFieldKind::Date { format: if de { "dd.mm.yyyy".into() } else { "mm/dd/yyyy".into() } }
             }
             Tool::FieldImage => NewFieldKind::Image,
-            Tool::FieldRadio | Tool::FieldList | Tool::FieldCombo | Tool::FieldButton => {
+            Tool::FieldRadio
+            | Tool::FieldList
+            | Tool::FieldCombo
+            | Tool::FieldButton
+            | Tool::FieldBarcode => {
                 let form = FieldForm::new(page, rect, tool, self.last_radio.clone(), de);
                 self.dialog = Some(Dialog::NewField(Box::new(form)));
                 return;
@@ -393,6 +398,84 @@ impl MrPdfApp {
                 if ok {
                     let cmd = *cmd;
                     action = Some(Box::new(move |app, ctx| app.run_confirmed(ctx, cmd)));
+                    outcome = Outcome::Close;
+                } else if cancel {
+                    outcome = Outcome::Close;
+                }
+            }
+            Dialog::NewField(form) if form.tool == Tool::FieldBarcode => {
+                super::dialogs::set_title(ui, Cmd::Tool(form.tool).label(lang));
+                ui.horizontal(|ui| {
+                    ui.label(if de {
+                        "Feldname (leer = automatisch):"
+                    } else {
+                        "Field name (empty = automatic):"
+                    });
+                    ui.text_edit_singleline(&mut form.name);
+                });
+                ui.label(if de {
+                    "Inhalt (Text oder Webadresse):"
+                } else {
+                    "Content (text or web address):"
+                });
+                ui.add(egui::TextEdit::multiline(&mut form.target).desired_rows(4).desired_width(360.0));
+                let code =
+                    crate::qr::encode(form.target.trim()).ok().filter(|_| !form.target.trim().is_empty());
+                // Preview of the code.
+                let side = 120.0;
+                let (rect, _) = ui.allocate_exact_size(egui::vec2(side, side), egui::Sense::hover());
+                ui.painter().rect_filled(rect, 0.0, egui::Color32::WHITE);
+                match &code {
+                    Some(c) => {
+                        let unit = side / (c.size as f32 + 4.0);
+                        for y in 0..c.size {
+                            for x in 0..c.size {
+                                if c.get(x, y) {
+                                    let p = rect.min
+                                        + egui::vec2((x as f32 + 2.0) * unit, (y as f32 + 2.0) * unit);
+                                    ui.painter().rect_filled(
+                                        egui::Rect::from_min_size(p, egui::vec2(unit, unit)),
+                                        0.0,
+                                        egui::Color32::BLACK,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    None => {
+                        ui.painter().rect_stroke(
+                            rect,
+                            0.0,
+                            egui::Stroke::new(1.0, egui::Color32::GRAY),
+                            egui::StrokeKind::Inside,
+                        );
+                    }
+                }
+                ui.label(
+                    egui::RichText::new(if de {
+                        "Der QR-Code kann mit jeder Handykamera gelesen werden (bis etwa 2300 Zeichen)."
+                    } else {
+                        "The QR code can be read with any phone camera (up to about 2300 characters)."
+                    })
+                    .small()
+                    .weak(),
+                );
+                ui.add_space(8.0);
+                let mut ok = false;
+                let mut cancel = false;
+                ui.horizontal(|ui| {
+                    ok = ui
+                        .add_enabled(code.is_some(), egui::Button::new(egui::RichText::new(t.ok).strong()))
+                        .clicked();
+                    cancel = ui.button(t.cancel).clicked();
+                });
+                cancel |= ui.input(|i| i.key_pressed(egui::Key::Escape));
+                if ok && code.is_some() {
+                    let f = (**form).clone();
+                    let kind = NewFieldKind::Barcode { text: f.target.trim().to_string() };
+                    action = Some(Box::new(move |app: &mut VersoloPdfApp, ctx: &Context| {
+                        app.add_field(ctx, f.page, f.rect, kind, f.name.trim().to_string());
+                    }));
                     outcome = Outcome::Close;
                 } else if cancel {
                     outcome = Outcome::Close;
@@ -466,7 +549,7 @@ impl MrPdfApp {
                 if ok && let Ok(act) = check {
                     let f = (**form).clone();
                     let kind = NewFieldKind::Button { caption: f.caption.trim().to_string(), action: act };
-                    action = Some(Box::new(move |app: &mut MrPdfApp, ctx: &Context| {
+                    action = Some(Box::new(move |app: &mut VersoloPdfApp, ctx: &Context| {
                         app.add_field(ctx, f.page, f.rect, kind, f.name.trim().to_string());
                     }));
                     outcome = Outcome::Close;

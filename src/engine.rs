@@ -16,7 +16,7 @@ static PDFIUM: OnceLock<Pdfium> = OnceLock::new();
 
 /// Environment variable that may point to a directory containing the PDFium
 /// library. Intended for development and packaging; it must be absolute.
-pub const PDFIUM_DIR_ENV: &str = "MRPDF_PDFIUM_DIR";
+pub const PDFIUM_DIR_ENV: &str = "VERSOLOPDF_PDFIUM_DIR";
 
 /// Returns the process-wide PDFium instance, initialising it on first use.
 pub fn pdfium() -> Result<&'static Pdfium> {
@@ -43,8 +43,8 @@ pub fn library_search_dirs() -> Vec<PathBuf> {
 
     if let Some(exe_dir) = std::env::current_exe().ok().and_then(|exe| exe.parent().map(Path::to_path_buf)) {
         dirs.push(exe_dir.clone());
-        // Linux packages (`/usr/lib/mrpdf`) and macOS app bundles.
-        dirs.push(exe_dir.join("../lib/mrpdf"));
+        // Linux packages (`/usr/lib/versolopdf`) and macOS app bundles.
+        dirs.push(exe_dir.join("../lib/versolopdf"));
         dirs.push(exe_dir.join("../Frameworks"));
     }
 

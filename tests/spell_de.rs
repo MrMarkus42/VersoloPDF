@@ -1,5 +1,5 @@
 //! The spell checker with the German Hunspell dictionary, if installed
-//! (skipped otherwise; MrPDF ships no dictionary).
+//! (skipped otherwise; VersoloPDF ships no dictionary).
 
 use std::path::Path;
 
@@ -10,7 +10,7 @@ fn german_dictionary() {
         eprintln!("no German dictionary installed, skipped");
         return;
     }
-    let d = mrpdf::spell::Dictionary::load(dic).unwrap();
+    let d = versolopdf::spell::Dictionary::load(dic).unwrap();
     assert!(d.len() > 50_000);
     for ok in [
         "Haus",

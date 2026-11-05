@@ -3,8 +3,8 @@
 //!
 //! Every mark is written as its own content stream, wrapped in a marked
 //! content sequence `/Artifact <</Type /Pagination /Subtype /Watermark …>>`
-//! and tagged with `/MrPDFMark (id)` in the stream dictionary. The definition
-//! of the mark is stored in the catalog (`/MrPDFMarks`), so marks can be
+//! and tagged with `/VersoloPDFMark (id)` in the stream dictionary. The definition
+//! of the mark is stored in the catalog (`/VersoloPDFMarks`), so marks can be
 //! listed, edited, reordered and removed later. Removing all marks of a kind
 //! also strips artifacts of the same subtype written by other programs.
 
@@ -280,7 +280,7 @@ fn font_dict(font: StdFont) -> Object {
 // ---------------------------------------------------------------------------
 // Catalog storage
 
-const STORE_KEY: &[u8] = b"MrPDFMarks";
+const STORE_KEY: &[u8] = b"VersoloPDFMarks";
 
 /// A stored mark: id, definition and (for images) its XObject.
 #[derive(Debug, Clone, PartialEq)]
@@ -356,7 +356,7 @@ fn visibility_group(edit: &mut Edit, id: &str, vis: Visibility) -> Result<Option
     usage.set("Print", Object::Dictionary(p));
     let mut ocg = Dictionary::new();
     ocg.set("Type", Object::Name(b"OCG".to_vec()));
-    ocg.set("Name", text_string(&format!("MrPDF {id}")));
+    ocg.set("Name", text_string(&format!("VersoloPDF {id}")));
     ocg.set("Usage", Object::Dictionary(usage));
     let ocg_id = edit.add(Object::Dictionary(ocg));
     let catalog_id = edit.prev().trailer.get(b"Root")?.as_reference()?;
@@ -627,7 +627,7 @@ pub fn add(
                 d.set("Subtype", Object::Name(b"Form".to_vec()));
                 d.set("BBox", crate::pdf_edit::rect_array(&RectF::new(0.0, 0.0, 1.0, 1.0)));
                 d.set("Resources", Object::Dictionary(res));
-                d.set("MrPDFSize", Object::Array(vec![real(w), real(h)]));
+                d.set("VersoloPDFSize", Object::Array(vec![real(w), real(h)]));
                 let wrapper = edit.add(Stream::new(d, format!("q {} /P Do Q\n", m.operator()).into_bytes()));
                 (Some(wrapper), Some((w, h)))
             }
@@ -641,7 +641,7 @@ pub fn add(
                 };
                 let size = match edit.object(prev)? {
                     Object::Stream(s) => {
-                        if let Ok(Object::Array(a)) = s.dict.get(b"MrPDFSize") {
+                        if let Ok(Object::Array(a)) = s.dict.get(b"VersoloPDFSize") {
                             let v: Vec<f32> = a.iter().filter_map(crate::pdf_edit::number).collect();
                             (v.first().copied().unwrap_or(100.0), v.get(1).copied().unwrap_or(100.0))
                         } else {
@@ -707,7 +707,7 @@ pub fn add(
                 content.push_str(&format!("/OC /{} BDC\n", names.oc));
             }
             content.push_str(&format!(
-                "/Artifact <</Type /Pagination /Subtype /{subtype} /MrPDF ({id})>> BDC\nq /{} gs\n",
+                "/Artifact <</Type /Pagination /Subtype /{subtype} /VersoloPDF ({id})>> BDC\nq /{} gs\n",
                 names.gs
             ));
             content.push_str(&body);
@@ -744,8 +744,8 @@ fn tag_last_stream(edit: &mut Edit, page_id: ObjectId, id: &str, kind: Kind, beh
     if let Some(Object::Reference(sid)) = target
         && let Object::Stream(s) = edit.object_mut(*sid)?
     {
-        s.dict.set("MrPDFMark", text_string(id));
-        s.dict.set("MrPDFKind", Object::Name(kind.name().as_bytes().to_vec()));
+        s.dict.set("VersoloPDFMark", text_string(id));
+        s.dict.set("VersoloPDFKind", Object::Name(kind.name().as_bytes().to_vec()));
     }
     Ok(())
 }
@@ -788,7 +788,7 @@ pub fn remove(bytes: &[u8], password: Option<&str>, filter: &RemoveFilter) -> Re
                 let tag = match edit.object(sid) {
                     Ok(Object::Stream(s)) => s
                         .dict
-                        .get(b"MrPDFMark")
+                        .get(b"VersoloPDFMark")
                         .ok()
                         .and_then(|o| match o {
                             Object::String(b, _) => Some(String::from_utf8_lossy(b).into_owned()),
@@ -798,7 +798,7 @@ pub fn remove(bytes: &[u8], password: Option<&str>, filter: &RemoveFilter) -> Re
                             (
                                 id,
                                 s.dict
-                                    .get(b"MrPDFKind")
+                                    .get(b"VersoloPDFKind")
                                     .ok()
                                     .and_then(|k| k.as_name().ok())
                                     .and_then(Kind::from_name),

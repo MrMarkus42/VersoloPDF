@@ -1329,7 +1329,7 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
 }
 
 /// The application icon (256 px PNG, see `scripts/make_icon.rs`).
-pub const LOGO_PNG: &[u8] = include_bytes!("../../assets/mrpdf.png");
+pub const LOGO_PNG: &[u8] = include_bytes!("../../assets/versolopdf.png");
 
 /// The application icon as RGBA pixels (width, height, pixels).
 pub fn logo_rgba() -> (u32, u32, Vec<u8>) {
@@ -1345,7 +1345,7 @@ pub fn logo_rgba() -> (u32, u32, Vec<u8>) {
 
 /// The application icon as a texture, loaded once per context.
 fn logo_texture(ctx: &egui::Context) -> egui::TextureHandle {
-    let id = egui::Id::new("mrpdf-logo-texture");
+    let id = egui::Id::new("versolopdf-logo-texture");
     if let Some(tex) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
         return tex;
     }
@@ -1353,7 +1353,7 @@ fn logo_texture(ctx: &egui::Context) -> egui::TextureHandle {
     let image = egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &rgba);
     // Mipmaps keep the picture smooth when it is drawn small (20 px).
     let options = egui::TextureOptions::LINEAR.with_mipmap_mode(Some(egui::TextureFilter::Linear));
-    let tex = ctx.load_texture("mrpdf-logo", image, options);
+    let tex = ctx.load_texture("versolopdf-logo", image, options);
     ctx.data_mut(|d| d.insert_temp(id, tex.clone()));
     tex
 }

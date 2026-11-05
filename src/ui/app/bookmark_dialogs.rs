@@ -9,7 +9,7 @@ use super::bookmark_big_dialogs::{CheckState, FromTextState, LinksState, TocStat
 use super::commands::Cmd;
 use super::dialogs::{Action, Outcome};
 use super::page_dialogs::{footer, tr};
-use super::{Dialog, MrPdfApp};
+use super::{Dialog, VersoloPdfApp};
 use crate::Document;
 use crate::model::Rgba;
 use crate::outline::NewBookmark;
@@ -455,7 +455,7 @@ pub(super) fn doc_action(
 const CHANGED: (&str, &str) = ("Geänderte Lesezeichen", "Changed bookmarks");
 const NEW: (&str, &str) = ("Neue Lesezeichen", "New bookmarks");
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     pub(super) fn bm_de(&self) -> bool {
         self.settings.language == Language::German
     }

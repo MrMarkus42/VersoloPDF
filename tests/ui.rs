@@ -10,27 +10,27 @@ use std::path::PathBuf;
 use egui::{Event, Modifiers, PointerButton, Pos2, pos2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
-use mrpdf::model::AnnotKind;
-use mrpdf::ui::MrPdfApp;
-use mrpdf::ui::i18n::Language;
-use mrpdf::ui::settings::Settings;
+use versolopdf::model::AnnotKind;
+use versolopdf::ui::VersoloPdfApp;
+use versolopdf::ui::i18n::Language;
+use versolopdf::ui::settings::Settings;
 
 fn screenshot_dir() -> PathBuf {
-    let dir = std::env::var_os("MRPDF_SCREENSHOT_DIR")
+    let dir = std::env::var_os("VERSOLOPDF_SCREENSHOT_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/ui-screenshots"));
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }
 
-fn save(harness: &mut Harness<'_, MrPdfApp>, name: &str) {
+fn save(harness: &mut Harness<'_, VersoloPdfApp>, name: &str) {
     match harness.render() {
         Ok(img) => img.save(screenshot_dir().join(format!("{name}.png"))).unwrap(),
         Err(err) => eprintln!("rendering {name} failed: {err}"),
     }
 }
 
-fn harness(files: Vec<PathBuf>, dark: bool) -> Harness<'static, MrPdfApp> {
+fn harness(files: Vec<PathBuf>, dark: bool) -> Harness<'static, VersoloPdfApp> {
     let settings = Settings {
         language: Language::German,
         author: "Tester".into(),
@@ -41,10 +41,10 @@ fn harness(files: Vec<PathBuf>, dark: bool) -> Harness<'static, MrPdfApp> {
     harness_with(settings, files)
 }
 
-fn harness_with(settings: Settings, files: Vec<PathBuf>) -> Harness<'static, MrPdfApp> {
+fn harness_with(settings: Settings, files: Vec<PathBuf>) -> Harness<'static, VersoloPdfApp> {
     Harness::builder().with_size(egui::vec2(1280.0, 820.0)).with_max_steps(64).wgpu().build_eframe(
         move |cc| {
-            let mut app = MrPdfApp::with_settings(&cc.egui_ctx, settings, files);
+            let mut app = VersoloPdfApp::with_settings(&cc.egui_ctx, settings, files);
             // Tests never touch the user's recovery folder.
             app.set_recovery_dir(None);
             app
@@ -59,13 +59,13 @@ fn sample_file(dir: &tempfile::TempDir, pages: usize) -> PathBuf {
 }
 
 /// Clicks a ribbon tab (tabs come before groups with the same caption).
-fn tab(harness: &mut Harness<'_, MrPdfApp>, label: &str) {
+fn tab(harness: &mut Harness<'_, VersoloPdfApp>, label: &str) {
     harness.get_all_by_label(label).next().unwrap().click();
     harness.run_steps(3);
 }
 
-fn drag(harness: &mut Harness<'_, MrPdfApp>, from: Pos2, to: Pos2) {
-    let input = |h: &mut Harness<'_, MrPdfApp>, e: Event| h.input_mut().events.push(e);
+fn drag(harness: &mut Harness<'_, VersoloPdfApp>, from: Pos2, to: Pos2) {
+    let input = |h: &mut Harness<'_, VersoloPdfApp>, e: Event| h.input_mut().events.push(e);
     input(harness, Event::PointerMoved(from));
     harness.step();
     input(
@@ -95,8 +95,8 @@ fn drag(harness: &mut Harness<'_, MrPdfApp>, from: Pos2, to: Pos2) {
     harness.run_steps(4);
 }
 
-fn click(harness: &mut Harness<'_, MrPdfApp>, at: Pos2) {
-    let input = |h: &mut Harness<'_, MrPdfApp>, e: Event| h.input_mut().events.push(e);
+fn click(harness: &mut Harness<'_, VersoloPdfApp>, at: Pos2) {
+    let input = |h: &mut Harness<'_, VersoloPdfApp>, e: Event| h.input_mut().events.push(e);
     input(harness, Event::PointerMoved(at));
     harness.step();
     input(
@@ -149,7 +149,7 @@ fn open_view_and_annotate() {
     save(&mut h, "03-comment-ribbon");
     h.get_by_label("Rechteck").click();
     h.run_steps(3);
-    assert_eq!(h.state().tool(), mrpdf::ui::tools::Tool::Rectangle);
+    assert_eq!(h.state().tool(), versolopdf::ui::tools::Tool::Rectangle);
     drag(&mut h, pos2(560.0, 360.0), pos2(720.0, 460.0));
     h.run_steps(5);
     let tab = h.state_mut().active_tab_mut().unwrap();
@@ -210,7 +210,7 @@ fn search_and_sidebar_panels() {
     h.run_steps(6);
     let tab = h.state().active_tab().unwrap();
     let page = tab.current_page;
-    assert_eq!(tab.doc.geometry(page).unwrap().rotation, mrpdf::geometry::Rotation::R90);
+    assert_eq!(tab.doc.geometry(page).unwrap().rotation, versolopdf::geometry::Rotation::R90);
     save(&mut h, "09-rotated");
 }
 
@@ -226,15 +226,18 @@ fn dark_mode_and_view_ribbon() {
     save(&mut h, "96-view-ribbon");
     h.get_by_label("Zwei Seiten fortlaufend").click();
     h.run_steps(8);
-    assert_eq!(h.state().active_tab().unwrap().layout_mode, mrpdf::ui::view::PageLayout::TwoPagesContinuous);
+    assert_eq!(
+        h.state().active_tab().unwrap().layout_mode,
+        versolopdf::ui::view::PageLayout::TwoPagesContinuous
+    );
     save(&mut h, "10-dark-two-pages");
 }
 
 #[test]
 fn view_tab_features() {
-    use mrpdf::ui::app::commands::Cmd;
-    use mrpdf::ui::app::view_cmds::ViewCmd as V;
-    use mrpdf::ui::view::PageLayout;
+    use versolopdf::ui::app::commands::Cmd;
+    use versolopdf::ui::app::view_cmds::ViewCmd as V;
+    use versolopdf::ui::view::PageLayout;
     let _guard = common::lock();
     let dir = tempfile::tempdir().unwrap();
     let file = sample_file(&dir, 4);
@@ -246,7 +249,7 @@ fn view_tab_features() {
     h.run_steps(4);
     tab(&mut h, "Ansicht");
     let ctx = h.ctx.clone();
-    let run = |h: &mut Harness<'_, MrPdfApp>, cmd: Cmd| {
+    let run = |h: &mut Harness<'_, VersoloPdfApp>, cmd: Cmd| {
         let ctx = h.ctx.clone();
         h.state_mut().run(&ctx, cmd);
         h.run_steps(4);
@@ -299,12 +302,12 @@ fn view_tab_features() {
     run(&mut h, Cmd::View(V::Transparency));
     assert!(h.state().active_tab().unwrap().transparent);
     run(&mut h, Cmd::View(V::Transparency));
-    run(&mut h, Cmd::View(V::Design(mrpdf::ui::theme::Design::Black)));
+    run(&mut h, Cmd::View(V::Design(versolopdf::ui::theme::Design::Black)));
     assert!(ctx.style_of(ctx.theme()).visuals.dark_mode);
     save(&mut h, "101-view-design-black");
-    run(&mut h, Cmd::View(V::Design(mrpdf::ui::theme::Design::Standard)));
+    run(&mut h, Cmd::View(V::Design(versolopdf::ui::theme::Design::Standard)));
     // Loupe and pan & zoom windows.
-    run(&mut h, Cmd::Tool(mrpdf::ui::tools::Tool::Loupe));
+    run(&mut h, Cmd::Tool(versolopdf::ui::tools::Tool::Loupe));
     run(&mut h, Cmd::View(V::PanZoom));
     let page = h.state().active_tab().unwrap().ruler_page.unwrap().1;
     h.hover_at(page.center());
@@ -315,7 +318,7 @@ fn view_tab_features() {
     // Rotate and reset the view.
     run(&mut h, Cmd::RotateViewRight);
     run(&mut h, Cmd::View(V::RotateReset));
-    assert_eq!(h.state().active_tab().unwrap().view_rotation, mrpdf::geometry::Rotation::R0);
+    assert_eq!(h.state().active_tab().unwrap().view_rotation, versolopdf::geometry::Rotation::R0);
     // Tabs: sort, close the other, reopen it.
     run(&mut h, Cmd::View(V::SortTabs));
     assert!(h.state().active_tab().unwrap().doc.display_name().starts_with("Beispiel"), "stays active");
@@ -341,8 +344,8 @@ fn form_filling() {
     let tab = h.state().active_tab().unwrap();
     assert_eq!(tab.doc.form_fields(0).unwrap().len(), 2);
 
-    let at = |h: &Harness<'_, MrPdfApp>, x: f32, y: f32| {
-        h.state().active_tab().unwrap().screen_pos(0, mrpdf::geometry::PointF::new(x, y)).unwrap()
+    let at = |h: &Harness<'_, VersoloPdfApp>, x: f32, y: f32| {
+        h.state().active_tab().unwrap().screen_pos(0, versolopdf::geometry::PointF::new(x, y)).unwrap()
     };
     let field = at(&h, 200.0, 710.0);
     click(&mut h, field);
@@ -365,14 +368,14 @@ fn form_filling() {
 
 #[test]
 fn comment_tab_features() {
-    use mrpdf::ui::tools::Tool;
+    use versolopdf::ui::tools::Tool;
     let _guard = common::lock();
     let dir = tempfile::tempdir().unwrap();
     let file = sample_file(&dir, 1);
     let mut h = harness(vec![file], false);
     h.run_steps(10);
-    let at = |h: &Harness<'_, MrPdfApp>, x: f32, y: f32| {
-        h.state().active_tab().unwrap().screen_pos(0, mrpdf::geometry::PointF::new(x, y)).unwrap()
+    let at = |h: &Harness<'_, VersoloPdfApp>, x: f32, y: f32| {
+        h.state().active_tab().unwrap().screen_pos(0, versolopdf::geometry::PointF::new(x, y)).unwrap()
     };
     tab(&mut h, "Anmerkungen");
     save(&mut h, "anm-01-ribbon");
@@ -391,7 +394,7 @@ fn comment_tab_features() {
     h.run_steps(2);
     assert_eq!(
         h.state().settings().style(Tool::ContentHighlight).color,
-        mrpdf::model::Rgba::rgb(30, 136, 229)
+        versolopdf::model::Rgba::rgb(30, 136, 229)
     );
     assert!(h.state().settings().keeps_tool(Tool::ContentHighlight));
     h.get_by_label("Auswahl beibehalten").click();
@@ -465,13 +468,13 @@ fn comment_tab_features() {
 
     // "Medien": a video and a sound note are embedded and can be read back.
     let ctx = h.ctx.clone();
-    let rect = mrpdf::geometry::RectF::new(300.0, 300.0, 460.0, 390.0);
+    let rect = versolopdf::geometry::RectF::new(300.0, 300.0, 460.0, 390.0);
     h.state_mut().add_media_bytes(&ctx, 0, rect, Tool::Video, "Film.mp4", b"not really a video");
     let mut wav =
         b"RIFF\x2c\0\0\0WAVEfmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x80\x3e\0\0\x02\0\x10\0data\x08\0\0\0"
             .to_vec();
     wav.extend_from_slice(&[1, 0, 2, 0, 3, 0, 4, 0]);
-    let note = mrpdf::geometry::RectF::new(480.0, 300.0, 500.0, 320.0);
+    let note = versolopdf::geometry::RectF::new(480.0, 300.0, 500.0, 320.0);
     h.state_mut().add_media_bytes(&ctx, 0, note, Tool::SoundNote, "Aufnahme.wav", &wav);
     h.run_steps(4);
     save(&mut h, "anm-08-media");
@@ -503,8 +506,8 @@ fn form_tab_features() {
     let file = sample_file(&dir, 1);
     let mut h = harness(vec![file], false);
     h.run_steps(10);
-    let at = |h: &Harness<'_, MrPdfApp>, x: f32, y: f32| {
-        h.state().active_tab().unwrap().screen_pos(0, mrpdf::geometry::PointF::new(x, y)).unwrap()
+    let at = |h: &Harness<'_, VersoloPdfApp>, x: f32, y: f32| {
+        h.state().active_tab().unwrap().screen_pos(0, versolopdf::geometry::PointF::new(x, y)).unwrap()
     };
     tab(&mut h, "Formular");
     save(&mut h, "frm-01-ribbon");
@@ -523,7 +526,7 @@ fn form_tab_features() {
     assert_eq!(fields.len(), 2, "{fields:?}");
     let image = fields[1].annot_index;
     let ctx = h.ctx.clone();
-    let green = mrpdf::pdf_edit::RgbaImage { width: 1, height: 1, rgba: vec![30, 160, 60, 255] };
+    let green = versolopdf::pdf_edit::RgbaImage { width: 1, height: 1, rgba: vec![30, 160, 60, 255] };
     h.state_mut().set_field_image(&ctx, 0, image, &green);
     h.get_by_label("Hand").click();
     h.run_steps(2);
@@ -544,7 +547,7 @@ fn form_tab_features() {
     save(&mut h, "frm-03-highlight-menu");
     h.get_by_label("Textfelder").click();
     h.run_steps(3);
-    assert!(h.state().settings().highlight_off.contains(&mrpdf::ui::settings::FieldGroup::TextFields));
+    assert!(h.state().settings().highlight_off.contains(&versolopdf::ui::settings::FieldGroup::TextFields));
 
     // The form pane (Ctrl+I) lists the fields.
     h.key_press_modifiers(Modifiers::COMMAND, egui::Key::I);
@@ -616,7 +619,7 @@ fn convert_tab_dialogs() {
     h.run_steps(4);
     let fonts = h.state_mut().active_tab_mut().unwrap().doc.fonts().unwrap();
     assert!(
-        fonts.iter().all(|f| mrpdf::font_replace::STANDARD_FONTS.contains(&f.name.as_str())),
+        fonts.iter().all(|f| versolopdf::font_replace::STANDARD_FONTS.contains(&f.name.as_str())),
         "{fonts:?}"
     );
     quick(&mut h, "Seiten neu einfärben");
@@ -642,7 +645,7 @@ fn delete_key_removes_selected_annotation() {
     h.run_steps(2);
     drag(&mut h, pos2(500.0, 300.0), pos2(650.0, 420.0));
     h.run_steps(4);
-    let count = |h: &mut Harness<'_, MrPdfApp>| {
+    let count = |h: &mut Harness<'_, VersoloPdfApp>| {
         let tab = h.state_mut().active_tab_mut().unwrap();
         tab.doc.annotations(0).unwrap().len()
     };
@@ -675,12 +678,12 @@ fn protect_ribbon_and_attachments() {
     save(&mut h, "16-attachments");
 }
 
-/// Manual check with a real document: `MRPDF_SAMPLE=/path/file.pdf cargo test --test ui -- --ignored`
+/// Manual check with a real document: `VERSOLOPDF_SAMPLE=/path/file.pdf cargo test --test ui -- --ignored`
 #[test]
 #[ignore]
 fn real_world_sample() {
     let _guard = common::lock();
-    let Some(path) = std::env::var_os("MRPDF_SAMPLE").map(PathBuf::from) else { return };
+    let Some(path) = std::env::var_os("VERSOLOPDF_SAMPLE").map(PathBuf::from) else { return };
     let name = path.file_stem().unwrap().to_string_lossy().into_owned();
     let mut h = harness(vec![path], false);
     h.run_steps(15);
@@ -700,9 +703,9 @@ fn real_world_sample() {
         .form_fields(0)
         .unwrap()
         .into_iter()
-        .find(|f| matches!(f.kind, mrpdf::model::FieldKind::Text { .. }));
+        .find(|f| matches!(f.kind, versolopdf::model::FieldKind::Text { .. }));
     if let Some(field) = field {
-        tab.doc.set_text_field(0, field.annot_index, "MrPDF Test 123").unwrap();
+        tab.doc.set_text_field(0, field.annot_index, "VersoloPDF Test 123").unwrap();
         tab.after_edit();
         let value = tab
             .doc
@@ -712,7 +715,7 @@ fn real_world_sample() {
             .find(|f| f.annot_index == field.annot_index)
             .unwrap()
             .value;
-        assert_eq!(value, "MrPDF Test 123");
+        assert_eq!(value, "VersoloPDF Test 123");
         h.get_by_label("Einzelseite").click();
         h.run_steps(10);
         save(&mut h, &format!("sample-{name}-3"));
@@ -720,7 +723,7 @@ fn real_world_sample() {
 }
 
 /// Selects a tool through the quick start search (works for every command).
-fn quick(harness: &mut Harness<'_, MrPdfApp>, query: &str) {
+fn quick(harness: &mut Harness<'_, VersoloPdfApp>, query: &str) {
     harness.key_press_modifiers(Modifiers::COMMAND, egui::Key::Period);
     harness.run_steps(3);
     harness.input_mut().events.push(Event::Text(query.into()));
@@ -729,7 +732,7 @@ fn quick(harness: &mut Harness<'_, MrPdfApp>, query: &str) {
     harness.run_steps(3);
 }
 
-fn kinds(harness: &mut Harness<'_, MrPdfApp>) -> Vec<AnnotKind> {
+fn kinds(harness: &mut Harness<'_, VersoloPdfApp>) -> Vec<AnnotKind> {
     let tab = harness.state_mut().active_tab_mut().unwrap();
     tab.doc.annotations(0).unwrap().iter().map(|a| a.kind).collect()
 }
@@ -741,13 +744,13 @@ fn new_comment_tools() {
     let file = sample_file(&dir, 1);
     let mut h = harness(vec![file], false);
     h.run_steps(10);
-    let at = |h: &Harness<'_, MrPdfApp>, x: f32, y: f32| {
-        h.state().active_tab().unwrap().screen_pos(0, mrpdf::geometry::PointF::new(x, y)).unwrap()
+    let at = |h: &Harness<'_, VersoloPdfApp>, x: f32, y: f32| {
+        h.state().active_tab().unwrap().screen_pos(0, versolopdf::geometry::PointF::new(x, y)).unwrap()
     };
 
     // Typewriter: click, type, Enter.
     quick(&mut h, "Schreibmaschine");
-    assert_eq!(h.state().tool(), mrpdf::ui::tools::Tool::Typewriter);
+    assert_eq!(h.state().tool(), versolopdf::ui::tools::Tool::Typewriter);
     let p = at(&h, 100.0, 500.0);
     click(&mut h, p);
     h.input_mut().events.push(Event::Text("Getippt".into()));
@@ -762,7 +765,7 @@ fn new_comment_tools() {
         let p = at(&h, x, y);
         click(&mut h, p);
     }
-    assert_eq!(h.state().tool(), mrpdf::ui::tools::Tool::Cloud);
+    assert_eq!(h.state().tool(), versolopdf::ui::tools::Tool::Cloud);
     assert_eq!(h.state().active_tab().unwrap().polygon.len(), 4, "vertices");
     h.key_press(egui::Key::Enter);
     h.run_steps(4);
@@ -821,7 +824,7 @@ fn new_comment_tools() {
 
     // View rotation and history.
     quick(&mut h, "Ansicht rechts drehen");
-    assert_eq!(h.state().active_tab().unwrap().view_rotation, mrpdf::geometry::Rotation::R90);
+    assert_eq!(h.state().active_tab().unwrap().view_rotation, versolopdf::geometry::Rotation::R90);
     save(&mut h, "18-view-rotated");
 }
 
@@ -871,10 +874,10 @@ fn form_designer_and_comment_commands() {
     let file = sample_file(&dir, 1);
     let mut h = harness(vec![file], false);
     h.run_steps(10);
-    let at = |h: &Harness<'_, MrPdfApp>, x: f32, y: f32| {
-        h.state().active_tab().unwrap().screen_pos(0, mrpdf::geometry::PointF::new(x, y)).unwrap()
+    let at = |h: &Harness<'_, VersoloPdfApp>, x: f32, y: f32| {
+        h.state().active_tab().unwrap().screen_pos(0, versolopdf::geometry::PointF::new(x, y)).unwrap()
     };
-    let fields = |h: &mut Harness<'_, MrPdfApp>| {
+    let fields = |h: &mut Harness<'_, VersoloPdfApp>| {
         let tab = h.state_mut().active_tab_mut().unwrap();
         tab.doc.form_fields(0).unwrap().into_iter().map(|f| f.kind).collect::<Vec<_>>()
     };
@@ -886,7 +889,7 @@ fn form_designer_and_comment_commands() {
     let (a, b) = (at(&h, 100.0, 700.0), at(&h, 116.0, 684.0));
     drag(&mut h, a, b);
     h.run_steps(4);
-    assert_eq!(fields(&mut h), vec![mrpdf::model::FieldKind::CheckBox]);
+    assert_eq!(fields(&mut h), vec![versolopdf::model::FieldKind::CheckBox]);
 
     // Combo box asks for its items first.
     h.get_all_by_label("Menü").next().unwrap().click();
@@ -898,7 +901,7 @@ fn form_designer_and_comment_commands() {
     save(&mut h, "22-new-field-dialog");
     h.get_by_label("OK").click();
     h.run_steps(6);
-    assert!(fields(&mut h).contains(&mrpdf::model::FieldKind::ComboBox));
+    assert!(fields(&mut h).contains(&versolopdf::model::FieldKind::ComboBox));
 
     // Text field, then the field selection tool selects it.
     h.get_all_by_label("Text").next().unwrap().click();
@@ -917,8 +920,8 @@ fn form_designer_and_comment_commands() {
     // Comment summary opens a new tab; deleting all comments asks first.
     {
         let tab = h.state_mut().active_tab_mut().unwrap();
-        let mut note = mrpdf::pdf_edit::NewAnnotation::new(AnnotKind::Note, Default::default());
-        note.rect = mrpdf::geometry::RectF::new(400.0, 700.0, 420.0, 720.0);
+        let mut note = versolopdf::pdf_edit::NewAnnotation::new(AnnotKind::Note, Default::default());
+        note.rect = versolopdf::geometry::RectF::new(400.0, 700.0, 420.0, 720.0);
         note.contents = "Notiz".into();
         tab.doc.add_annotation(0, &note).unwrap();
         tab.after_edit();
@@ -947,19 +950,19 @@ fn form_designer_and_comment_commands() {
     drag(&mut h, a, b);
     h.run_steps(4);
     assert!(
-        matches!(h.state().dialog(), Some(mrpdf::ui::app::Dialog::NewField(f)) if f.caption == "Schaltfläche"),
+        matches!(h.state().dialog(), Some(versolopdf::ui::app::Dialog::NewField(f)) if f.caption == "Schaltfläche"),
         "button dialog"
     );
     assert!(h.query_by_label("Beim Klicken:").is_some());
     save(&mut h, "24-new-button-dialog");
     h.get_by_label("OK").click();
     h.run_steps(6);
-    assert!(fields(&mut h).contains(&mrpdf::model::FieldKind::PushButton));
+    assert!(fields(&mut h).contains(&versolopdf::model::FieldKind::PushButton));
     // A click on a button without an action says so instead of failing silently.
     let index = {
         let tab = h.state_mut().active_tab_mut().unwrap();
         let fields = tab.doc.form_fields(0).unwrap();
-        fields.iter().find(|f| f.kind == mrpdf::model::FieldKind::PushButton).unwrap().annot_index
+        fields.iter().find(|f| f.kind == versolopdf::model::FieldKind::PushButton).unwrap().annot_index
     };
     let ctx = h.ctx.clone();
     h.state_mut().press_button(&ctx, 0, index);
@@ -995,14 +998,14 @@ fn search_and_redact() {
 
 #[test]
 fn bookmark_tools_ui() {
-    use mrpdf::ui::app::Dialog;
-    use mrpdf::ui::app::bookmark_dialogs::BookmarkDialog;
+    use versolopdf::ui::app::Dialog;
+    use versolopdf::ui::app::bookmark_dialogs::BookmarkDialog;
     let _guard = common::lock();
     let dir = tempfile::tempdir().unwrap();
     let file = sample_file(&dir, 3);
     let mut h = harness(vec![file], false);
     h.run_steps(10);
-    let ok = |h: &mut Harness<'_, MrPdfApp>| {
+    let ok = |h: &mut Harness<'_, VersoloPdfApp>| {
         h.get_all_by_label("OK").last().unwrap().click();
         h.run_steps(6);
     };
@@ -1071,17 +1074,18 @@ fn bookmark_tools_ui() {
 
 #[test]
 fn edit_page_content_ui() {
-    use mrpdf::ui::tools::Tool;
+    use versolopdf::ui::tools::Tool;
     let _guard = common::lock();
     let dir = tempfile::tempdir().unwrap();
     let file = sample_file(&dir, 1);
     let mut h = harness(vec![file], false);
     h.run_steps(10);
-    let at = |h: &Harness<'_, MrPdfApp>, x: f32, y: f32| {
-        h.state().active_tab().unwrap().screen_pos(0, mrpdf::geometry::PointF::new(x, y)).unwrap()
+    let at = |h: &Harness<'_, VersoloPdfApp>, x: f32, y: f32| {
+        h.state().active_tab().unwrap().screen_pos(0, versolopdf::geometry::PointF::new(x, y)).unwrap()
     };
-    let objects =
-        |h: &mut Harness<'_, MrPdfApp>| h.state_mut().active_tab_mut().unwrap().doc.page_objects(0).unwrap();
+    let objects = |h: &mut Harness<'_, VersoloPdfApp>| {
+        h.state_mut().active_tab_mut().unwrap().doc.page_objects(0).unwrap()
+    };
     tab(&mut h, "Start");
     save(&mut h, "obj-01-start");
 
@@ -1182,13 +1186,13 @@ fn edit_page_content_ui() {
 /// goes back.
 #[test]
 fn ribbon_keyboard() {
-    use mrpdf::ui::app::keytips::Level;
+    use versolopdf::ui::app::keytips::Level;
     let _guard = common::lock();
     let dir = tempfile::tempdir().unwrap();
     let file = sample_file(&dir, 2);
     let mut h = harness(vec![file], false);
     h.run_steps(10);
-    let code = |h: &Harness<'_, MrPdfApp>, label: &str| {
+    let code = |h: &Harness<'_, VersoloPdfApp>, label: &str| {
         let (_, codes) = h.state().keytip_codes();
         codes
             .into_iter()
@@ -1196,7 +1200,7 @@ fn ribbon_keyboard() {
             .map(|(_, c)| c)
             .unwrap_or_else(|| panic!("no letters for {label:?}: {:?}", h.state().keytip_codes()))
     };
-    let typ = |h: &mut Harness<'_, MrPdfApp>, text: &str| {
+    let typ = |h: &mut Harness<'_, VersoloPdfApp>, text: &str| {
         h.input_mut().events.push(Event::Text(text.into()));
         h.run_steps(3);
     };
@@ -1258,8 +1262,8 @@ fn ribbon_keyboard() {
 /// All icons in light and dark, in the ribbon sizes (26 and 16 points).
 #[test]
 fn icon_gallery() {
-    use mrpdf::ui::icons::{Icon, paint};
-    use mrpdf::ui::theme;
+    use versolopdf::ui::icons::{Icon, paint};
+    use versolopdf::ui::theme;
     let _guard = common::lock();
     for dark in [false, true] {
         let mut h = Harness::builder().with_size(egui::vec2(1240.0, 820.0)).wgpu().build_ui(move |ui| {
@@ -1296,7 +1300,7 @@ fn icon_gallery() {
 /// One-letter tool keys and the named undo step.
 #[test]
 fn tool_keys_and_undo_name() {
-    use mrpdf::ui::tools::Tool;
+    use versolopdf::ui::tools::Tool;
     let _guard = common::lock();
     let dir = tempfile::tempdir().unwrap();
     let mut h = harness(vec![sample_file(&dir, 2)], false);
@@ -1327,7 +1331,7 @@ fn tool_keys_and_undo_name() {
 /// together (one undo step) and are deleted together.
 #[test]
 fn select_move_delete_several_comments() {
-    use mrpdf::ui::tools::Tool;
+    use versolopdf::ui::tools::Tool;
     let _guard = common::lock();
     let dir = tempfile::tempdir().unwrap();
     let mut h = harness(vec![sample_file(&dir, 2)], false);
@@ -1338,7 +1342,7 @@ fn select_move_delete_several_comments() {
     h.key_press(egui::Key::R);
     h.run_steps(2);
     drag(&mut h, pos2(560.0, 520.0), pos2(720.0, 600.0));
-    let rects = |h: &mut Harness<'_, MrPdfApp>| -> Vec<mrpdf::geometry::RectF> {
+    let rects = |h: &mut Harness<'_, VersoloPdfApp>| -> Vec<versolopdf::geometry::RectF> {
         let tab = h.state_mut().active_tab_mut().unwrap();
         tab.annotations(0).iter().map(|a| a.rect.normalized()).collect()
     };
@@ -1354,7 +1358,7 @@ fn select_move_delete_several_comments() {
     save(&mut h, "comments-selected");
 
     // Drag the first rectangle at its left edge: both move, shown while dragging.
-    let input = |h: &mut Harness<'_, MrPdfApp>, e: Event| h.input_mut().events.push(e);
+    let input = |h: &mut Harness<'_, VersoloPdfApp>, e: Event| h.input_mut().events.push(e);
     let button = |pos: Pos2, pressed: bool| Event::PointerButton {
         pos,
         button: PointerButton::Primary,
@@ -1401,7 +1405,8 @@ fn undo_history_list() {
         h.run_steps(2);
         drag(&mut h, pos2(560.0, y), pos2(720.0, y + 80.0));
     }
-    let count = |h: &mut Harness<'_, MrPdfApp>| h.state_mut().active_tab_mut().unwrap().annotations(0).len();
+    let count =
+        |h: &mut Harness<'_, VersoloPdfApp>| h.state_mut().active_tab_mut().unwrap().annotations(0).len();
     assert_eq!(count(&mut h), 2);
     h.get_by_label("Liste der letzten Aktionen").click();
     h.run_steps(4);
@@ -1418,15 +1423,15 @@ fn undo_history_list() {
 /// click alone just picks the tool.
 #[test]
 fn hold_down_style_presets() {
-    use mrpdf::model::Rgba;
-    use mrpdf::ui::tools::Tool;
+    use versolopdf::model::Rgba;
+    use versolopdf::ui::tools::Tool;
     let _guard = common::lock();
     let dir = tempfile::tempdir().unwrap();
     let mut h = harness(vec![sample_file(&dir, 1)], false);
     h.run_steps(8);
     tab(&mut h, "Anmerkungen");
     let button = h.get_by_label("Rechteck").rect().center();
-    let input = |h: &mut Harness<'_, MrPdfApp>, e: Event| h.input_mut().events.push(e);
+    let input = |h: &mut Harness<'_, VersoloPdfApp>, e: Event| h.input_mut().events.push(e);
     let press = |pressed: bool| Event::PointerButton {
         pos: button,
         button: PointerButton::Primary,
@@ -1457,8 +1462,8 @@ fn hold_down_style_presets() {
 /// offers to shrink it.
 #[test]
 fn print_dialog_warns_about_cut_pages() {
-    use mrpdf::ui::app::Dialog;
-    use mrpdf::ui::app::commands::Cmd;
+    use versolopdf::ui::app::Dialog;
+    use versolopdf::ui::app::commands::Cmd;
     let _guard = common::lock();
     let dir = tempfile::tempdir().unwrap();
     let mut h = harness(vec![sample_file(&dir, 1)], false);
@@ -1478,7 +1483,7 @@ fn print_dialog_warns_about_cut_pages() {
     h.run_steps(8);
     match h.state().dialog() {
         Some(Dialog::Print(p)) => {
-            assert_eq!(p.settings.scaling, mrpdf::print_layout::Scaling::Shrink);
+            assert_eq!(p.settings.scaling, versolopdf::print_layout::Scaling::Shrink);
             assert!(p.cut.is_empty(), "nothing cut after shrinking: {:?}", p.cut);
         }
         other => panic!("print dialog expected, got {other:?}"),
@@ -1533,7 +1538,7 @@ fn insert_pages_source_list() {
     h.run_steps(3);
     h.get_by_label("Seiten einfügen…").click();
     h.run_steps(3);
-    assert!(matches!(h.state().dialog(), Some(mrpdf::ui::app::Dialog::Pages(_))));
+    assert!(matches!(h.state().dialog(), Some(versolopdf::ui::app::Dialog::Pages(_))));
     h.get_by_role(egui::accesskit::Role::ComboBox).click();
     h.run_steps(3);
     save(&mut h, "les-04-insert-source");
@@ -1555,7 +1560,9 @@ fn review_tools_ui() {
     tab(&mut h, "Überprüfen");
     quick(&mut h, "Wörter zählen");
     match h.state().dialog() {
-        Some(mrpdf::ui::app::Dialog::Message { text, .. }) => assert!(text.contains("Wörter: 18"), "{text}"),
+        Some(versolopdf::ui::app::Dialog::Message { text, .. }) => {
+            assert!(text.contains("Wörter: 18"), "{text}")
+        }
         other => panic!("unexpected dialog {other:?}"),
     }
     save(&mut h, "28-word-count");
@@ -1580,7 +1587,7 @@ fn spell_check_and_comment_menus() {
     let _guard = common::lock();
     let dir = tempfile::tempdir().unwrap();
     let file = sample_file(&dir, 2);
-    // A tiny Hunspell dictionary (MrPDF ships none).
+    // A tiny Hunspell dictionary (VersoloPDF ships none).
     std::fs::write(dir.path().join("mini.aff"), "SET UTF-8\nTRY estinrdaS\n").unwrap();
     std::fs::write(dir.path().join("mini.dic"), "5\nDies\nist\nein\nTest\nNotiz\n").unwrap();
     let settings = Settings {
@@ -1591,7 +1598,7 @@ fn spell_check_and_comment_menus() {
     };
     let mut h = harness_with(settings, vec![file]);
     h.run_steps(10);
-    let notes = |h: &mut Harness<'_, MrPdfApp>| -> Vec<String> {
+    let notes = |h: &mut Harness<'_, VersoloPdfApp>| -> Vec<String> {
         let tab = h.state_mut().active_tab_mut().unwrap();
         tab.doc
             .annotations(0)
@@ -1604,9 +1611,9 @@ fn spell_check_and_comment_menus() {
     {
         let tab = h.state_mut().active_tab_mut().unwrap();
         for (i, text) in ["Dies ist ein Tset", "Notiz"].into_iter().enumerate() {
-            let mut note = mrpdf::pdf_edit::NewAnnotation::new(AnnotKind::Note, Default::default());
+            let mut note = versolopdf::pdf_edit::NewAnnotation::new(AnnotKind::Note, Default::default());
             let x = 400.0 + 40.0 * i as f32;
-            note.rect = mrpdf::geometry::RectF::new(x, 700.0, x + 20.0, 720.0);
+            note.rect = versolopdf::geometry::RectF::new(x, 700.0, x + 20.0, 720.0);
             note.contents = text.into();
             tab.doc.add_annotation(0, &note).unwrap();
         }
@@ -1619,7 +1626,7 @@ fn spell_check_and_comment_menus() {
     h.get_by_label("Prüfung starten").click();
     h.run_steps(4);
     match h.state().dialog() {
-        Some(mrpdf::ui::app::Dialog::SpellCheck(s)) => {
+        Some(versolopdf::ui::app::Dialog::SpellCheck(s)) => {
             let words: Vec<&str> = s.findings.as_ref().unwrap().iter().map(|f| f.word.as_str()).collect();
             assert_eq!(words, ["Tset"]);
             assert_eq!(s.replacement, "Test");
@@ -1667,16 +1674,12 @@ fn organize_ribbon_menus() {
     tab(&mut h, "Dokumentaufbau");
     h.get_by_label("Einfügen").click();
     h.run_steps(3);
-    // The insert menu lists the entries; scanning is offered but disabled.
-    for label in [
-        "Seiten einfügen…",
-        "Leere Seiten einfügen…",
-        "Bilder einfügen…",
-        "Gescannte Seiten einfügen…",
-        "RTF einfügen…",
-    ] {
+    // The insert menu lists the entries; nothing that only stays greyed out.
+    for label in ["Seiten einfügen…", "Leere Seiten einfügen…", "Bilder einfügen…", "RTF einfügen…"]
+    {
         assert!(h.query_by_label(label).is_some(), "{label} missing");
     }
+    assert!(h.query_by_label("Gescannte Seiten einfügen…").is_none());
     save(&mut h, "30-insert-menu");
     h.key_press(egui::Key::Escape);
     h.run_steps(3);
@@ -1696,8 +1699,8 @@ fn page_dialogs_ui() {
     let file = sample_file(&dir, 3);
     let mut h = harness(vec![file], false);
     h.run_steps(10);
-    let count = |h: &Harness<'_, MrPdfApp>| h.state().active_tab().unwrap().doc.page_count();
-    let ok = |h: &mut Harness<'_, MrPdfApp>| {
+    let count = |h: &Harness<'_, VersoloPdfApp>| h.state().active_tab().unwrap().doc.page_count();
+    let ok = |h: &mut Harness<'_, VersoloPdfApp>| {
         h.get_all_by_label("OK").last().unwrap().click();
         h.run_steps(6);
     };
@@ -1739,7 +1742,7 @@ fn page_dialogs_ui() {
     ok(&mut h);
     let rotations: Vec<_> =
         (0..5).map(|p| h.state().active_tab().unwrap().doc.geometry(p).unwrap().rotation).collect();
-    assert!(rotations.iter().all(|r| *r == mrpdf::geometry::Rotation::R90));
+    assert!(rotations.iter().all(|r| *r == versolopdf::geometry::Rotation::R90));
 
     // Normalize removes the rotation again without visual change.
     quick(&mut h, "Seiten normalisieren");
@@ -1747,7 +1750,7 @@ fn page_dialogs_ui() {
     ok(&mut h);
     assert_eq!(
         h.state().active_tab().unwrap().doc.geometry(0).unwrap().rotation,
-        mrpdf::geometry::Rotation::R0
+        versolopdf::geometry::Rotation::R0
     );
 
     // Delete blank pages (the inserted one) and show the duplicates.
@@ -1757,7 +1760,7 @@ fn page_dialogs_ui() {
     assert_eq!(count(&h), 4, "the blank page is gone");
     quick(&mut h, "Duplikate finden");
     ok(&mut h);
-    assert!(matches!(h.state().dialog(), Some(mrpdf::ui::app::Dialog::Duplicates { .. })));
+    assert!(matches!(h.state().dialog(), Some(versolopdf::ui::app::Dialog::Duplicates { .. })));
     h.key_press(egui::Key::Escape);
     h.run_steps(3);
 
@@ -1800,7 +1803,7 @@ fn combine_split_overlay_ui() {
     let file = sample_file(&dir, 7);
     let mut h = harness(vec![file], false);
     h.run_steps(10);
-    let ok = |h: &mut Harness<'_, MrPdfApp>| {
+    let ok = |h: &mut Harness<'_, VersoloPdfApp>| {
         h.get_all_by_label("OK").last().unwrap().click();
         h.run_steps(8);
     };
@@ -1851,8 +1854,8 @@ fn page_shape_ui() {
     let mut h = harness(vec![file], false);
     h.run_steps(10);
     let size =
-        |h: &Harness<'_, MrPdfApp>| h.state().active_tab().unwrap().doc.geometry(0).unwrap().view_size();
-    let ok = |h: &mut Harness<'_, MrPdfApp>| {
+        |h: &Harness<'_, VersoloPdfApp>| h.state().active_tab().unwrap().doc.geometry(0).unwrap().view_size();
+    let ok = |h: &mut Harness<'_, VersoloPdfApp>| {
         h.get_all_by_label("OK").last().unwrap().click();
         h.run_steps(8);
     };
@@ -1888,9 +1891,9 @@ fn page_shape_ui() {
 
     // Crop tool: drag a rectangle on page 1.
     quick(&mut h, "Seite zuschneiden");
-    assert_eq!(h.state().tool(), mrpdf::ui::tools::Tool::Crop);
-    let at = |h: &Harness<'_, MrPdfApp>, x: f32, y: f32| {
-        h.state().active_tab().unwrap().screen_pos(0, mrpdf::geometry::PointF::new(x, y)).unwrap()
+    assert_eq!(h.state().tool(), versolopdf::ui::tools::Tool::Crop);
+    let at = |h: &Harness<'_, VersoloPdfApp>, x: f32, y: f32| {
+        h.state().active_tab().unwrap().screen_pos(0, versolopdf::geometry::PointF::new(x, y)).unwrap()
     };
     let (a, b) = (at(&h, 60.0, 760.0), at(&h, 400.0, 560.0));
     drag(&mut h, a, b);
@@ -1907,10 +1910,10 @@ fn page_marks_ui() {
     let file = sample_file(&dir, 2);
     let mut h = harness(vec![file], false);
     h.run_steps(10);
-    let text = |h: &mut Harness<'_, MrPdfApp>, p: usize| {
+    let text = |h: &mut Harness<'_, VersoloPdfApp>, p: usize| {
         h.state_mut().active_tab_mut().unwrap().doc.page_text(p).unwrap().all_text()
     };
-    let ok = |h: &mut Harness<'_, MrPdfApp>| {
+    let ok = |h: &mut Harness<'_, VersoloPdfApp>| {
         h.get_all_by_label("OK").last().unwrap().click();
         h.run_steps(8);
     };
@@ -2045,7 +2048,7 @@ fn file_operations_and_recovery() {
     open_backstage(&mut h);
     h.get_by_label("Umbenennen").click();
     h.run_steps(4);
-    assert!(matches!(h.state().dialog(), Some(mrpdf::ui::app::Dialog::RenameFile { .. })));
+    assert!(matches!(h.state().dialog(), Some(versolopdf::ui::app::Dialog::RenameFile { .. })));
     // One frame: delete the old name, type the new one.
     for _ in 0.."Beispiel".len() {
         h.input_mut().events.push(Event::Key {
@@ -2070,7 +2073,7 @@ fn file_operations_and_recovery() {
     open_backstage(&mut h);
     h.get_by_label("Zurücksetzen").click();
     h.run_steps(3);
-    assert!(matches!(h.state().dialog(), Some(mrpdf::ui::app::Dialog::Confirm { .. })));
+    assert!(matches!(h.state().dialog(), Some(versolopdf::ui::app::Dialog::Confirm { .. })));
     h.get_by_label("OK").click();
     h.run_steps(4);
     assert!(!h.state().active_tab().unwrap().doc.is_modified());
@@ -2079,7 +2082,7 @@ fn file_operations_and_recovery() {
     // A recovery copy of the changed document …
     h.state_mut().active_tab_mut().unwrap().doc.rotate_pages(&[1], 90).unwrap();
     h.state_mut().write_recovery_now();
-    assert_eq!(mrpdf::files::list_recovery(&recovery).len(), 1);
+    assert_eq!(versolopdf::files::list_recovery(&recovery).len(), 1);
     // … is offered by the next start (as after a crash).
     drop(h);
     let mut h = harness(Vec::new(), false);
@@ -2094,7 +2097,7 @@ fn file_operations_and_recovery() {
     assert_eq!(tab.doc.path(), Some(renamed.as_path()), "saving writes the original file");
     let (w, hgt) = tab.doc.geometry(1).unwrap().view_size();
     assert!(w > hgt, "the change is restored");
-    assert!(mrpdf::files::list_recovery(&recovery).is_empty());
+    assert!(versolopdf::files::list_recovery(&recovery).is_empty());
 }
 
 #[test]
@@ -2107,7 +2110,7 @@ fn optimize_and_space_usage() {
     open_backstage(&mut h);
     h.get_by_label("Optimiert speichern").click();
     h.run_steps(4);
-    assert!(matches!(h.state().dialog(), Some(mrpdf::ui::app::Dialog::Optimize(_))));
+    assert!(matches!(h.state().dialog(), Some(versolopdf::ui::app::Dialog::Optimize(_))));
     save(&mut h, "70-optimize-images");
     for (page, shot) in [("Schriftarten", "71-optimize-fonts"), ("Aufräumen", "72-optimize-cleanup")] {
         h.get_by_label(page).click();
@@ -2117,14 +2120,14 @@ fn optimize_and_space_usage() {
     // "Platzverbrauch untersuchen…" shows the report.
     h.get_by_label("Platzverbrauch untersuchen…").click();
     h.run_steps(4);
-    assert!(matches!(h.state().dialog(), Some(mrpdf::ui::app::Dialog::SpaceUsage(_))));
+    assert!(matches!(h.state().dialog(), Some(versolopdf::ui::app::Dialog::SpaceUsage(_))));
     assert!(h.query_all_by_label("Seiteninhalt").next().is_some());
     save(&mut h, "73-space-usage");
     h.key_press(egui::Key::Escape);
     h.run_steps(3);
     // Optimize into a new file; the tab shows it afterwards.
     let out = dir.path().join("Optimiert.pdf");
-    let options = mrpdf::optimize::OptimizeOptions { metadata: true, ..Default::default() };
+    let options = versolopdf::optimize::OptimizeOptions { metadata: true, ..Default::default() };
     let ctx = h.ctx.clone();
     h.state_mut().save_optimized_to(&ctx, &out, &options);
     h.run_steps(4);
@@ -2133,7 +2136,7 @@ fn optimize_and_space_usage() {
     assert_eq!(tab.doc.path(), Some(out.as_path()));
     assert_eq!(tab.doc.page_count(), 3);
     assert!(tab.doc.page_text(2).unwrap().all_text().contains("Page 3"));
-    assert!(matches!(h.state().dialog(), Some(mrpdf::ui::app::Dialog::Message { .. })));
+    assert!(matches!(h.state().dialog(), Some(versolopdf::ui::app::Dialog::Message { .. })));
     save(&mut h, "74-optimize-result");
 }
 
@@ -2146,7 +2149,7 @@ fn print_and_export_dialogs() {
     h.run_steps(10);
     h.key_press_modifiers(Modifiers::COMMAND, egui::Key::P);
     h.run_steps(5);
-    assert!(matches!(h.state().dialog(), Some(mrpdf::ui::app::Dialog::Print(_))));
+    assert!(matches!(h.state().dialog(), Some(versolopdf::ui::app::Dialog::Print(_))));
     assert!(h.query_all_by_label("Position und Skalierung").next().is_some());
     save(&mut h, "75-print-dialog");
     h.key_press(egui::Key::Escape);
@@ -2158,7 +2161,7 @@ fn print_and_export_dialogs() {
     h.run_steps(3);
     h.get_by_label("In Bilder").click();
     h.run_steps(5);
-    assert!(matches!(h.state().dialog(), Some(mrpdf::ui::app::Dialog::ExportImages(_))));
+    assert!(matches!(h.state().dialog(), Some(versolopdf::ui::app::Dialog::ExportImages(_))));
     save(&mut h, "76-export-images");
     h.get_by_label("Öffne Zielordner und wähle Dateien aus").click();
     h.run_steps(2);
@@ -2174,7 +2177,7 @@ fn print_and_export_dialogs() {
     h.run_steps(3);
     h.get_by_label("In Microsoft-Word-Dokument").click();
     h.run_steps(4);
-    assert!(matches!(h.state().dialog(), Some(mrpdf::ui::app::Dialog::ExportWord { .. })));
+    assert!(matches!(h.state().dialog(), Some(versolopdf::ui::app::Dialog::ExportWord { .. })));
     save(&mut h, "77-export-word");
 }
 
@@ -2187,7 +2190,7 @@ fn document_properties_dialog() {
     h.run_steps(10);
     h.key_press_modifiers(Modifiers::COMMAND, egui::Key::D);
     h.run_steps(4);
-    assert!(matches!(h.state().dialog(), Some(mrpdf::ui::app::Dialog::Properties(_))));
+    assert!(matches!(h.state().dialog(), Some(versolopdf::ui::app::Dialog::Properties(_))));
     assert!(h.query_all_by_label("Beispiel.pdf").next().is_some(), "file name shown");
     save(&mut h, "78-properties-description");
     for (page, shot) in [
@@ -2227,7 +2230,7 @@ fn document_properties_dialog() {
     assert!(tab.doc.properties().unwrap().center_window);
 }
 
-fn open_backstage(h: &mut Harness<'_, MrPdfApp>) {
+fn open_backstage(h: &mut Harness<'_, VersoloPdfApp>) {
     h.get_by_label("Datei").click();
     h.run_steps(4);
     assert!(h.state().backstage_open());
@@ -2279,15 +2282,13 @@ fn file_backstage() {
     // "Von URL öffnen" asks for the address.
     h.get_by_label("Von URL öffnen").click();
     h.run_steps(3);
-    assert!(matches!(h.state().dialog(), Some(mrpdf::ui::app::Dialog::OpenUrl { .. })));
+    assert!(matches!(h.state().dialog(), Some(versolopdf::ui::app::Dialog::OpenUrl { .. })));
     save(&mut h, "65-open-url");
     h.key_press(egui::Key::Escape);
     h.run_steps(3);
     open_backstage(&mut h);
-    // Disabled entries do nothing.
-    h.get_by_label("Speicherort hinzufügen").click();
-    h.run_steps(3);
-    assert!(h.state().backstage_open() && h.state().dialog().is_none());
+    // Cloud places are not offered (VersoloPDF works with local files).
+    assert!(h.query_by_label("Speicherort hinzufügen").is_none());
     // "Einstellungen verwalten": "zurücksetzen" asks first.
     h.get_by_label("Einstellungen verwalten").click();
     h.run_steps(3);
@@ -2296,7 +2297,7 @@ fn file_backstage() {
     save(&mut h, "86-backstage-manage-settings");
     h.get_by_label("Einstellungen zurücksetzen").click();
     h.run_steps(3);
-    assert!(matches!(h.state().dialog(), Some(mrpdf::ui::app::Dialog::Confirm { .. })));
+    assert!(matches!(h.state().dialog(), Some(versolopdf::ui::app::Dialog::Confirm { .. })));
     h.key_press(egui::Key::Escape);
     h.run_steps(3);
     if !h.state().backstage_open() {
@@ -2334,12 +2335,12 @@ fn file_backstage() {
     // Strg+K opens the settings, Strg+D the document properties.
     h.key_press_modifiers(Modifiers::COMMAND, egui::Key::K);
     h.run_steps(3);
-    assert!(matches!(h.state().dialog(), Some(mrpdf::ui::app::Dialog::Settings { .. })));
+    assert!(matches!(h.state().dialog(), Some(versolopdf::ui::app::Dialog::Settings { .. })));
     h.key_press(egui::Key::Escape);
     h.run_steps(3);
     h.key_press_modifiers(Modifiers::COMMAND, egui::Key::D);
     h.run_steps(3);
-    assert!(matches!(h.state().dialog(), Some(mrpdf::ui::app::Dialog::Properties(_))));
+    assert!(matches!(h.state().dialog(), Some(versolopdf::ui::app::Dialog::Properties(_))));
     h.key_press(egui::Key::Escape);
     h.run_steps(3);
     // "Alle schließen" asks for the changed document, "Nein" closes all.
@@ -2348,7 +2349,7 @@ fn file_backstage() {
     open_backstage(&mut h);
     h.get_by_label("Alle schließen").click();
     h.run_steps(4);
-    assert!(matches!(h.state().dialog(), Some(mrpdf::ui::app::Dialog::Unsaved { .. })));
+    assert!(matches!(h.state().dialog(), Some(versolopdf::ui::app::Dialog::Unsaved { .. })));
     save(&mut h, "62-close-all-question");
     h.get_by_label("›  Abbrechen").click();
     h.run_steps(3);
@@ -2360,7 +2361,7 @@ fn file_backstage() {
     h.run_steps(5);
     // The new blank document is unsaved too: second question.
     assert_eq!(h.state().tab_count(), 1);
-    assert!(matches!(h.state().dialog(), Some(mrpdf::ui::app::Dialog::Unsaved { .. })));
+    assert!(matches!(h.state().dialog(), Some(versolopdf::ui::app::Dialog::Unsaved { .. })));
     h.get_by_label("›  Nein").click();
     h.run_steps(5);
     assert_eq!(h.state().tab_count(), 0);
@@ -2369,7 +2370,7 @@ fn file_backstage() {
 
 #[test]
 fn settings_dialog() {
-    use mrpdf::ui::app::Dialog;
+    use versolopdf::ui::app::Dialog;
     let _guard = common::lock();
     let dir = tempfile::tempdir().unwrap();
     let file = sample_file(&dir, 3);
@@ -2378,9 +2379,13 @@ fn settings_dialog() {
     h.key_press_modifiers(Modifiers::COMMAND, egui::Key::K);
     h.run_steps(3);
     assert!(matches!(h.state().dialog(), Some(Dialog::Settings(_))));
-    // All 38 categories are listed; "Allgemein" is shown first.
+    // The categories with options are listed; "Allgemein" is shown first.
     for label in ["Dokumente", "Seitenanzeige", "Identität", "Sicherheit", "Vollbild", "Vorlesen"] {
         assert!(h.query_all_by_label(label).next().is_some(), "{label} missing");
+    }
+    // Categories without options are not offered at all.
+    for label in ["Lizenz", "SharePoint", "KI-Assistent", "3D-Messung"] {
+        assert!(h.query_all_by_label(label).next().is_none(), "{label} listed");
     }
     save(&mut h, "87-settings-general");
     // A checkbox changes only the draft; "Übernehmen" applies it and keeps the dialog.
@@ -2405,11 +2410,6 @@ fn settings_dialog() {
     h.run_steps(3);
     assert!(h.query_by_label("Vertrauensliste").is_some(), "security page shown");
     save(&mut h, "89-settings-security");
-    h.get_by_label("Lizenz").scroll_to_me();
-    h.run_steps(6);
-    h.get_by_label("Lizenz").click();
-    h.run_steps(3);
-    assert!(h.query_by_label("❌ MrPDF ist freie Software und braucht keine Lizenz.").is_some());
     // Signaturen and Neue Version have pages now.
     h.get_by_label("Signaturen").scroll_to_me();
     h.run_steps(6);
@@ -2458,7 +2458,7 @@ fn settings_dialog() {
 
 #[test]
 fn narrow_window_and_movable_dialog() {
-    use mrpdf::ui::app::Dialog;
+    use versolopdf::ui::app::Dialog;
     let _guard = common::lock();
     let dir = tempfile::tempdir().unwrap();
     let file = sample_file(&dir, 2);
@@ -2490,7 +2490,7 @@ fn narrow_window_and_movable_dialog() {
     save(&mut h, "94-ribbon-collapsed-group");
     h.get_by_label("Verweis erstellen").click();
     h.run_steps(3);
-    assert_eq!(h.state().tool(), mrpdf::ui::tools::Tool::Link);
+    assert_eq!(h.state().tool(), versolopdf::ui::tools::Tool::Link);
     // Dialogs are windows: drag the title bar, close with ✕.
     h.set_size(egui::vec2(1280.0, 820.0));
     h.run_steps(16);
@@ -2517,10 +2517,10 @@ fn narrow_window_and_movable_dialog() {
 
 #[test]
 fn transitions_tab_windows_and_portfolio() {
-    use mrpdf::transitions::{Direction, Speed, Style, Transition};
-    use mrpdf::ui::app::Dialog;
-    use mrpdf::ui::app::commands::Cmd;
-    use mrpdf::ui::app::view_cmds::ViewCmd as V;
+    use versolopdf::transitions::{Direction, Speed, Style, Transition};
+    use versolopdf::ui::app::Dialog;
+    use versolopdf::ui::app::commands::Cmd;
+    use versolopdf::ui::app::view_cmds::ViewCmd as V;
     let _guard = common::lock();
     let dir = tempfile::tempdir().unwrap();
     let file = sample_file(&dir, 3);
@@ -2530,7 +2530,7 @@ fn transitions_tab_windows_and_portfolio() {
     h.run_steps(12);
     h.state_mut().set_active_tab(0);
     h.run_steps(3);
-    let run = |h: &mut Harness<'_, MrPdfApp>, cmd: Cmd| {
+    let run = |h: &mut Harness<'_, VersoloPdfApp>, cmd: Cmd| {
         let ctx = h.ctx.clone();
         h.state_mut().run(&ctx, cmd);
         h.run_steps(4);
@@ -2579,7 +2579,7 @@ fn transitions_tab_windows_and_portfolio() {
     h.run_steps(3);
     assert_eq!(h.state().tab_count(), 2);
     assert!(h.state().spawned_windows().is_empty());
-    // ... a saved one goes to a separate MrPDF and leaves this window.
+    // ... a saved one goes to a separate VersoloPDF and leaves this window.
     h.state_mut().set_active_tab(1);
     h.run_steps(2);
     run(&mut h, Cmd::View(V::MoveTabNewWindow));
@@ -2597,11 +2597,15 @@ fn transitions_tab_windows_and_portfolio() {
     h.run_steps(3);
     // A portfolio shows its file list; a PDF in it opens in a new tab.
     let files = vec![
-        mrpdf::portfolio::NewFile { name: "Bericht.pdf".into(), data: common::text_pdf(2), modified: None },
-        mrpdf::portfolio::NewFile { name: "Notiz.txt".into(), data: b"Hallo".to_vec(), modified: None },
+        versolopdf::portfolio::NewFile {
+            name: "Bericht.pdf".into(),
+            data: common::text_pdf(2),
+            modified: None,
+        },
+        versolopdf::portfolio::NewFile { name: "Notiz.txt".into(), data: b"Hallo".to_vec(), modified: None },
     ];
     let mappe = dir.path().join("Mappe.pdf");
-    std::fs::write(&mappe, mrpdf::portfolio::create(&files, "Mappe", true).unwrap()).unwrap();
+    std::fs::write(&mappe, versolopdf::portfolio::create(&files, "Mappe", true).unwrap()).unwrap();
     let ctx = h.ctx.clone();
     h.state_mut().open_path(&ctx, mappe, None);
     h.run_steps(6);
@@ -2630,27 +2634,27 @@ fn backstage_and_tool_at_start() {
     let _guard = common::lock();
     let settings = Settings {
         language: Language::German,
-        default_tool: mrpdf::ui::tools::Tool::SelectText,
+        default_tool: versolopdf::ui::tools::Tool::SelectText,
         ..Settings::default()
     };
     let mut h = harness_with(settings, Vec::new());
     h.run_steps(5);
     // "Das Dateimenü beim Start anzeigen" is on by default.
     assert!(h.state().backstage_open());
-    assert_eq!(h.state().tool(), mrpdf::ui::tools::Tool::SelectText);
+    assert_eq!(h.state().tool(), versolopdf::ui::tools::Tool::SelectText);
 }
 
 /// "Dokument signieren" with a stored digital ID, then "Signaturen überprüfen"
 /// and the hint when a signed document is opened.
 #[test]
 fn sign_and_check_document() {
-    use mrpdf::ui::app::Dialog;
-    use mrpdf::ui::app::commands::Cmd;
+    use versolopdf::ui::app::Dialog;
+    use versolopdf::ui::app::commands::Cmd;
     let _guard = common::lock();
     let dir = tempfile::tempdir().unwrap();
     let ids = dir.path().join("ids");
     std::fs::create_dir_all(&ids).unwrap();
-    let id = mrpdf::sign::id::DigitalId::create(&mrpdf::sign::cert::NewId {
+    let id = versolopdf::sign::id::DigitalId::create(&versolopdf::sign::cert::NewId {
         name: "Erika Test",
         email: "",
         organisation: "",
@@ -2661,8 +2665,8 @@ fn sign_and_check_document() {
     let out = dir.path().join("Beispiel_signiert.pdf");
     // SAFETY: only tests holding the lock read these variables.
     unsafe {
-        std::env::set_var("MRPDF_IDS_DIR", &ids);
-        std::env::set_var("MRPDF_SIGN_SAVE_PATH", &out);
+        std::env::set_var("VERSOLOPDF_IDS_DIR", &ids);
+        std::env::set_var("VERSOLOPDF_SIGN_SAVE_PATH", &out);
     }
     let mut h = harness(vec![sample_file(&dir, 2)], false);
     h.run_steps(8);
@@ -2685,7 +2689,7 @@ fn sign_and_check_document() {
     h.run_steps(10);
     assert!(h.state().dialog().is_none(), "dialog closed: {:?}", h.state().status_text());
     let bytes = std::fs::read(&out).expect("signed file written");
-    let sigs = mrpdf::sign::pdf::signatures(&bytes);
+    let sigs = versolopdf::sign::pdf::signatures(&bytes);
     assert_eq!(sigs.len(), 1);
     assert!(sigs[0].valid() && sigs[0].whole_file, "{sigs:?}");
     assert_eq!(sigs[0].signer, "Erika Test");
@@ -2714,8 +2718,8 @@ fn sign_and_check_document() {
     assert!(status.starts_with("Digital signiert: 1 gültige Signatur"), "{status}");
     // SAFETY: see above.
     unsafe {
-        std::env::remove_var("MRPDF_IDS_DIR");
-        std::env::remove_var("MRPDF_SIGN_SAVE_PATH");
+        std::env::remove_var("VERSOLOPDF_IDS_DIR");
+        std::env::remove_var("VERSOLOPDF_SIGN_SAVE_PATH");
     }
 }
 
@@ -2729,7 +2733,7 @@ fn ribbon_collapse_and_pin() {
     h.run_steps(8);
     save(&mut h, "98-ribbon-compact");
     // "Hand" is a ribbon button (and the title of the properties panel).
-    let hands = |h: &Harness<'_, MrPdfApp>| h.query_all_by_label("Hand").count();
+    let hands = |h: &Harness<'_, VersoloPdfApp>| h.query_all_by_label("Hand").count();
     let pinned = hands(&h);
     h.get_by_label("Menüband reduzieren").click();
     h.run_steps(4);
@@ -2817,7 +2821,7 @@ fn ribbon_height_is_steady() {
             tab(&mut h, name);
             h.run_steps(6);
             heights.push((width, name, h.state().ribbon_height()));
-            let cut = mrpdf::ui::widgets::ribbon_group_too_tall(&h.ctx);
+            let cut = versolopdf::ui::widgets::ribbon_group_too_tall(&h.ctx);
             assert_eq!(cut, None, "group too tall on {name} at {width}");
         }
     }
@@ -2831,7 +2835,7 @@ fn ribbon_height_is_steady() {
     h.run_steps(6);
     heights.push((1800.0, "Format", h.state().ribbon_height()));
     save(&mut h, "99-ribbon-tool-format");
-    assert_eq!(mrpdf::ui::widgets::ribbon_group_too_tall(&h.ctx), None, "group too tall on Format");
+    assert_eq!(versolopdf::ui::widgets::ribbon_group_too_tall(&h.ctx), None, "group too tall on Format");
     h.key_press(egui::Key::Escape);
     h.run_steps(4);
     eprintln!("ribbon heights: {heights:?}");
@@ -2841,11 +2845,95 @@ fn ribbon_height_is_steady() {
     // Hover over a tab: neither it nor its neighbour moves.
     h.set_size(egui::vec2(1280.0, 820.0));
     h.run_steps(6);
-    let rects = |h: &Harness<'_, MrPdfApp>| {
+    let rects = |h: &Harness<'_, VersoloPdfApp>| {
         ["Ansicht", "Anmerkungen"].map(|n| h.get_all_by_label(n).next().unwrap().rect())
     };
     let before = rects(&h);
     h.input_mut().events.push(Event::PointerMoved(before[0].center()));
     h.run_steps(4);
     assert_eq!(rects(&h), before, "tabs moved on hover");
+}
+
+/// Version 1.1: layers pane, QR code field, certifying, no greyed-out
+/// placeholders.
+#[test]
+fn layers_barcode_certify_and_no_placeholders() {
+    use versolopdf::ui::app::commands::Cmd;
+    use versolopdf::ui::app::{Dialog, SidePanel};
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let plan = dir.path().join("Plan.pdf");
+    std::fs::write(&plan, common::layered_pdf()).unwrap();
+    let mut h = harness(vec![plan], false);
+    h.run_steps(12);
+    let run = |h: &mut Harness<'_, VersoloPdfApp>, cmd: Cmd| {
+        let ctx = h.ctx.clone();
+        h.state_mut().run(&ctx, cmd);
+        h.run_steps(4);
+    };
+    // "Ebenen": offered for this document; a click hides a layer.
+    run(&mut h, Cmd::Panel(SidePanel::Layers));
+    assert!(h.query_by_label("Grundriss").is_some(), "layers pane shown");
+    save(&mut h, "110-layers");
+    h.get_by_label("Grundriss").click();
+    h.run_steps(4);
+    let visible = |h: &mut Harness<'_, VersoloPdfApp>| {
+        h.state_mut()
+            .active_tab_mut()
+            .unwrap()
+            .doc
+            .layers()
+            .unwrap()
+            .iter()
+            .map(|l| l.visible)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(visible(&mut h), vec![false, false]);
+
+    // No greyed-out placeholders any more; QR code field instead of a dummy.
+    tab(&mut h, "Umwandeln");
+    assert!(h.query_by_label("Scannen").is_none());
+    tab(&mut h, "Formular");
+    assert!(h.query_by_label("JavaScript-Konsole").is_none());
+    h.get_all_by_label("Barcode (QR-Code)").next().unwrap().click();
+    h.run_steps(3);
+    assert_eq!(h.state().tool(), versolopdf::ui::tools::Tool::FieldBarcode);
+    let at = |h: &Harness<'_, VersoloPdfApp>, x: f32, y: f32| {
+        h.state().active_tab().unwrap().screen_pos(0, versolopdf::geometry::PointF::new(x, y)).unwrap()
+    };
+    let (a, b) = (at(&h, 380.0, 780.0), at(&h, 480.0, 680.0));
+    drag(&mut h, a, b);
+    h.run_steps(4);
+    assert!(matches!(h.state().dialog(), Some(Dialog::NewField(_))), "barcode dialog");
+    h.get_all_by_role(egui::accesskit::Role::MultilineTextInput).last().unwrap().click();
+    h.run_steps(3);
+    h.input_mut().events.push(Event::Text("https://example.org/".into()));
+    h.run_steps(3);
+    save(&mut h, "111-barcode-dialog");
+    h.get_by_label("OK").click();
+    h.run_steps(6);
+    let buttons = {
+        let tab = h.state_mut().active_tab_mut().unwrap();
+        tab.doc
+            .form_fields(0)
+            .unwrap()
+            .into_iter()
+            .filter(|f| f.kind == versolopdf::model::FieldKind::PushButton)
+            .count()
+    };
+    assert_eq!(buttons, 1, "QR code field created");
+    save(&mut h, "112-barcode-field");
+
+    // "Zertifizieren" opens the signing dialog in its certify mode.
+    run(&mut h, Cmd::Certify);
+    assert!(h.query_by_label("Danach erlaubt:").is_some(), "certify dialog");
+    save(&mut h, "113-certify-dialog");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+
+    // "Vorlesen" works in the Accessibility tab too.
+    tab(&mut h, "Barrierefreiheit");
+    assert!(h.query_all_by_label("Vorlesen").next().is_some());
+    let read = Cmd::View(versolopdf::ui::app::view_cmds::ViewCmd::ReadStart);
+    assert!(h.state().cmd_enabled(read), "read aloud enabled");
 }

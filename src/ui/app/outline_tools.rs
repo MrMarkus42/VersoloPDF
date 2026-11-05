@@ -4,11 +4,11 @@
 use egui::Context;
 
 use super::commands::Cmd;
-use super::{Dialog, MrPdfApp};
+use super::{Dialog, VersoloPdfApp};
 use crate::outline::title_case;
 use crate::outline_edit::Scope;
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     /// Starts a bookmark command. Returns false if `cmd` is not one.
     pub(super) fn run_outline(&mut self, ctx: &Context, cmd: Cmd) -> bool {
         let de = self.bm_de();

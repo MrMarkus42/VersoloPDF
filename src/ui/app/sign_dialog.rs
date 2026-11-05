@@ -5,9 +5,10 @@ use std::path::{Path, PathBuf};
 
 use egui::{Color32, Context, RichText, Ui};
 
+use super::commands::Cmd;
 use super::dialogs::{Action, Outcome};
 use super::page_dialogs::{footer, tr};
-use super::{Dialog, MrPdfApp};
+use super::{Dialog, VersoloPdfApp};
 use crate::geometry::RectF;
 use crate::sign::cert::NewId;
 use crate::sign::cms::Check;
@@ -18,7 +19,7 @@ use crate::ui::i18n::Language;
 /// Which digital ID signs.
 #[derive(Debug, Clone, PartialEq)]
 pub enum IdChoice {
-    /// A .pfx file from MrPDF's folder of digital IDs.
+    /// A .pfx file from VersoloPDF's folder of digital IDs.
     Stored(PathBuf),
     /// Another .pfx / .p12 file.
     File(Option<PathBuf>),
@@ -61,6 +62,10 @@ impl Corner {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SignState {
+    /// "Zertifizieren": allowed changes (DocMDP level); None: signing.
+    certify: Option<u8>,
+    /// Add a time stamp from the time stamp authority.
+    time_stamp: bool,
     stored: Vec<PathBuf>,
     choice: IdChoice,
     password: String,
@@ -162,13 +167,15 @@ pub fn check_text(s: &SigInfo, de: bool) -> (bool, String) {
     }
 }
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     fn sign_de(&self) -> bool {
         self.settings.language == Language::German
     }
 
-    /// "Dokument signieren".
-    pub(super) fn open_sign_dialog(&mut self) {
+    /// "Dokument signieren"; with `certify` "Zertifizieren" (DocMDP level),
+    /// `invisible` without a visible signature.
+    pub(super) fn open_sign_dialog(&mut self, certify: Option<u8>, invisible: bool) {
+        let time_stamp = self.settings.sign_time_stamp;
         let Some(tab) = self.tabs.get_mut(self.active) else { return };
         let modified = tab.doc.is_modified();
         let pages = tab.doc.page_count();
@@ -185,8 +192,16 @@ impl MrPdfApp {
             Some(p) => IdChoice::Stored(p.clone()),
             None => IdChoice::New,
         };
-        let placement = if fields.is_empty() { Placement::Visible } else { Placement::Field };
+        let placement = if invisible {
+            Placement::Invisible
+        } else if fields.is_empty() {
+            Placement::Visible
+        } else {
+            Placement::Field
+        };
         self.dialog = Some(Dialog::Sign(Box::new(SignState {
+            certify,
+            time_stamp,
             stored,
             choice,
             password: String::new(),
@@ -264,7 +279,12 @@ impl MrPdfApp {
 
     pub(super) fn sign_dialog(&mut self, ui: &mut Ui, s: &mut SignState) -> (Outcome, Option<Action>) {
         let de = self.sign_de();
-        super::dialogs::set_title(ui, tr(de, "Dokument signieren", "Sign document"));
+        let title = if s.certify.is_some() {
+            tr(de, "Dokument zertifizieren", "Certify document")
+        } else {
+            tr(de, "Dokument signieren", "Sign document")
+        };
+        super::dialogs::set_title(ui, title);
         ui.set_width(460.0);
         let strong = |ui: &mut Ui, text: &str| {
             ui.add_space(6.0);
@@ -354,8 +374,8 @@ impl MrPdfApp {
             ui.label(
                 RichText::new(tr(
                     de,
-                    "Die neue ID wird kennwortgeschützt in MrPDFs Ordner für digitale IDs gespeichert. Sie ist selbst ausgestellt: Empfänger sehen eine gültige Signatur, aber die Identität ist nicht von einer Zertifizierungsstelle bestätigt.",
-                    "The new ID is stored password protected in MrPDF's folder of digital IDs. It is self-signed: recipients see a valid signature, but no certificate authority confirms the identity.",
+                    "Die neue ID wird kennwortgeschützt in VersoloPDFs Ordner für digitale IDs gespeichert. Sie ist selbst ausgestellt: Empfänger sehen eine gültige Signatur, aber die Identität ist nicht von einer Zertifizierungsstelle bestätigt.",
+                    "The new ID is stored password protected in VersoloPDF's folder of digital IDs. It is self-signed: recipients see a valid signature, but no certificate authority confirms the identity.",
                 ))
                 .small()
                 .weak(),
@@ -455,6 +475,63 @@ impl MrPdfApp {
                 );
             }
         }
+        if let Some(level) = &mut s.certify {
+            strong(ui, tr(de, "Zertifizierung", "Certification"));
+            ui.horizontal(|ui| {
+                ui.label(tr(de, "Danach erlaubt:", "Allowed afterwards:"));
+                egui::ComboBox::from_id_salt("certify-level")
+                    .selected_text(sigpdf::certify_names(*level, de))
+                    .width(280.0)
+                    .show_ui(ui, |ui| {
+                        for p in 1..=3u8 {
+                            ui.selectable_value(level, p, sigpdf::certify_names(p, de));
+                        }
+                    });
+            });
+            ui.label(
+                RichText::new(tr(
+                    de,
+                    "Eine Zertifizierung ist die erste Signatur eines Dokuments und legt fest, welche Änderungen sie gültig lassen.",
+                    "A certification is the first signature of a document and sets which changes keep it valid.",
+                ))
+                .small()
+                .weak(),
+            );
+            if s.signed {
+                ui.colored_label(
+                    Color32::from_rgb(190, 110, 0),
+                    tr(
+                        de,
+                        "Das Dokument ist bereits signiert und kann daher nicht mehr zertifiziert werden.",
+                        "The document is already signed and can therefore no longer be certified.",
+                    ),
+                );
+            }
+        }
+        strong(ui, tr(de, "Zeitstempel", "Time stamp"));
+        ui.checkbox(
+            &mut s.time_stamp,
+            tr(
+                de,
+                "Zeitstempel eines Zeitstempeldienstes hinzufügen",
+                "Add a time stamp from a time stamp authority",
+            ),
+        );
+        ui.label(
+            RichText::new(if de {
+                format!(
+                    "Bestätigt unabhängig den Zeitpunkt der Signatur. Dazu wird nur ein Prüfwert (kein Dokumentinhalt) an {} gesendet.",
+                    self.settings.tsa_url
+                )
+            } else {
+                format!(
+                    "Confirms the time of the signature independently. Only a hash value (no document content) is sent to {}.",
+                    self.settings.tsa_url
+                )
+            })
+            .small()
+            .weak(),
+        );
         if s.modified && s.signed {
             ui.add_space(4.0);
             ui.colored_label(
@@ -481,7 +558,13 @@ impl MrPdfApp {
             .weak(),
         );
 
-        let (ok, cancel, _) = footer(ui, de, true, false, tr(de, "Signieren", "Sign"));
+        let can = !(s.certify.is_some() && s.signed);
+        let button = if s.certify.is_some() {
+            tr(de, "Zertifizieren", "Certify")
+        } else {
+            tr(de, "Signieren", "Sign")
+        };
+        let (ok, cancel, _) = footer(ui, de, can, false, button);
         if cancel {
             return (Outcome::Close, None);
         }
@@ -518,8 +601,47 @@ impl MrPdfApp {
             reason: s.reason.trim().into(),
             location: s.location.trim().into(),
             contact: s.contact.trim().into(),
+            certify: s.certify,
+            time_stamp: s.time_stamp.then(|| self.settings.tsa_url.clone()),
         };
+        // The choice is kept for the next time.
+        self.settings.sign_time_stamp = s.time_stamp;
         (Outcome::Close, Some(Box::new(move |app, ctx| app.sign_active(ctx, &id, &opts))))
+    }
+
+    /// "Zeitstempel": a document time stamp, after a confirmation.
+    pub(super) fn ask_time_stamp(&mut self) {
+        let de = self.sign_de();
+        let text = if de {
+            format!(
+                "Ein Zeitstempel bestätigt, dass das Dokument in diesem Zustand zum jetzigen Zeitpunkt vorlag.\n\nDazu wird nur ein Prüfwert (kein Dokumentinhalt) an den Zeitstempeldienst {} gesendet. Danach wählen Sie, wo die Datei gespeichert wird.",
+                self.settings.tsa_url
+            )
+        } else {
+            format!(
+                "A time stamp confirms that the document existed in this state at the current time.\n\nOnly a hash value (no document content) is sent to the time stamp authority {}. Afterwards you choose where the file is saved.",
+                self.settings.tsa_url
+            )
+        };
+        let title = Cmd::TimeStampDocument.label(self.settings.language).to_string();
+        self.dialog = Some(Dialog::Confirm { title, text, cmd: Cmd::TimeStampDocument });
+    }
+
+    /// Adds a document time stamp and saves the result where the user wants.
+    pub(super) fn time_stamp_active(&mut self, ctx: &Context) {
+        let de = self.sign_de();
+        let url = self.settings.tsa_url.clone();
+        let Some(tab) = self.tabs.get_mut(self.active) else { return };
+        let bytes = match tab.doc.to_bytes() {
+            Ok(b) => b,
+            Err(e) => return self.show_error(&e),
+        };
+        let stamped = match sigpdf::time_stamp_document(&bytes, &url) {
+            Ok(b) => b,
+            Err(e) => return self.show_error(&e),
+        };
+        self.save_signed(ctx, &stamped, tr(de, "_zeitgestempelt", "_timestamped"));
+        self.set_status(ctx, tr(de, "Zeitstempel hinzugefügt und gespeichert", "Time stamp added and saved"));
     }
 
     /// Signs the active document and saves the result where the user wants.
@@ -530,7 +652,6 @@ impl MrPdfApp {
             Ok(b) => b,
             Err(e) => return self.show_error(&e),
         };
-        let current = tab.doc.path().map(Path::to_path_buf);
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs() as i64);
@@ -538,25 +659,40 @@ impl MrPdfApp {
             Ok(b) => b,
             Err(e) => return self.show_error(&e),
         };
+        let suffix = if opts.certify.is_some() {
+            tr(de, "_zertifiziert", "_certified")
+        } else {
+            tr(de, "_signiert", "_signed")
+        };
+        if self.save_signed(ctx, &signed, suffix) {
+            self.set_status(ctx, tr(de, "Dokument signiert und gespeichert", "Document signed and saved"));
+        }
+    }
+
+    /// Saves a signed or time stamped file where the user wants and shows
+    /// it. Returns false if the user cancelled.
+    fn save_signed(&mut self, ctx: &Context, signed: &[u8], suffix: &str) -> bool {
+        let Some(tab) = self.tabs.get(self.active) else { return false };
+        let current = tab.doc.path().map(Path::to_path_buf);
         let stem = current
             .as_ref()
             .and_then(|p| p.file_stem())
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| tab.title().trim_end_matches(".pdf").to_string());
-        let mut dialog = rfd::FileDialog::new()
-            .add_filter("PDF", &["pdf"])
-            .set_file_name(format!("{stem}{}.pdf", tr(de, "_signiert", "_signed")));
+        let mut dialog =
+            rfd::FileDialog::new().add_filter("PDF", &["pdf"]).set_file_name(format!("{stem}{suffix}.pdf"));
         if let Some(dir) = current.as_ref().and_then(|p| p.parent()) {
             dialog = dialog.set_directory(dir);
         }
-        // MRPDF_SIGN_SAVE_PATH replaces the file dialog (tests).
-        let chosen = match std::env::var_os("MRPDF_SIGN_SAVE_PATH") {
+        // VERSOLOPDF_SIGN_SAVE_PATH replaces the file dialog (tests).
+        let chosen = match std::env::var_os("VERSOLOPDF_SIGN_SAVE_PATH") {
             Some(p) => Some(PathBuf::from(p)),
             None => dialog.save_file(),
         };
-        let Some(dest) = chosen else { return };
-        if let Err(e) = std::fs::write(&dest, &signed) {
-            return self.show_error(&crate::Error::io(&dest, e));
+        let Some(dest) = chosen else { return false };
+        if let Err(e) = std::fs::write(&dest, signed) {
+            self.show_error(&crate::Error::io(&dest, e));
+            return false;
         }
         log::info!("Dokument signiert: {}", dest.display());
         // The signed file replaces an open document of the same name, else opens.
@@ -571,7 +707,7 @@ impl MrPdfApp {
         } else {
             self.open_path(ctx, dest, None);
         }
-        self.set_status(ctx, tr(de, "Dokument signiert und gespeichert", "Document signed and saved"));
+        true
     }
 
     /// "Signaturen überprüfen".
@@ -618,10 +754,16 @@ impl MrPdfApp {
                     ui.painter().line_segment([c + egui::vec2(-4.0, 4.0), c + egui::vec2(4.0, -4.0)], st);
                 }
                 ui.vertical(|ui| {
+                    let kind = if s.doc_time_stamp {
+                        tr(de, "Zeitstempel", "Time stamp")
+                    } else if s.certified.is_some() {
+                        tr(de, "Zertifizierung", "Certification")
+                    } else {
+                        tr(de, "Signatur", "Signature")
+                    };
                     ui.label(
                         RichText::new(format!(
-                            "{} {} – {}",
-                            tr(de, "Signatur", "Signature"),
+                            "{kind} {} – {}",
                             i + 1,
                             if s.signer.is_empty() { s.field.as_str() } else { s.signer.as_str() }
                         ))
@@ -638,11 +780,27 @@ impl MrPdfApp {
                         ui.end_row();
                     }
                 };
-                row(tr(de, "Signiert am:", "Signed on:"), &s.time);
+                if s.doc_time_stamp {
+                    row(tr(de, "Zeitpunkt:", "Time:"), &s.time);
+                } else {
+                    row(tr(de, "Signiert am:", "Signed on:"), &s.time);
+                }
+                if let Some(p) = s.certified {
+                    row(tr(de, "Danach erlaubt:", "Allowed afterwards:"), sigpdf::certify_names(p, de));
+                }
+                if let Some(t) = s.time_stamp.as_ref().filter(|_| !s.doc_time_stamp) {
+                    let text = match &t.check {
+                        Check::Valid => format!("{} ({})", t.time, t.authority),
+                        _ => format!("{} – {}", t.time, tr(de, "ungültig", "invalid")),
+                    };
+                    row(tr(de, "Zeitstempel:", "Time stamp:"), &text);
+                }
                 row(tr(de, "Grund:", "Reason:"), &s.reason);
                 row(tr(de, "Ort:", "Location:"), &s.location);
                 row(tr(de, "Feld:", "Field:"), &s.field);
-                row(tr(de, "Zertifikat gültig bis:", "Certificate valid until:"), &day(&s.cert_valid_until));
+                if !s.doc_time_stamp {
+                    row(tr(de, "Zertifikat gültig bis:", "Certificate valid until:"), &day(&s.cert_valid_until));
+                }
                 let who = if s.self_signed {
                     tr(
                         de,
@@ -752,7 +910,7 @@ mod tests {
 
     #[test]
     fn id_names_do_not_overwrite() {
-        let dir = std::env::temp_dir().join(format!("mrpdf-ids-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("versolopdf-ids-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let first = id_file_name(&dir, "Erika M/ustermann");
         assert_eq!(first.file_name().unwrap(), "Erika M_ustermann.pfx");

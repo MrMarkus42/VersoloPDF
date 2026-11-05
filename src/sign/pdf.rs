@@ -23,9 +23,10 @@ fn bad(what: impl Into<String>) -> Error {
 }
 
 /// Where the signature goes.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum Place {
     /// No visible appearance.
+    #[default]
     Invisible,
     /// An existing empty signature field (by its full name).
     Field(String),
@@ -33,12 +34,40 @@ pub enum Place {
     Rect { page: usize, rect: RectF },
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct SignOptions {
     pub place: Place,
     pub reason: String,
     pub location: String,
     pub contact: String,
+    /// "Zertifizieren": the changes allowed afterwards (DocMDP /P: 1 none,
+    /// 2 filling in forms and signing, 3 also comments). Only as the first
+    /// signature of a document.
+    pub certify: Option<u8>,
+    /// Address of a time stamp authority: the signature gets a time stamp.
+    pub time_stamp: Option<String>,
+}
+
+/// What is written into the signature dictionary.
+enum Kind<'a> {
+    Sign {
+        id: &'a DigitalId,
+        stamp: Option<cms::Stamper<'a>>,
+    },
+    /// A document time stamp (/DocTimeStamp, ETSI.RFC3161).
+    DocStamp(cms::Stamper<'a>),
+}
+
+/// Names of the DocMDP levels of "Zertifizieren".
+pub fn certify_names(p: u8, de: bool) -> &'static str {
+    match (p, de) {
+        (1, true) => "Keine Änderungen erlaubt",
+        (1, false) => "No changes allowed",
+        (3, true) => "Formulare ausfüllen, signieren und kommentieren",
+        (3, false) => "Filling in forms, signing and commenting",
+        (_, true) => "Formulare ausfüllen und signieren",
+        (_, false) => "Filling in forms and signing",
+    }
 }
 
 /// PDF date "D:YYYYMMDDHHmmSS+hh'mm'" for `unix` in the local offset
@@ -210,7 +239,8 @@ pub fn empty_signature_fields(bytes: &[u8]) -> Vec<String> {
         .collect()
 }
 
-/// Signs the PDF `bytes` with `id`; returns the signed file.
+/// Signs the PDF `bytes` with `id`; returns the signed file. A time stamp
+/// is fetched from `opts.time_stamp` when set.
 pub fn sign(
     bytes: &[u8],
     id: &DigitalId,
@@ -218,6 +248,47 @@ pub fn sign(
     now_unix: i64,
     offset_minutes: i32,
 ) -> Result<Vec<u8>> {
+    let url = opts.time_stamp.clone();
+    let fetch = move |hash: &[u8]| super::tsa::fetch(url.as_deref().unwrap_or_default(), hash);
+    let stamp: Option<cms::Stamper<'_>> = if opts.time_stamp.is_some() { Some(&fetch) } else { None };
+    write(bytes, Kind::Sign { id, stamp }, opts, now_unix, offset_minutes)
+}
+
+/// Like [`sign`] with the time stamps made by `stamp` (tests).
+pub fn sign_with_stamper(
+    bytes: &[u8],
+    id: &DigitalId,
+    opts: &SignOptions,
+    stamp: cms::Stamper<'_>,
+    now_unix: i64,
+) -> Result<Vec<u8>> {
+    write(bytes, Kind::Sign { id, stamp: Some(stamp) }, opts, now_unix, 0)
+}
+
+/// "Zeitstempel": a document time stamp from the authority at `url`.
+pub fn time_stamp_document(bytes: &[u8], url: &str) -> Result<Vec<u8>> {
+    let fetch = |hash: &[u8]| super::tsa::fetch(url, hash);
+    write(bytes, Kind::DocStamp(&fetch), &SignOptions::default(), 0, 0)
+}
+
+/// Like [`time_stamp_document`] with the time stamp made by `stamp` (tests).
+pub fn time_stamp_document_with(bytes: &[u8], stamp: cms::Stamper<'_>) -> Result<Vec<u8>> {
+    write(bytes, Kind::DocStamp(stamp), &SignOptions::default(), 0, 0)
+}
+
+fn write(
+    bytes: &[u8],
+    kind: Kind<'_>,
+    opts: &SignOptions,
+    now_unix: i64,
+    offset_minutes: i32,
+) -> Result<Vec<u8>> {
+    let doc_stamp = matches!(kind, Kind::DocStamp(_));
+    if opts.certify.is_some() && has_signatures(bytes) && !signatures(bytes).is_empty() {
+        return Err(bad(
+            "Zertifizieren geht nur als erste Signatur eines Dokuments. Dieses Dokument ist bereits signiert.",
+        ));
+    }
     let prev = lopdf::Document::load_mem(bytes).map_err(|e| bad(format!("PDF lesen: {e}")))?;
     // lopdf decrypts on loading (empty user password) and may drop /Encrypt.
     if prev.is_encrypted() || prev.trailer.has(b"Encrypt") || find(bytes, b"/Encrypt").is_some() {
@@ -234,9 +305,24 @@ pub fn sign(
 
     // The signature dictionary with placeholders.
     let mut sig = Dictionary::new();
-    sig.set("Type", Object::Name(b"Sig".to_vec()));
+    sig.set("Type", Object::Name(if doc_stamp { b"DocTimeStamp".to_vec() } else { b"Sig".to_vec() }));
     sig.set("Filter", Object::Name(b"Adobe.PPKLite".to_vec()));
-    sig.set("SubFilter", Object::Name(b"ETSI.CAdES.detached".to_vec()));
+    sig.set(
+        "SubFilter",
+        Object::Name(if doc_stamp { b"ETSI.RFC3161".to_vec() } else { b"ETSI.CAdES.detached".to_vec() }),
+    );
+    if let Some(p) = opts.certify {
+        // DocMDP: which changes keep the certification valid.
+        let mut params = Dictionary::new();
+        params.set("Type", Object::Name(b"TransformParams".to_vec()));
+        params.set("P", i64::from(p.clamp(1, 3)));
+        params.set("V", Object::Name(b"1.2".to_vec()));
+        let mut reference = Dictionary::new();
+        reference.set("Type", Object::Name(b"SigRef".to_vec()));
+        reference.set("TransformMethod", Object::Name(b"DocMDP".to_vec()));
+        reference.set("TransformParams", Object::Dictionary(params));
+        sig.set("Reference", Object::Array(vec![Object::Dictionary(reference)]));
+    }
     sig.set(
         "ByteRange",
         Object::Array(vec![
@@ -247,20 +333,26 @@ pub fn sign(
         ]),
     );
     sig.set("Contents", Object::String(vec![0u8; CONTENTS_BYTES], StringFormat::Hexadecimal));
-    sig.set("M", crate::pdf_edit::text_string(&date));
-    sig.set("Name", crate::pdf_edit::text_string(&id.cert.name));
-    for (key, value) in
-        [("Reason", &opts.reason), ("Location", &opts.location), ("ContactInfo", &opts.contact)]
-    {
-        if !value.trim().is_empty() {
-            sig.set(key, crate::pdf_edit::text_string(value.trim()));
+    let signer = match &kind {
+        Kind::Sign { id, .. } => id.cert.name.clone(),
+        Kind::DocStamp(_) => String::new(),
+    };
+    if !doc_stamp {
+        sig.set("M", crate::pdf_edit::text_string(&date));
+        sig.set("Name", crate::pdf_edit::text_string(&signer));
+        for (key, value) in
+            [("Reason", &opts.reason), ("Location", &opts.location), ("ContactInfo", &opts.contact)]
+        {
+            if !value.trim().is_empty() {
+                sig.set(key, crate::pdf_edit::text_string(value.trim()));
+            }
         }
     }
     let sig_id = inc.new_document.add_object(Object::Dictionary(sig));
 
     // Lines of the visible signature.
-    let mut lines =
-        vec![format!("Digital signiert von {}", id.cert.name), format!("Datum: {}", readable_date(&date))];
+    let first = if opts.certify.is_some() { "Zertifiziert von" } else { "Digital signiert von" };
+    let mut lines = vec![format!("{first} {signer}"), format!("Datum: {}", readable_date(&date))];
     if !opts.reason.trim().is_empty() {
         lines.push(format!("Grund: {}", opts.reason.trim()));
     }
@@ -331,7 +423,8 @@ pub fn sign(
                         .map(|d| field_name(inc.get_prev_documents(), d))
                 })
                 .collect();
-            let name = (1..).map(|n| format!("Signatur{n}")).find(|n| !names.contains(n)).unwrap_or_default();
+            let base = if doc_stamp { "Zeitstempel" } else { "Signatur" };
+            let name = (1..).map(|n| format!("{base}{n}")).find(|n| !names.contains(n)).unwrap_or_default();
             let mut w = Dictionary::new();
             w.set("Type", Object::Name(b"Annot".to_vec()));
             w.set("Subtype", Object::Name(b"Widget".to_vec()));
@@ -432,6 +525,14 @@ pub fn sign(
     if let Ok(f) = inc.new_document.get_dictionary_mut(form_id) {
         f.set("SigFlags", 3i64);
     }
+    // A certification is named in the catalogue (/Perms /DocMDP).
+    if opts.certify.is_some()
+        && let Ok(c) = inc.new_document.get_dictionary_mut(root_id)
+    {
+        let mut perms = Dictionary::new();
+        perms.set("DocMDP", Object::Reference(sig_id));
+        c.set("Perms", Object::Dictionary(perms));
+    }
 
     // Save, then fill in the byte ranges and the signature.
     let mut out = Vec::new();
@@ -452,7 +553,10 @@ pub fn sign(
     let padded = format!("{ranges:<width$}", width = RANGE_MARK.len());
     out[range_at..range_at + RANGE_MARK.len()].copy_from_slice(padded.as_bytes());
     let digest = super::cert::digest(super::cert::SHA256, &[&out[..a], &out[b..]])?;
-    let cms_bytes = cms::signed_data(id, &digest)?;
+    let cms_bytes = match kind {
+        Kind::Sign { id, stamp } => cms::signed_data_with(id, &digest, stamp)?,
+        Kind::DocStamp(stamp) => stamp(&digest)?,
+    };
     if cms_bytes.len() > CONTENTS_BYTES {
         return Err(bad("Die Signatur ist zu groß (Zertifikatskette)."));
     }
@@ -487,6 +591,12 @@ pub struct SigInfo {
     pub location: String,
     pub sub_filter: String,
     pub check: cms::Check,
+    /// "Zertifiziert": the allowed changes (DocMDP /P).
+    pub certified: Option<u8>,
+    /// Time stamp of the signature, or the document time stamp itself.
+    pub time_stamp: Option<super::tsa::Stamp>,
+    /// A document time stamp, not a person's signature.
+    pub doc_time_stamp: bool,
     /// The signature covers the whole file (nothing appended later).
     pub whole_file: bool,
     /// Byte length of the signed revision.
@@ -527,6 +637,20 @@ pub fn signatures(bytes: &[u8]) -> Vec<SigInfo> {
     out
 }
 
+/// DocMDP level of a certification signature.
+fn certify_level(sig: &Dictionary) -> Option<u8> {
+    let refs = sig.get(b"Reference").and_then(Object::as_array).ok()?;
+    refs.iter().filter_map(|r| r.as_dict().ok()).find_map(|r| {
+        (r.get(b"TransformMethod").and_then(Object::as_name).ok()? == b"DocMDP").then(|| {
+            r.get(b"TransformParams")
+                .and_then(Object::as_dict)
+                .and_then(|p| p.get(b"P"))
+                .and_then(Object::as_i64)
+                .map_or(2, |p| p.clamp(1, 3) as u8)
+        })
+    })
+}
+
 fn text_of(d: &Dictionary, key: &[u8]) -> String {
     d.get(key).ok().and_then(|o| o.as_str().ok()).map(crate::pdf_edit::decode_text_string).unwrap_or_default()
 }
@@ -555,6 +679,9 @@ fn check_one(_doc: &lopdf::Document, bytes: &[u8], field: String, sig: &Dictiona
         location: text_of(sig, b"Location"),
         sub_filter: sub_filter.clone(),
         check: cms::Check::Unsupported(String::new()),
+        certified: certify_level(sig),
+        time_stamp: None,
+        doc_time_stamp: sub_filter == "ETSI.RFC3161",
         whole_file: false,
         revision_end: 0,
     };
@@ -569,6 +696,16 @@ fn check_one(_doc: &lopdf::Document, bytes: &[u8], field: String, sig: &Dictiona
     let (l0, s1, l1) = (range[1] as usize, range[2] as usize, range[3] as usize);
     info.revision_end = s1 + l1;
     info.whole_file = s1 + l1 == bytes.len();
+    if info.doc_time_stamp {
+        // The token confirms the hash of the signed byte ranges.
+        let digest = super::cert::digest(super::cert::SHA256, &[&bytes[..l0], &bytes[s1..s1 + l1]]);
+        let stamp = super::tsa::check_token(contents, &digest.unwrap_or_default());
+        info.signer = stamp.authority.clone();
+        info.time = stamp.time.clone();
+        info.check = stamp.check.clone();
+        info.time_stamp = Some(stamp);
+        return info;
+    }
     if !matches!(sub_filter.as_str(), "ETSI.CAdES.detached" | "adbe.pkcs7.detached") {
         info.check = cms::Check::Unsupported(format!("Format {sub_filter}"));
         return info;
@@ -583,6 +720,10 @@ fn check_one(_doc: &lopdf::Document, bytes: &[u8], field: String, sig: &Dictiona
                 info.cert_valid_until = c.not_after.clone();
             }
             info.check = cms::check(&p, &[&bytes[..l0], &bytes[s1..s1 + l1]]);
+            if let Some(token) = &p.time_stamp {
+                let hash = super::cert::digest(super::cert::SHA256, &[&p.signature]).unwrap_or_default();
+                info.time_stamp = Some(super::tsa::check_token(token, &hash));
+            }
         }
         Err(e) => info.check = cms::Check::Unsupported(e.to_string()),
     }

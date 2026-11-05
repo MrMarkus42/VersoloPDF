@@ -1,8 +1,8 @@
 //! Error log and crash reports ("Fehlerprotokoll").
 //!
-//! The log goes to `<data dir>/logs/mrpdf-<date>.log` (and to the console
+//! The log goes to `<data dir>/logs/versolopdf-<date>.log` (and to the console
 //! of debug builds): program start, every error shown to the user and the
-//! warnings of MrPDF. A panic writes `absturz-<time>.txt` with version,
+//! warnings of VersoloPDF. A panic writes `absturz-<time>.txt` with version,
 //! system, the place of the error, the backtrace and the last log lines;
 //! the next start tells the user where it is. Document contents never go
 //! into the log; file names are written without their folders.
@@ -53,14 +53,14 @@ pub fn file_name(path: &Path) -> String {
 struct Logger {
     file: Mutex<Option<File>>,
     recent: Mutex<VecDeque<String>>,
-    /// Level for MrPDF's own messages; other crates only warn and above.
+    /// Level for VersoloPDF's own messages; other crates only warn and above.
     own: log::LevelFilter,
     console: bool,
 }
 
 impl log::Log for Logger {
     fn enabled(&self, meta: &log::Metadata<'_>) -> bool {
-        let limit = if meta.target().starts_with("mrpdf") { self.own } else { log::LevelFilter::Warn };
+        let limit = if meta.target().starts_with("versolopdf") { self.own } else { log::LevelFilter::Warn };
         meta.level() <= limit
     }
 
@@ -122,10 +122,11 @@ fn clean(dir: &Path) {
 }
 
 /// Starts the log and the crash reports; returns the log file. The level
-/// of MrPDF's messages comes from `MRPDF_LOG` (error, warn, info, debug,
+/// of VersoloPDF's messages comes from `VERSOLOPDF_LOG` (error, warn, info, debug,
 /// trace), default info.
 pub fn init() -> Option<PathBuf> {
-    let own = std::env::var("MRPDF_LOG").ok().and_then(|v| v.parse().ok()).unwrap_or(log::LevelFilter::Info);
+    let own =
+        std::env::var("VERSOLOPDF_LOG").ok().and_then(|v| v.parse().ok()).unwrap_or(log::LevelFilter::Info);
     let dir = log_dir();
     let mut path = None;
     let mut file = None;
@@ -133,7 +134,7 @@ pub fn init() -> Option<PathBuf> {
         && std::fs::create_dir_all(dir).is_ok()
     {
         clean(dir);
-        let p = dir.join(format!("mrpdf-{}.log", &timestamp(SystemTime::now())[..10]));
+        let p = dir.join(format!("versolopdf-{}.log", &timestamp(SystemTime::now())[..10]));
         let too_big = std::fs::metadata(&p).is_ok_and(|m| m.len() > MAX_SIZE);
         file = std::fs::OpenOptions::new()
             .create(true)
@@ -148,7 +149,7 @@ pub fn init() -> Option<PathBuf> {
         file: Mutex::new(file),
         recent: Mutex::new(VecDeque::new()),
         own,
-        console: cfg!(debug_assertions) || std::env::var_os("MRPDF_LOG").is_some(),
+        console: cfg!(debug_assertions) || std::env::var_os("VERSOLOPDF_LOG").is_some(),
     });
     if log::set_logger(logger).is_ok() {
         log::set_max_level(own.max(log::LevelFilter::Warn));
@@ -172,7 +173,7 @@ fn report(info: &std::panic::PanicHookInfo<'_>, backtrace: &str) -> String {
         .and_then(|l| l.recent.lock().ok().map(|r| r.iter().cloned().collect::<Vec<_>>().join("\n")))
         .unwrap_or_default();
     format!(
-        "MrPDF Absturzbericht / crash report\n\
+        "VersoloPDF Absturzbericht / crash report\n\
          ===================================\n\
          Zeit:     {} UTC\n\
          Version:  {}\n\

@@ -7,7 +7,7 @@ use egui::{Context, RichText, Ui, vec2};
 use super::dialogs::{Action, Outcome};
 use super::page_dialogs::{PAPERS, paper_size, tr};
 use super::preview::{doc_preview, page_strip};
-use super::{Dialog, MrPdfApp};
+use super::{Dialog, VersoloPdfApp};
 use crate::Document;
 use crate::import::PageOrder;
 use crate::print::PrinterInfo;
@@ -169,7 +169,7 @@ fn content_name(c: PrintContent, de: bool) -> (&'static str, &'static str) {
     }
 }
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     fn pr_de(&self) -> bool {
         self.settings.language == crate::ui::i18n::Language::German
     }
@@ -405,8 +405,8 @@ impl MrPdfApp {
                         let mut always = true;
                         let _ = ui.add_enabled(false, egui::Checkbox::new(&mut always, tr(de, "Als Bild drucken", "Print as image"))).on_disabled_hover_text(tr(
                             de,
-                            "Unter Windows druckt MrPDF die Seiten immer als Bild.",
-                            "On Windows MrPDF always prints pages as images.",
+                            "Unter Windows druckt VersoloPDF die Seiten immer als Bild.",
+                            "On Windows VersoloPDF always prints pages as images.",
                         ));
                     }
                     #[cfg(not(windows))]

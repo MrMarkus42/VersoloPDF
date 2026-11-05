@@ -256,6 +256,8 @@ pub struct DocTab {
     fields: HashMap<usize, Cached<Vec<FormFieldInfo>>>,
     bookmarks: Option<Cached<Vec<Bookmark>>>,
     content_objects: HashMap<usize, Cached<Vec<crate::content::ContentObject>>>,
+    /// "Ebenen" of the document.
+    layers: Option<Cached<Vec<crate::layers::Layer>>>,
     /// "Objekte bearbeiten" / "Text bearbeiten".
     pub content: crate::ui::content_state::ContentEdit,
     pub selection: Option<TextSelection>,
@@ -343,6 +345,7 @@ impl DocTab {
             fields: HashMap::new(),
             bookmarks: None,
             content_objects: HashMap::new(),
+            layers: None,
             content: Default::default(),
             selection: None,
             selected_annot: None,
@@ -577,6 +580,31 @@ impl DocTab {
         let list = Arc::new(self.doc.page_objects(page).unwrap_or_default());
         self.content_objects.insert(page, Cached { revision: rev, value: list.clone() });
         list
+    }
+
+    /// "Ebenen": the layers of the document (read again after changes).
+    pub fn layers(&mut self) -> Arc<Vec<crate::layers::Layer>> {
+        let rev = self.doc.revision();
+        if let Some(c) = self.layers.as_ref().filter(|c| c.revision == rev) {
+            return c.value.clone();
+        }
+        let list = Arc::new(self.doc.layers().unwrap_or_default());
+        self.layers = Some(Cached { revision: rev, value: list.clone() });
+        list
+    }
+
+    /// True if the layers were read and there are some.
+    pub fn has_layers(&self) -> bool {
+        self.layers.as_ref().is_some_and(|c| !c.value.is_empty())
+    }
+
+    /// The objects of a page if they were read already (for "An Objekten
+    /// einrasten" while dragging, where the tab cannot be changed).
+    pub fn cached_objects(&self, page: usize) -> Option<&[crate::content::ContentObject]> {
+        self.content_objects
+            .get(&page)
+            .filter(|c| c.revision >= self.doc.page_revision(page))
+            .map(|c| c.value.as_slice())
     }
 
     pub fn links(&mut self, page: usize) -> Arc<Vec<LinkInfo>> {

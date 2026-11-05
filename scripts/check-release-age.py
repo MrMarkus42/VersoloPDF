@@ -19,8 +19,8 @@ import tomllib
 import urllib.request
 
 API = "https://crates.io/api/v1/crates/{name}/{version}"
-USER_AGENT = "mrpdf-release-age-check (https://github.com/MrMarkus42/MrPDF)"
-CACHE = pathlib.Path.home() / ".cache" / "mrpdf-release-dates.json"
+USER_AGENT = "versolopdf-release-age-check (https://github.com/MrMarkus42/VersoloPDF)"
+CACHE = pathlib.Path.home() / ".cache" / "versolopdf-release-dates.json"
 
 
 def fetch_date(name: str, version: str) -> str:

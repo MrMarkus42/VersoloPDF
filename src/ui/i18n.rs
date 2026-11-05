@@ -168,7 +168,7 @@ strings! {
     hint_edit_text: "Textblock anklicken und tippen. Schrift, Größe, Farbe und Ausrichtung im Reiter Format. Strg+Enter oder ein Klick daneben übernimmt, Esc verwirft.", "Click a text block and type. Font, size, colour and alignment are on the Format tab. Ctrl+Enter or a click outside applies, Esc discards.";
     format_tab: "Format", "Format";
     no_command: "Kein passender Befehl", "No matching command";
-    manual_text: "MrPDF ist ein freier PDF-Editor. Wählen Sie oben eine Registerkarte und darin ein Werkzeug. Die meisten Werkzeuge werden durch Klicken oder Aufziehen auf der Seite benutzt, Polygone durch Klicken der Eckpunkte (Doppelklick oder Eingabe beendet). Ausgewählte Kommentare ändern Sie in der Registerkarte Format oder rechts in den Eigenschaften. Strg+. öffnet die Befehlssuche.", "MrPDF is a free PDF editor. Choose a tab at the top and a tool in it. Most tools are used by clicking or dragging on the page, polygons by clicking the corners (double click or Enter finishes). Change selected comments in the Format tab or in the properties on the right. Ctrl+. opens the command search.";
+    manual_text: "VersoloPDF ist ein freier PDF-Editor. Wählen Sie oben eine Registerkarte und darin ein Werkzeug. Die meisten Werkzeuge werden durch Klicken oder Aufziehen auf der Seite benutzt, Polygone durch Klicken der Eckpunkte (Doppelklick oder Eingabe beendet). Ausgewählte Kommentare ändern Sie in der Registerkarte Format oder rechts in den Eigenschaften. Strg+. öffnet die Befehlssuche.", "VersoloPDF is a free PDF editor. Choose a tab at the top and a tool in it. Most tools are used by clicking or dragging on the page, polygons by clicking the corners (double click or Enter finishes). Change selected comments in the Format tab or in the properties on the right. Ctrl+. opens the command search.";
     add_bookmark: "Lesezeichen hinzufügen", "Add bookmark";
     add_child_bookmark: "Unterlesezeichen hinzufügen", "Add child bookmark";
     rename: "Umbenennen", "Rename";
@@ -335,7 +335,7 @@ strings! {
     perm_annotate: "Kommentieren", "Commenting";
     perm_forms: "Formulare ausfüllen", "Filling forms";
     save_properties: "Übernehmen", "Apply";
-    about: "Über MrPDF", "About MrPDF";
+    about: "Über VersoloPDF", "About VersoloPDF";
     about_text: "Freier PDF-Betrachter und -Editor.", "Free PDF viewer and editor.";
     license_text: "Lizenz: MIT oder Apache-2.0 (nach Wahl). Copyright © Mr. M und Mitwirkende.", "License: MIT or Apache-2.0 (at your option). Copyright © Mr. M and contributors.";
     third_party_text: "Verwendet PDFium (BSD-3-Clause/Apache-2.0), egui/eframe, pdfium-render, lopdf und weitere Bibliotheken unter MIT-, Apache- oder BSD-Lizenzen. Details: THIRD_PARTY_NOTICES.md.", "Uses PDFium (BSD-3-Clause/Apache-2.0), egui/eframe, pdfium-render, lopdf and further libraries under MIT, Apache or BSD licenses. Details: THIRD_PARTY_NOTICES.md.";
@@ -344,7 +344,7 @@ strings! {
 
     // Errors
     error: "Fehler", "Error";
-    err_engine: "Die PDF-Bibliothek (PDFium) wurde nicht gefunden. Bitte installieren Sie MrPDF neu.", "The PDF library (PDFium) was not found. Please reinstall MrPDF.";
+    err_engine: "Die PDF-Bibliothek (PDFium) wurde nicht gefunden. Bitte installieren Sie VersoloPDF neu.", "The PDF library (PDFium) was not found. Please reinstall VersoloPDF.";
     err_password_required: "Das Dokument ist kennwortgeschützt.", "The document is password protected.";
     err_wrong_password: "Das Kennwort ist falsch.", "The password is incorrect.";
     err_invalid_pdf: "Die Datei ist keine gültige PDF-Datei oder beschädigt.", "The file is not a valid PDF document or is damaged.";
@@ -356,7 +356,7 @@ strings! {
     err_generic: "Die Aktion ist fehlgeschlagen.", "The action failed.";
     err_not_found: "Die Datei oder der Ordner wurde nicht gefunden:", "The file or folder was not found:";
     err_access_denied: "Kein Zugriff auf die Datei. Vielleicht ist sie schreibgeschützt oder in einem anderen Programm geöffnet:", "No access to the file. It may be read-only or open in another program:";
-    err_engine_step: "Dieser Schritt hat bei diesem Dokument nicht geklappt. Die Datei ist vielleicht beschädigt oder nutzt eine Besonderheit, die MrPDF noch nicht kennt. Das Dokument selbst wurde nicht verändert.", "This step did not work for this document. The file may be damaged or use a feature MrPDF does not know yet. The document itself was not changed.";
+    err_engine_step: "Dieser Schritt hat bei diesem Dokument nicht geklappt. Die Datei ist vielleicht beschädigt oder nutzt eine Besonderheit, die VersoloPDF noch nicht kennt. Das Dokument selbst wurde nicht verändert.", "This step did not work for this document. The file may be damaged or use a feature VersoloPDF does not know yet. The document itself was not changed.";
     err_page_missing: "Diese Seite gibt es im Dokument nicht:", "This page does not exist in the document:";
     err_details: "Technische Angabe:", "Technical detail:";
 }

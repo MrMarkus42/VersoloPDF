@@ -9,7 +9,7 @@ use super::commands::Cmd;
 use super::dialogs::{Action, Outcome};
 use super::page_dialogs::{footer, tr};
 use super::preview::doc_preview;
-use super::{Dialog, MrPdfApp};
+use super::{Dialog, VersoloPdfApp};
 use crate::export_image::{ExportMode, ImageExportOptions, ImageFormat};
 use crate::ui::pickers::{PageRange, RangeMode, parse_pages, preset_combo, section};
 
@@ -32,7 +32,7 @@ fn range_parts(range: &PageRange, count: usize) -> Vec<Vec<usize>> {
     range.text.split([',', ';']).filter_map(|part| parse_pages(part, count)).collect()
 }
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     fn ex_de(&self) -> bool {
         self.settings.language == crate::ui::i18n::Language::German
     }
@@ -99,8 +99,8 @@ impl MrPdfApp {
                                             .add_enabled(false, egui::Button::new(other).frame(false))
                                             .on_disabled_hover_text(tr(
                                                 de,
-                                                "Dieses Format wird von MrPDF nicht geschrieben.",
-                                                "MrPDF does not write this format.",
+                                                "Dieses Format wird von VersoloPDF nicht geschrieben.",
+                                                "VersoloPDF does not write this format.",
                                             ));
                                     }
                                 });

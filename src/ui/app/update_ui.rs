@@ -7,7 +7,7 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 use egui::{Context, RichText, Ui};
 
 use super::page_dialogs::tr;
-use super::{Dialog, MrPdfApp};
+use super::{Dialog, VersoloPdfApp};
 use crate::ui::pickers::section;
 use crate::ui::settings::Settings;
 use crate::update::{self, Release};
@@ -43,12 +43,12 @@ fn restart_args() -> Vec<String> {
     std::env::args().skip(1).filter(|a| a == "--opengl").collect()
 }
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     /// Starts asking GitHub for the newest release.
     pub(super) fn start_update_check(&mut self, ctx: &Context, manual: bool) {
         if crate::mail::no_external() {
             // Automated tests never use the network.
-            self.update = UpdateState::Failed("MRPDF_NO_EXTERNAL".into());
+            self.update = UpdateState::Failed("VERSOLOPDF_NO_EXTERNAL".into());
             return;
         }
         let (tx, rx) = std::sync::mpsc::channel();
@@ -92,13 +92,13 @@ impl MrPdfApp {
                                 title: tr(de, "Neue Version", "New version").into(),
                                 text: if de {
                                     format!(
-                                        "MrPDF {} ist erschienen (installiert: {}).\n\nInstallieren über Datei › Einstellungen › Neue Version.",
+                                        "VersoloPDF {} ist erschienen (installiert: {}).\n\nInstallieren über Datei › Einstellungen › Neue Version.",
                                         release.version,
                                         update::current_version()
                                     )
                                 } else {
                                     format!(
-                                        "MrPDF {} has been released (installed: {}).\n\nInstall it with File › Settings › Updates.",
+                                        "VersoloPDF {} has been released (installed: {}).\n\nInstall it with File › Settings › Updates.",
                                         release.version,
                                         update::current_version()
                                     )
@@ -150,7 +150,7 @@ impl MrPdfApp {
         let repaint = ctx.clone();
         let job = release.clone();
         std::thread::spawn(move || {
-            let dir = std::env::temp_dir().join("mrpdf-update").join(&job.version);
+            let dir = std::env::temp_dir().join("versolopdf-update").join(&job.version);
             let result = update::download_package(&job, &dir)
                 .and_then(|zip| update::prepare_install(&zip, &target, std::process::id(), &restart_args()));
             let _ = tx.send(result);
@@ -185,7 +185,7 @@ impl MrPdfApp {
                     )
                 } else {
                     format!(
-                        "MrPDF looks at github.com/{} (releases). Only the version number is asked for.",
+                        "VersoloPDF looks at github.com/{} (releases). Only the version number is asked for.",
                         update::REPOSITORY
                     )
                 })
@@ -220,7 +220,11 @@ impl MrPdfApp {
                     });
                 }
                 UpdateState::UpToDate => {
-                    ui.label(tr(de, "✔ MrPDF ist auf dem neuesten Stand.", "✔ MrPDF is up to date."));
+                    ui.label(tr(
+                        de,
+                        "✔ VersoloPDF ist auf dem neuesten Stand.",
+                        "✔ VersoloPDF is up to date.",
+                    ));
                 }
                 UpdateState::NoRelease => {
                     ui.label(tr(
@@ -238,9 +242,9 @@ impl MrPdfApp {
                 UpdateState::Available(release) => {
                     ui.label(
                         RichText::new(if de {
-                            format!("MrPDF {} ist verfügbar.", release.version)
+                            format!("VersoloPDF {} ist verfügbar.", release.version)
                         } else {
-                            format!("MrPDF {} is available.", release.version)
+                            format!("VersoloPDF {} is available.", release.version)
                         })
                         .strong(),
                     );
@@ -287,15 +291,15 @@ impl MrPdfApp {
                 }
                 UpdateState::Ready(script, version) => {
                     ui.label(if de {
-                        format!("MrPDF {version} ist heruntergeladen und geprüft.")
+                        format!("VersoloPDF {version} ist heruntergeladen und geprüft.")
                     } else {
-                        format!("MrPDF {version} has been downloaded and checked.")
+                        format!("VersoloPDF {version} has been downloaded and checked.")
                     });
                     ui.label(
                         RichText::new(tr(
                             de,
-                            "Zum Installieren wird MrPDF beendet (ungespeicherte Änderungen werden vorher abgefragt) und danach in der neuen Version wieder gestartet.",
-                            "To install, MrPDF closes (asking about unsaved changes first) and starts again in the new version.",
+                            "Zum Installieren wird VersoloPDF beendet (ungespeicherte Änderungen werden vorher abgefragt) und danach in der neuen Version wieder gestartet.",
+                            "To install, VersoloPDF closes (asking about unsaved changes first) and starts again in the new version.",
                         ))
                         .small()
                         .weak(),

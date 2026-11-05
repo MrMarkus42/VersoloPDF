@@ -7,10 +7,10 @@
 //! * a dialog: OK is clicked and no error may follow,
 //! * otherwise the effect on the document is noted.
 //!
-//! Buttons acting outside MrPDF (printing, e-mail, files, web pages) are
+//! Buttons acting outside VersoloPDF (printing, e-mail, files, web pages) are
 //! not clicked. The report goes to `target/mouse/report.md`.
 //!
-//! Run: `MRPDF_MOUSE_TABS=Start,Anmerkungen cargo test --release --test mouse
+//! Run: `VERSOLOPDF_MOUSE_TABS=Start,Anmerkungen cargo test --release --test mouse
 //! -- --ignored --nocapture` (all tabs without the variable).
 
 mod common;
@@ -22,14 +22,14 @@ use egui::accesskit::Role;
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, Rect, pos2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
-use mrpdf::geometry::RectF;
-use mrpdf::model::{AnnotKind, AnnotStyle, Rgba};
-use mrpdf::pdf_edit::NewAnnotation;
-use mrpdf::ui::MrPdfApp;
-use mrpdf::ui::app::Dialog;
-use mrpdf::ui::i18n::Language;
-use mrpdf::ui::settings::Settings;
-use mrpdf::ui::tools::{Gesture, Tool};
+use versolopdf::geometry::RectF;
+use versolopdf::model::{AnnotKind, AnnotStyle, Rgba};
+use versolopdf::pdf_edit::NewAnnotation;
+use versolopdf::ui::VersoloPdfApp;
+use versolopdf::ui::app::Dialog;
+use versolopdf::ui::i18n::Language;
+use versolopdf::ui::settings::Settings;
+use versolopdf::ui::tools::{Gesture, Tool};
 
 const TABS: [&str; 12] = [
     "Start",
@@ -46,7 +46,7 @@ const TABS: [&str; 12] = [
     "Hilfe",
 ];
 
-/// Buttons that act outside MrPDF or would end the test.
+/// Buttons that act outside VersoloPDF or would end the test.
 const NOT_CLICKED: [&str; 20] = [
     "Drucken",
     "Alle drucken",
@@ -76,7 +76,7 @@ fn out_dir() -> PathBuf {
     dir
 }
 
-fn harness(file: PathBuf) -> Harness<'static, MrPdfApp> {
+fn harness(file: PathBuf) -> Harness<'static, VersoloPdfApp> {
     let settings = Settings {
         language: Language::German,
         author: "Tester".into(),
@@ -86,7 +86,7 @@ fn harness(file: PathBuf) -> Harness<'static, MrPdfApp> {
     let mut h =
         Harness::builder().with_size(egui::vec2(1280.0, 820.0)).with_max_steps(64).wgpu().build_eframe(
             move |cc| {
-                let mut app = MrPdfApp::with_settings(&cc.egui_ctx, settings, vec![file]);
+                let mut app = VersoloPdfApp::with_settings(&cc.egui_ctx, settings, vec![file]);
                 app.set_recovery_dir(None);
                 app
             },
@@ -95,7 +95,7 @@ fn harness(file: PathBuf) -> Harness<'static, MrPdfApp> {
     h
 }
 
-fn input(h: &mut Harness<'_, MrPdfApp>, e: Event) {
+fn input(h: &mut Harness<'_, VersoloPdfApp>, e: Event) {
     h.input_mut().events.push(e);
 }
 
@@ -103,7 +103,7 @@ fn button(pos: Pos2, pressed: bool) -> Event {
     Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE }
 }
 
-fn click(h: &mut Harness<'_, MrPdfApp>, at: Pos2) {
+fn click(h: &mut Harness<'_, VersoloPdfApp>, at: Pos2) {
     input(h, Event::PointerMoved(at));
     h.step();
     input(h, button(at, true));
@@ -112,7 +112,7 @@ fn click(h: &mut Harness<'_, MrPdfApp>, at: Pos2) {
     h.run_steps(5);
 }
 
-fn drag(h: &mut Harness<'_, MrPdfApp>, from: Pos2, to: Pos2) {
+fn drag(h: &mut Harness<'_, VersoloPdfApp>, from: Pos2, to: Pos2) {
     input(h, Event::PointerMoved(from));
     h.step();
     input(h, button(from, true));
@@ -125,14 +125,14 @@ fn drag(h: &mut Harness<'_, MrPdfApp>, from: Pos2, to: Pos2) {
     h.run_steps(5);
 }
 
-fn key(h: &mut Harness<'_, MrPdfApp>, k: Key) {
+fn key(h: &mut Harness<'_, VersoloPdfApp>, k: Key) {
     h.key_press(k);
     h.run_steps(3);
 }
 
 /// Vertical extent of the ribbon (below the tab row with "Datei", above
 /// the document tabs), in any look.
-fn ribbon_band(h: &Harness<'_, MrPdfApp>) -> (f32, f32) {
+fn ribbon_band(h: &Harness<'_, VersoloPdfApp>) -> (f32, f32) {
     let top = h.query_all_by_label("Datei").map(|n| n.rect().max.y).fold(f32::INFINITY, f32::min);
     let top = if top.is_finite() { top + 4.0 } else { 55.0 };
     // The document tab strip starts below the ribbon (the close buttons of
@@ -146,7 +146,7 @@ fn ribbon_band(h: &Harness<'_, MrPdfApp>) -> (f32, f32) {
 }
 
 /// Enabled buttons with a name; with `ribbon` only those in the ribbon.
-fn all_buttons(h: &Harness<'_, MrPdfApp>, ribbon: bool) -> Vec<(String, Rect)> {
+fn all_buttons(h: &Harness<'_, VersoloPdfApp>, ribbon: bool) -> Vec<(String, Rect)> {
     let (top, bottom) = ribbon_band(h);
     h.get_all_by_role(Role::Button)
         .filter(|n| !n.accesskit_node().is_disabled())
@@ -161,20 +161,20 @@ fn all_buttons(h: &Harness<'_, MrPdfApp>, ribbon: bool) -> Vec<(String, Rect)> {
 
 /// A place on page 1 given as it was on the screen of the classic look
 /// (1280 × 820, page at 97 %): the same spot of the page in any look.
-fn at(h: &Harness<'_, MrPdfApp>, x: f32, y: f32) -> Pos2 {
+fn at(h: &Harness<'_, VersoloPdfApp>, x: f32, y: f32) -> Pos2 {
     const LEFT: f32 = 257.0;
     const TOP: f32 = 218.0;
     const SCALE: f32 = 770.0 / 595.28;
     to_screen(h, (x - LEFT) / SCALE, 841.89 - (y - TOP) / SCALE)
 }
 
-fn buttons(h: &Harness<'_, MrPdfApp>) -> Vec<(String, Rect)> {
+fn buttons(h: &Harness<'_, VersoloPdfApp>) -> Vec<(String, Rect)> {
     all_buttons(h, true)
 }
 
 /// Buttons that are new compared with `before` (the entries of a menu that
 /// just opened).
-fn new_buttons(h: &Harness<'_, MrPdfApp>, before: &[(String, Rect)]) -> Vec<(String, Rect)> {
+fn new_buttons(h: &Harness<'_, VersoloPdfApp>, before: &[(String, Rect)]) -> Vec<(String, Rect)> {
     all_buttons(h, false)
         .into_iter()
         .filter(|(l, r)| !before.iter().any(|(bl, br)| bl == l && br.center().distance(r.center()) < 2.0))
@@ -195,7 +195,7 @@ struct Snap {
 
 /// Hash of the rendered window below the ribbon, pointer moved away so no
 /// hover effect or tooltip counts as a change.
-fn picture(h: &mut Harness<'_, MrPdfApp>) -> u64 {
+fn picture(h: &mut Harness<'_, VersoloPdfApp>) -> u64 {
     use std::hash::{Hash, Hasher};
     h.event(egui::Event::PointerGone);
     h.run_steps(3);
@@ -208,7 +208,7 @@ fn picture(h: &mut Harness<'_, MrPdfApp>) -> u64 {
     hasher.finish()
 }
 
-fn snap(h: &mut Harness<'_, MrPdfApp>) -> Snap {
+fn snap(h: &mut Harness<'_, VersoloPdfApp>) -> Snap {
     let picture = picture(h);
     let tool = h.state().tool();
     let tab = h.state_mut().active_tab_mut();
@@ -222,13 +222,13 @@ fn snap(h: &mut Harness<'_, MrPdfApp>) -> Snap {
     Snap { revision, pages, comments, tool, zoom, picture }
 }
 
-fn dialog_name(h: &Harness<'_, MrPdfApp>) -> Option<String> {
+fn dialog_name(h: &Harness<'_, VersoloPdfApp>) -> Option<String> {
     let d = h.state().dialog()?;
     let text = format!("{d:?}");
     Some(text.split([' ', '{', '(']).next().unwrap_or("").to_string())
 }
 
-fn error_text(h: &Harness<'_, MrPdfApp>) -> Option<String> {
+fn error_text(h: &Harness<'_, VersoloPdfApp>) -> Option<String> {
     match h.state().dialog() {
         Some(Dialog::Message { title, text }) if title == "Fehler" => Some(text.replace('\n', " ")),
         _ => None,
@@ -236,7 +236,7 @@ fn error_text(h: &Harness<'_, MrPdfApp>) -> Option<String> {
 }
 
 /// Uses the active tool on the page; returns a description.
-fn use_tool(h: &mut Harness<'_, MrPdfApp>, tool: Tool) -> String {
+fn use_tool(h: &mut Harness<'_, VersoloPdfApp>, tool: Tool) -> String {
     let before = snap(h);
     match tool.gesture() {
         // Over the first text line of the sample page.
@@ -286,7 +286,7 @@ fn use_tool(h: &mut Harness<'_, MrPdfApp>, tool: Tool) -> String {
 }
 
 /// What a click on `target` did; may continue with OK or a tool use.
-fn outcome(h: &mut Harness<'_, MrPdfApp>, before: &Snap, shots: &str) -> String {
+fn outcome(h: &mut Harness<'_, VersoloPdfApp>, before: &Snap, shots: &str) -> String {
     if let Some(e) = error_text(h) {
         return format!("**Fehlermeldung**: {e}");
     }
@@ -376,7 +376,7 @@ fn skipped(label: &str) -> bool {
 
 /// A fresh window with the sample; a selected comment for the comment
 /// commands.
-fn fresh(dir: &std::path::Path, n: usize) -> Harness<'static, MrPdfApp> {
+fn fresh(dir: &std::path::Path, n: usize) -> Harness<'static, VersoloPdfApp> {
     let file = dir.join(format!("Beispiel{n}.pdf"));
     std::fs::write(&file, common::text_pdf(3)).unwrap();
     let mut h = harness(file);
@@ -389,7 +389,7 @@ fn fresh(dir: &std::path::Path, n: usize) -> Harness<'static, MrPdfApp> {
     h
 }
 
-fn open_tab(h: &mut Harness<'_, MrPdfApp>, tab: &str) {
+fn open_tab(h: &mut Harness<'_, VersoloPdfApp>, tab: &str) {
     if let Some(n) = h.get_all_by_label(tab).next() {
         n.click();
     }
@@ -401,7 +401,7 @@ fn open_tab(h: &mut Harness<'_, MrPdfApp>, tab: &str) {
 fn mouse_tour() {
     let _guard = common::lock();
     let dir = tempfile::tempdir().unwrap();
-    let wanted: Vec<String> = std::env::var("MRPDF_MOUSE_TABS")
+    let wanted: Vec<String> = std::env::var("VERSOLOPDF_MOUSE_TABS")
         .map(|v| v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
         .unwrap_or_default();
     let mut lines =
@@ -488,15 +488,15 @@ fn mouse_tour() {
 }
 
 /// Screen position of a PDF point of page 0.
-fn to_screen(h: &Harness<'_, MrPdfApp>, x: f32, y: f32) -> Pos2 {
+fn to_screen(h: &Harness<'_, VersoloPdfApp>, x: f32, y: f32) -> Pos2 {
     let tab = h.state().active_tab().unwrap();
     let slot = tab.layout.slots.iter().find(|s| s.page == 0).unwrap();
     let g = tab.display_geometry(0).unwrap();
-    let v = g.pdf_to_view(mrpdf::geometry::PointF::new(x, y));
+    let v = g.pdf_to_view(versolopdf::geometry::PointF::new(x, y));
     slot.rect.min + tab.canvas_origin.to_vec2() + egui::vec2(v.x, v.y) * tab.scale()
 }
 
-fn first_rect(h: &mut Harness<'_, MrPdfApp>) -> Option<RectF> {
+fn first_rect(h: &mut Harness<'_, VersoloPdfApp>) -> Option<RectF> {
     let tab = h.state_mut().active_tab_mut()?;
     tab.annotations(0).first().map(|a| a.rect.normalized())
 }
@@ -507,7 +507,7 @@ fn first_rect(h: &mut Harness<'_, MrPdfApp>) -> Option<RectF> {
 #[test]
 #[ignore = "long; run explicitly"]
 fn polygon_gestures() {
-    use mrpdf::ui::app::commands::Cmd;
+    use versolopdf::ui::app::commands::Cmd;
     let _guard = common::lock();
     let dir = tempfile::tempdir().unwrap();
     let mut failed = Vec::new();
@@ -561,13 +561,13 @@ fn polygon_gestures() {
 }
 
 /// Background colour on a page that covers its background (first real test
-/// file, `MRPDF_TESTFILES`): the dialog switches to "Über den Seiteninhalt
+/// file, `VERSOLOPDF_TESTFILES`): the dialog switches to "Über den Seiteninhalt
 /// legen" by itself and OK colours the white parts of the page.
 #[test]
-#[ignore = "needs MRPDF_TESTFILES"]
+#[ignore = "needs VERSOLOPDF_TESTFILES"]
 fn background_on_covered_page() {
-    use mrpdf::ui::app::commands::Cmd;
-    let Some(dir) = std::env::var_os("MRPDF_TESTFILES") else { return };
+    use versolopdf::ui::app::commands::Cmd;
+    let Some(dir) = std::env::var_os("VERSOLOPDF_TESTFILES") else { return };
     let file = PathBuf::from(dir).join("test1.pdf");
     let _guard = common::lock();
     let mut h = harness(file);
@@ -603,8 +603,8 @@ fn background_on_covered_page() {
 #[test]
 #[ignore = "long; run explicitly"]
 fn compare_documents() {
-    use mrpdf::compare::DiffKind;
-    use mrpdf::ui::app::commands::Cmd;
+    use versolopdf::compare::DiffKind;
+    use versolopdf::ui::app::commands::Cmd;
     let _guard = common::lock();
     let dir = tempfile::tempdir().unwrap();
     let old = dir.path().join("Vertrag-alt.pdf");
@@ -740,15 +740,15 @@ fn compare_documents() {
     assert!(failed.is_empty(), "{failed:?}");
 }
 
-/// "Dokumente vergleichen" with the real test files (`MRPDF_TESTFILES`):
+/// "Dokumente vergleichen" with the real test files (`VERSOLOPDF_TESTFILES`):
 /// each file against a copy without its second page. Exactly one
 /// difference ("Seite gelöscht") may come out; the time is printed.
 #[test]
-#[ignore = "needs MRPDF_TESTFILES"]
+#[ignore = "needs VERSOLOPDF_TESTFILES"]
 fn compare_real_files() {
-    use mrpdf::compare::DiffKind;
-    use mrpdf::ui::app::commands::Cmd;
-    let Some(dir) = std::env::var_os("MRPDF_TESTFILES") else { return };
+    use versolopdf::compare::DiffKind;
+    use versolopdf::ui::app::commands::Cmd;
+    let Some(dir) = std::env::var_os("VERSOLOPDF_TESTFILES") else { return };
     let _guard = common::lock();
     let tmp = tempfile::tempdir().unwrap();
     let mut files: Vec<PathBuf> =
@@ -757,7 +757,7 @@ fn compare_real_files() {
     let mut failed = Vec::new();
     for path in files.into_iter().filter(|p| p.extension().is_some_and(|e| e == "pdf")) {
         let name = path.file_name().unwrap().to_string_lossy().to_string();
-        let mut doc = mrpdf::Document::open(&path, None).unwrap();
+        let mut doc = versolopdf::Document::open(&path, None).unwrap();
         let pages = doc.page_count();
         if pages < 3 {
             continue;
@@ -796,7 +796,7 @@ fn compare_real_files() {
 }
 
 /// Hash of the pixels in `r` (screen points).
-fn region_hash(h: &mut Harness<'_, MrPdfApp>, r: Rect) -> u64 {
+fn region_hash(h: &mut Harness<'_, VersoloPdfApp>, r: Rect) -> u64 {
     use std::hash::{Hash, Hasher};
     h.event(egui::Event::PointerGone);
     h.run_steps(3);
@@ -814,7 +814,7 @@ fn region_hash(h: &mut Harness<'_, MrPdfApp>, r: Rect) -> u64 {
 }
 
 /// Screen area of the dialog preview: below the "Vorschau …" heading.
-fn preview_rect(h: &Harness<'_, MrPdfApp>) -> Rect {
+fn preview_rect(h: &Harness<'_, VersoloPdfApp>) -> Rect {
     let text = |n: &egui_kittest::Node<'_>| {
         let a = n.accesskit_node();
         a.label().or_else(|| a.value()).unwrap_or_default().to_string()
@@ -836,11 +836,11 @@ fn preview_rect(h: &Harness<'_, MrPdfApp>) -> Rect {
 #[test]
 #[ignore = "long; run explicitly"]
 fn dialog_previews() {
-    use mrpdf::ui::app::commands::Cmd;
+    use versolopdf::ui::app::commands::Cmd;
     let _guard = common::lock();
     let dir = tempfile::tempdir().unwrap();
     let mut failed = Vec::new();
-    let shot = |h: &mut Harness<'_, MrPdfApp>, name: &str| {
+    let shot = |h: &mut Harness<'_, VersoloPdfApp>, name: &str| {
         if let Ok(img) = h.render() {
             let _ = img.save(out_dir().join(format!("preview-{name}.png")));
         }
@@ -997,10 +997,11 @@ fn dialog_previews() {
 #[test]
 #[ignore = "long; run explicitly"]
 fn text_tools() {
-    use mrpdf::ui::app::commands::Cmd;
+    use versolopdf::ui::app::commands::Cmd;
     let _guard = common::lock();
     let dir = tempfile::tempdir().unwrap();
-    let count = |h: &mut Harness<'_, MrPdfApp>| h.state_mut().active_tab_mut().unwrap().annotations(0).len();
+    let count =
+        |h: &mut Harness<'_, VersoloPdfApp>| h.state_mut().active_tab_mut().unwrap().annotations(0).len();
     let cases: [(&str, Tool, Option<Event>); 3] = [
         (
             "Textkorrektur + Entf",
@@ -1069,7 +1070,7 @@ fn text_tools() {
 #[test]
 #[ignore = "long; run explicitly"]
 fn annotation_handling() {
-    use mrpdf::ui::app::commands::Cmd;
+    use versolopdf::ui::app::commands::Cmd;
     let _guard = common::lock();
     let dir = tempfile::tempdir().unwrap();
     let tools = [
@@ -1201,7 +1202,7 @@ fn annotation_handling() {
         }
         // Delete and undo.
         let count =
-            |h: &mut Harness<'_, MrPdfApp>| h.state_mut().active_tab_mut().unwrap().annotations(0).len();
+            |h: &mut Harness<'_, VersoloPdfApp>| h.state_mut().active_tab_mut().unwrap().annotations(0).len();
         let p = to_screen(&h, (r2.x0 + r2.x1) / 2.0, (r2.y0 + r2.y1) / 2.0);
         click(&mut h, p);
         if h.state().active_tab().unwrap().selected_annot.is_none() {

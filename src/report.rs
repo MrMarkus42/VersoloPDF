@@ -324,7 +324,7 @@ pub fn build_pdf(title: &str, lines: &[Line]) -> Result<Vec<u8>> {
     doc.objects.insert(pages_id, Object::Dictionary(pages_dict));
     let mut info = Dictionary::new();
     info.set("Title", text_string(title));
-    info.set("Producer", Object::string_literal(format!("MrPDF {}", env!("CARGO_PKG_VERSION"))));
+    info.set("Producer", Object::string_literal(format!("VersoloPDF {}", env!("CARGO_PKG_VERSION"))));
     let info_id = doc.add_object(info);
     let mut catalog = Dictionary::new();
     catalog.set("Type", Object::Name(b"Catalog".to_vec()));

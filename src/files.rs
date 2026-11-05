@@ -127,10 +127,10 @@ fn trash_impl(path: &Path) -> Result<()> {
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     // The path is passed in an environment variable, never as script text.
     let script = "Add-Type -AssemblyName Microsoft.VisualBasic; \
-                  [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($env:MRPDF_TRASH_PATH, 'OnlyErrorDialogs', 'SendToRecycleBin')";
+                  [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($env:VERSOLOPDF_TRASH_PATH, 'OnlyErrorDialogs', 'SendToRecycleBin')";
     let output = std::process::Command::new("powershell.exe")
         .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script])
-        .env("MRPDF_TRASH_PATH", path)
+        .env("VERSOLOPDF_TRASH_PATH", path)
         .creation_flags(CREATE_NO_WINDOW)
         .output()
         .map_err(|e| Error::Invalid(format!("powershell: {e}")))?;
@@ -228,19 +228,66 @@ pub struct RecoveryEntry {
     pub saved: String,
 }
 
-/// MrPDF's folder in the user's data folder.
+/// VersoloPDF's folder in the user's data folder.
 pub fn data_dir() -> Option<PathBuf> {
     if cfg!(windows) {
-        std::env::var_os("LOCALAPPDATA").map(PathBuf::from).map(|p| p.join("MrPDF"))
+        std::env::var_os("LOCALAPPDATA").map(PathBuf::from).map(|p| p.join("VersoloPDF"))
     } else if cfg!(target_os = "macos") {
-        std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/Application Support/MrPDF"))
+        std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/Application Support/VersoloPDF"))
     } else {
         std::env::var_os("XDG_DATA_HOME")
             .map(PathBuf::from)
             .filter(|p| p.is_absolute())
             .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
-            .map(|p| p.join("mrpdf"))
+            .map(|p| p.join("versolopdf"))
     }
+}
+
+/// The data folder of version 1.0, when the program was called "MrPDF".
+fn old_data_dir() -> Option<PathBuf> {
+    let new = data_dir()?;
+    let name = if cfg!(windows) || cfg!(target_os = "macos") { "MrPDF" } else { "mrpdf" };
+    Some(new.with_file_name(name))
+}
+
+/// Takes over the data of the former name "MrPDF" (settings, digital IDs,
+/// recovery copies, error log): the old folders are moved to the new names
+/// as long as the new ones do not exist yet. Call before anything writes
+/// into the data folder.
+pub fn take_over_old_data() {
+    move_folder(old_data_dir(), data_dir());
+    move_folder(eframe::storage_dir("MrPDF"), eframe::storage_dir("VersoloPDF"));
+}
+
+fn move_folder(from: Option<PathBuf>, to: Option<PathBuf>) {
+    let (Some(from), Some(to)) = (from, to) else { return };
+    if from == to || !from.is_dir() || to.exists() {
+        return;
+    }
+    if let Some(parent) = to.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    // Moving fails while the old program still runs: copy instead.
+    if std::fs::rename(&from, &to).is_err() && copy_folder(&from, &to, 0).is_err() {
+        std::fs::remove_dir_all(&to).ok();
+    }
+}
+
+fn copy_folder(from: &Path, to: &Path, depth: usize) -> std::io::Result<()> {
+    if depth > 8 {
+        return Ok(());
+    }
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let target = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_folder(&entry.path(), &target, depth + 1)?;
+        } else {
+            std::fs::copy(entry.path(), target)?;
+        }
+    }
+    Ok(())
 }
 
 /// Folder of the recovery copies in the user's data folder.
@@ -311,7 +358,7 @@ mod tests {
     use super::*;
 
     fn temp(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("mrpdf-files-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("versolopdf-files-{name}-{}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
         dir

@@ -1,5 +1,5 @@
 //! "Von URL öffnen": downloads a PDF with the system's `curl` program
-//! (part of Windows 10/11, macOS and most Linux systems), so MrPDF needs no
+//! (part of Windows 10/11, macOS and most Linux systems), so VersoloPDF needs no
 //! own network or TLS library.
 
 use std::path::{Path, PathBuf};

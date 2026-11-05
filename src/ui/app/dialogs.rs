@@ -3,10 +3,10 @@
 use egui::{Context, Id, Modal, RichText, Ui};
 
 use super::actions::parse_page_range;
-use super::{Dialog, MrPdfApp, RangePurpose};
+use super::{Dialog, RangePurpose, VersoloPdfApp};
 
-/// Work to do after the modal closed (needs `&mut MrPdfApp`).
-pub(super) type Action = Box<dyn FnOnce(&mut MrPdfApp, &Context)>;
+/// Work to do after the modal closed (needs `&mut VersoloPdfApp`).
+pub(super) type Action = Box<dyn FnOnce(&mut VersoloPdfApp, &Context)>;
 
 pub(super) enum Outcome {
     Keep,
@@ -17,10 +17,10 @@ pub(super) enum Outcome {
 const TITLE_BAR: f32 = 30.0;
 
 fn title_id() -> Id {
-    Id::new("mrpdf-dialog-title")
+    Id::new("versolopdf-dialog-title")
 }
 
-/// Sets the text of the dialog's title bar (drawn by `MrPdfApp::dialogs`).
+/// Sets the text of the dialog's title bar (drawn by `VersoloPdfApp::dialogs`).
 pub(super) fn set_title(ui: &mut Ui, text: impl Into<String>) {
     let text: String = text.into();
     ui.ctx().data_mut(|d| d.insert_temp(title_id(), text));
@@ -30,7 +30,7 @@ pub(super) fn set_title(ui: &mut Ui, text: impl Into<String>) {
 /// movement, close button clicked).
 fn title_bar(ui: &mut Ui, bar: egui::Rect, title: &str) -> (Option<egui::Vec2>, bool) {
     let visuals = ui.visuals().clone();
-    let drag = ui.interact(bar, Id::new("mrpdf-dialog-bar"), egui::Sense::drag());
+    let drag = ui.interact(bar, Id::new("versolopdf-dialog-bar"), egui::Sense::drag());
     let fill = if visuals.dark_mode { egui::Color32::from_gray(48) } else { egui::Color32::from_gray(236) };
     let r = visuals.window_corner_radius;
     ui.painter().rect_filled(bar, egui::CornerRadius { nw: r.nw, ne: r.ne, sw: 0, se: 0 }, fill);
@@ -56,7 +56,7 @@ fn title_bar(ui: &mut Ui, bar: egui::Rect, title: &str) -> (Option<egui::Vec2>, 
     );
     // Accessible name of the bar: the title (found by tests and screen readers).
     drag.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, title));
-    let close = ui.interact(close_rect, Id::new("mrpdf-dialog-close"), egui::Sense::click());
+    let close = ui.interact(close_rect, Id::new("versolopdf-dialog-close"), egui::Sense::click());
     close.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "✕"));
     if close.hovered() {
         ui.painter().rect_filled(close_rect, 3.0, egui::Color32::from_rgb(196, 43, 28));
@@ -90,7 +90,7 @@ pub(super) fn buttons_if(ui: &mut Ui, ok: &str, cancel: &str, enabled: bool) -> 
     (result.0 || enter, result.1 || esc)
 }
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     pub(super) fn dialogs(&mut self, ctx: &Context) {
         let Some(mut dialog) = self.dialog.take() else { return };
         let t = self.t();
@@ -100,7 +100,7 @@ impl MrPdfApp {
 
         // The dialog is a window: title bar (drag to move, ✕ to close) and
         // content. A different dialog opens in the middle again.
-        let area_id = Id::new("mrpdf-dialog");
+        let area_id = Id::new("versolopdf-dialog");
         let kind = std::mem::discriminant(&dialog);
         let pos = self.dialog_pos.filter(|(k, _)| *k == kind).map(|(_, p)| p);
         let area = match pos {
@@ -596,9 +596,9 @@ impl MrPdfApp {
                             set_title(
                                 ui,
                                 if self.settings.language == crate::ui::i18n::Language::German {
-                                    "Über MrPDF"
+                                    "Über VersoloPDF"
                                 } else {
-                                    "About MrPDF"
+                                    "About VersoloPDF"
                                 },
                             );
                             ui.horizontal(|ui| {
@@ -611,7 +611,7 @@ impl MrPdfApp {
                                     crate::ui::theme::BRAND,
                                 );
                                 ui.vertical(|ui| {
-                                    ui.heading(format!("MrPDF {}", env!("CARGO_PKG_VERSION")));
+                                    ui.heading(format!("VersoloPDF {}", env!("CARGO_PKG_VERSION")));
                                     ui.label(t.about_text);
                                 });
                             });
@@ -692,7 +692,8 @@ impl MrPdfApp {
                 super::page_dialogs::draw_footer(ui);
             });
             let bar = egui::Rect::from_min_size(bar_top, egui::vec2(ui.min_rect().width(), TITLE_BAR));
-            let title = ui.ctx().data(|d| d.get_temp::<String>(title_id())).unwrap_or_else(|| "MrPDF".into());
+            let title =
+                ui.ctx().data(|d| d.get_temp::<String>(title_id())).unwrap_or_else(|| "VersoloPDF".into());
             (moved, closed) = title_bar(ui, bar, &title);
         });
 

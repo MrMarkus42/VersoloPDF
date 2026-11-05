@@ -35,7 +35,7 @@ pub struct Settings {
     pub recent_files: Vec<PathBuf>,
     /// Pinned documents shown above the recent files.
     pub pinned_files: Vec<PathBuf>,
-    /// Documents open when MrPDF was last closed.
+    /// Documents open when VersoloPDF was last closed.
     pub last_session: Session,
     /// Sessions saved by name.
     pub sessions: Vec<Session>,
@@ -97,6 +97,9 @@ pub struct Settings {
     pub sign_location: String,
     pub sign_contact: String,
     pub sign_corner: u8,
+    /// Signaturen: add a time stamp when signing; the time stamp authority.
+    pub sign_time_stamp: bool,
+    pub tsa_url: String,
     /// Neue Version: look for a new release at start (at most once a day).
     pub update_check: bool,
     /// Neue Version: time of the last automatic check (seconds since 1970).
@@ -127,10 +130,11 @@ pub struct Settings {
     pub transparency_grid: bool,
     /// "Seitenmaße/Position" in the status bar.
     pub show_page_info: bool,
-    /// "Einrasten" (at the grid and/or the guides).
+    /// "Einrasten" (at the grid, the guides and/or the page objects).
     pub snap: bool,
     pub snap_grid: bool,
     pub snap_guides: bool,
+    pub snap_objects: bool,
     /// "Verweise hervorheben".
     pub highlight_links: bool,
     /// Grid: distance of the main lines (mm) and number of subdivisions.
@@ -328,6 +332,8 @@ impl Default for Settings {
             sign_location: String::new(),
             sign_contact: String::new(),
             sign_corner: 0,
+            sign_time_stamp: false,
+            tsa_url: crate::sign::tsa::DEFAULT_URL.into(),
             update_check: true,
             update_last_check: 0,
             identity: Identity::default(),
@@ -348,6 +354,7 @@ impl Default for Settings {
             snap: false,
             snap_grid: true,
             snap_guides: true,
+            snap_objects: false,
             highlight_links: false,
             grid_mm: 10.0,
             grid_subdivisions: 10,
@@ -640,9 +647,9 @@ mod tests {
         s.store_session(session.clone());
         s.store_session(Session { files: vec!["/c.pdf".into()], ..session.clone() });
         assert_eq!(s.sessions.len(), 1, "same name replaces");
-        let dir = std::env::temp_dir().join(format!("mrpdf-session-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("versolopdf-session-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let file = dir.join("s.mrpdfsession");
+        let file = dir.join("s.versolopdfsession");
         write_session(&file, &session).unwrap();
         assert_eq!(read_session(&file).unwrap(), session);
         std::fs::write(&file, "kein ron").unwrap();
@@ -661,7 +668,7 @@ mod tests {
         s.add_recent(Path::new("/a.pdf"));
         s.remember_page(Path::new("/a.pdf"), 7);
         assert_eq!(s.last_page(Path::new("/a.pdf")), Some(7));
-        let dir = std::env::temp_dir().join(format!("mrpdf-settings-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("versolopdf-settings-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("e.ron");
         s.export(&file).unwrap();

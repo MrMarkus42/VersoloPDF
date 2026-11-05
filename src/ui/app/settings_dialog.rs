@@ -1,5 +1,5 @@
 //! "Einstellungen" (Strg+K):
-//! 38 categories with a search box, OK / Übernehmen / Abbrechen; and
+//! the categories with options, a search box, OK / Übernehmen / Abbrechen; and
 //! "Einstellungen verwalten" (export, import, reset).
 
 use egui::{RichText, Ui, vec2};
@@ -7,14 +7,14 @@ use egui::{RichText, Ui, vec2};
 use super::commands::Cmd;
 use super::dialogs::{Action, Outcome};
 use super::page_dialogs::tr;
-use super::{Dialog, MrPdfApp};
+use super::{Dialog, VersoloPdfApp};
 use crate::ui::i18n::Language;
 use crate::ui::pickers::{Unit, section};
 use crate::ui::settings::{LinkPolicy, SaveFolder, Settings, url_host};
 use crate::ui::tools::Tool;
 use crate::ui::view::{PageLayout, ZoomMode};
 
-/// State of the dialog (the edited options are in `MrPdfApp::settings_draft`).
+/// State of the dialog (the edited options are in `VersoloPdfApp::settings_draft`).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct SettingsPage {
     pub page: Cat,
@@ -190,21 +190,21 @@ impl Cat {
         if de { g } else { e }
     }
 
-    /// Why a category has no options in MrPDF (None: it has some).
+    /// Why a category has no options in VersoloPDF (None: it has some).
     fn unavailable(self, de: bool) -> Option<&'static str> {
         Some(match self {
             Cat::License => tr(
                 de,
-                "MrPDF ist freie Software und braucht keine Lizenz.",
-                "MrPDF is free software and needs no licence.",
+                "VersoloPDF ist freie Software und braucht keine Lizenz.",
+                "VersoloPDF is free software and needs no licence.",
             ),
             Cat::Measure3d | Cat::Media3d => {
-                tr(de, "MrPDF zeigt keine 3D-Inhalte an.", "MrPDF does not show 3D content.")
+                tr(de, "VersoloPDF zeigt keine 3D-Inhalte an.", "VersoloPDF does not show 3D content.")
             }
             Cat::Launch => tr(
                 de,
-                "MrPDF startet keine fremden Programme aus Dokumenten.",
-                "MrPDF does not start other programs from documents.",
+                "VersoloPDF startet keine fremden Programme aus Dokumenten.",
+                "VersoloPDF does not start other programs from documents.",
             ),
             Cat::FileAssoc => tr(
                 de,
@@ -213,10 +213,10 @@ impl Cat {
             ),
             Cat::InfoBar => tr(
                 de,
-                "MrPDF zeigt nur die Wiederherstellungsleiste (siehe „Dokumente“).",
-                "MrPDF only shows the recovery bar (see \"Documents\").",
+                "VersoloPDF zeigt nur die Wiederherstellungsleiste (siehe „Dokumente“).",
+                "VersoloPDF only shows the recovery bar (see \"Documents\").",
             ),
-            Cat::Plugins => tr(de, "MrPDF hat keine Erweiterungen.", "MrPDF has no plug-ins."),
+            Cat::Plugins => tr(de, "VersoloPDF hat keine Erweiterungen.", "VersoloPDF has no plug-ins."),
             Cat::ColorManagement => tr(
                 de,
                 "Farben werden ohne Farbprofile angezeigt.",
@@ -224,25 +224,25 @@ impl Cat {
             ),
             Cat::JavaScript => tr(
                 de,
-                "MrPDF führt kein JavaScript aus Dokumenten aus.",
-                "MrPDF does not run JavaScript from documents.",
+                "VersoloPDF führt kein JavaScript aus Dokumenten aus.",
+                "VersoloPDF does not run JavaScript from documents.",
             ),
-            Cat::Ai => tr(de, "MrPDF hat keinen KI-Dienst.", "MrPDF has no AI service."),
+            Cat::Ai => tr(de, "VersoloPDF hat keinen KI-Dienst.", "VersoloPDF has no AI service."),
             Cat::Performance => tr(
                 de,
                 "Speicher und Rechenkerne werden automatisch verwaltet.",
                 "Memory and processor cores are managed automatically.",
             ),
-            Cat::Scanner => tr(de, "MrPDF kann nicht scannen.", "MrPDF cannot scan."),
+            Cat::Scanner => tr(de, "VersoloPDF kann nicht scannen.", "VersoloPDF cannot scan."),
             Cat::SharePoint | Cat::Places => tr(
                 de,
-                "MrPDF arbeitet nur mit Dateien auf diesem Computer.",
-                "MrPDF only works with files on this computer.",
+                "VersoloPDF arbeitet nur mit Dateien auf diesem Computer.",
+                "VersoloPDF only works with files on this computer.",
             ),
             Cat::SearchEngines => {
-                tr(de, "MrPDF sucht nicht im Internet.", "MrPDF does not search the internet.")
+                tr(de, "VersoloPDF sucht nicht im Internet.", "VersoloPDF does not search the internet.")
             }
-            Cat::Ocr => tr(de, "MrPDF hat keine Texterkennung.", "MrPDF has no OCR."),
+            Cat::Ocr => tr(de, "VersoloPDF hat keine Texterkennung.", "VersoloPDF has no OCR."),
             _ => return None,
         })
     }
@@ -297,6 +297,10 @@ fn sanitize(s: &mut Settings) {
     s.sign_location = clean(&s.sign_location, 200);
     s.sign_contact = clean(&s.sign_contact, 200);
     s.sign_corner = s.sign_corner.min(3);
+    s.tsa_url = clean(s.tsa_url.trim(), 300);
+    if !crate::download::valid_url(&s.tsa_url) {
+        s.tsa_url = crate::sign::tsa::DEFAULT_URL.into();
+    }
     s.ui_scale = s.ui_scale.clamp(0.5, 2.0);
     s.recovery_minutes = s.recovery_minutes.clamp(1, 600);
     if s.snapshot_dpi != 0 {
@@ -306,7 +310,7 @@ fn sanitize(s: &mut Settings) {
     s.limit_view_values();
 }
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     /// Opens "Einstellungen".
     pub fn open_settings(&mut self) {
         self.open_settings_at(Cat::General);
@@ -354,16 +358,12 @@ impl MrPdfApp {
                 egui::ScrollArea::vertical().id_salt("settings-cats").max_height(400.0).show(ui, |ui| {
                     // Full column width, so the scroll bar sits at the edge.
                     ui.set_min_width(ui.available_width());
+                    // Categories without options in VersoloPDF are not listed.
                     for cat in Cat::ALL {
-                        if !cat.matches(&query) {
+                        if !cat.matches(&query) || cat.unavailable(de).is_some() {
                             continue;
                         }
-                        let text = if cat.unavailable(de).is_some() {
-                            RichText::new(cat.name(de)).weak()
-                        } else {
-                            RichText::new(cat.name(de))
-                        };
-                        if ui.selectable_label(s.page == cat, text).clicked() {
+                        if ui.selectable_label(s.page == cat, RichText::new(cat.name(de))).clicked() {
                             s.page = cat;
                         }
                     }
@@ -415,8 +415,8 @@ impl MrPdfApp {
         let de = self.settings.language == Language::German;
         let Some(path) = rfd::FileDialog::new()
             .set_title(Cmd::ExportSettings.label(self.settings.language))
-            .add_filter(tr(de, "MrPDF-Einstellungen", "MrPDF settings"), &["ron"])
-            .set_file_name("MrPDF-Einstellungen.ron")
+            .add_filter(tr(de, "VersoloPDF-Einstellungen", "VersoloPDF settings"), &["ron"])
+            .set_file_name("VersoloPDF-Einstellungen.ron")
             .save_file()
         else {
             return;
@@ -435,7 +435,7 @@ impl MrPdfApp {
         let de = self.settings.language == Language::German;
         let Some(path) = rfd::FileDialog::new()
             .set_title(Cmd::ImportSettings.label(self.settings.language))
-            .add_filter(tr(de, "MrPDF-Einstellungen", "MrPDF settings"), &["ron"])
+            .add_filter(tr(de, "VersoloPDF-Einstellungen", "VersoloPDF settings"), &["ron"])
             .pick_file()
         else {
             return;
@@ -805,13 +805,34 @@ fn settings_page(ui: &mut Ui, de: bool, s: &mut SettingsPage, d: &mut Settings) 
                     ));
                 }
             });
+            section(ui, tr(de, "Zeitstempel", "Time stamps"), |ui| {
+                ui.checkbox(
+                    &mut d.sign_time_stamp,
+                    tr(de, "Signaturen mit einem Zeitstempel versehen", "Add a time stamp to signatures"),
+                );
+                ui.horizontal(|ui| {
+                    ui.label(tr(de, "Zeitstempeldienst:", "Time stamp authority:"));
+                    ui.add(egui::TextEdit::singleline(&mut d.tsa_url).desired_width(280.0));
+                    if ui.button(tr(de, "Standard", "Default")).clicked() {
+                        d.tsa_url = crate::sign::tsa::DEFAULT_URL.into();
+                    }
+                });
+                hint(
+                    ui,
+                    tr(
+                        de,
+                        "Ein Zeitstempeldienst (RFC 3161) bestätigt unabhängig, wann signiert wurde. Gesendet wird nur ein Prüfwert, nie der Inhalt des Dokuments. „Schützen › Zeitstempel“ versieht ein Dokument auch ohne Signatur mit einem Zeitstempel.",
+                        "A time stamp authority (RFC 3161) confirms independently when a document was signed. Only a hash value is sent, never the content of the document. \"Protect › Time stamp\" adds a time stamp without a signature.",
+                    ),
+                );
+            });
             section(ui, tr(de, "Prüfen", "Checking"), |ui| {
                 hint(
                     ui,
                     tr(
                         de,
-                        "Signaturen prüft „Schützen › Signaturen überprüfen“. Zeitstempel und der Zertifikatsspeicher von Windows werden noch nicht verwendet.",
-                        "Signatures are checked with \"Protect › Check signatures\". Timestamps and the Windows certificate store are not used yet.",
+                        "Signaturen, Zertifizierungen und Zeitstempel prüft „Schützen › Signaturen überprüfen“. Ob einem Aussteller vertraut werden kann, wird nicht geprüft.",
+                        "Signatures, certifications and time stamps are checked with \"Protect › Check signatures\". Whether an issuer can be trusted is not checked.",
                     ),
                 );
             });
@@ -853,9 +874,9 @@ fn settings_page(ui: &mut Ui, de: bool, s: &mut SettingsPage, d: &mut Settings) 
                 ui,
                 tr(
                     de,
-                    "MrPDF wandelt Bilder (PNG, JPEG, BMP, TIFF …), Text, Markdown, CSV und RTF in PDF um \
+                    "VersoloPDF wandelt Bilder (PNG, JPEG, BMP, TIFF …), Text, Markdown, CSV und RTF in PDF um \
                      (Datei › Neues Dokument). Eigene Einstellungen gibt es in den jeweiligen Dialogen.",
-                    "MrPDF converts images (PNG, JPEG, BMP, TIFF …), text, Markdown, CSV and RTF to PDF \
+                    "VersoloPDF converts images (PNG, JPEG, BMP, TIFF …), text, Markdown, CSV and RTF to PDF \
                      (File › New document). Their options are in the dialogs.",
                 ),
             );
@@ -865,9 +886,9 @@ fn settings_page(ui: &mut Ui, de: bool, s: &mut SettingsPage, d: &mut Settings) 
                 ui,
                 tr(
                     de,
-                    "MrPDF exportiert in Bilder, Word (DOCX) und Text (Datei › Exportieren). \
+                    "VersoloPDF exportiert in Bilder, Word (DOCX) und Text (Datei › Exportieren). \
                      Die Einstellungen stehen in den jeweiligen Dialogen.",
-                    "MrPDF exports to images, Word (DOCX) and text (File › Export). \
+                    "VersoloPDF exports to images, Word (DOCX) and text (File › Export). \
                      Their options are in the dialogs.",
                 ),
             );
@@ -904,6 +925,14 @@ fn settings_page(ui: &mut Ui, de: bool, s: &mut SettingsPage, d: &mut Settings) 
                 ui.add_enabled_ui(d.snap, |ui| {
                     ui.checkbox(&mut d.snap_grid, tr(de, "Am Gitter", "To grid"));
                     ui.checkbox(&mut d.snap_guides, tr(de, "An Hilfslinien", "To guides"));
+                    ui.checkbox(
+                        &mut d.snap_objects,
+                        tr(
+                            de,
+                            "An Objekten (Texte, Bilder, Grafiken)",
+                            "To objects (text, images, graphics)",
+                        ),
+                    );
                 });
             });
         }
@@ -913,8 +942,8 @@ fn settings_page(ui: &mut Ui, de: bool, s: &mut SettingsPage, d: &mut Settings) 
                     ui,
                     tr(
                         de,
-                        "MrPDF verwendet die Sprachausgabe des Betriebssystems.",
-                        "MrPDF uses the speech output of the operating system.",
+                        "VersoloPDF verwendet die Sprachausgabe des Betriebssystems.",
+                        "VersoloPDF uses the speech output of the operating system.",
                     ),
                 );
                 egui::Grid::new("set-read").num_columns(2).spacing(vec2(10.0, 4.0)).show(ui, |ui| {

@@ -9,9 +9,9 @@ use egui::{
     WidgetType, vec2,
 };
 
-use super::commands::{Cmd, Unavailable};
+use super::commands::Cmd;
 use super::page_dialogs::{NewKind, TextKind};
-use super::{Dialog, MrPdfApp};
+use super::{Dialog, VersoloPdfApp};
 use crate::ui::i18n::Language;
 use crate::ui::icons::{self, Icon};
 use crate::ui::settings::Session;
@@ -103,8 +103,6 @@ enum Kind {
     New(NewKind),
     /// "Von URL öffnen".
     Url,
-    /// Offered by other editors, not by MrPDF.
-    Not(Unavailable),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -134,7 +132,6 @@ fn items(page: Page) -> &'static [Item] {
                     item("Letzte Dateien", "Recent files", Icon::Open, View(OpenView::Recent)),
                     item("Sitzungen", "Sessions", Icon::Thumbnails, View(OpenView::Sessions)),
                     item("Von URL öffnen", "Open from URL", Icon::Web, Url),
-                    item("Speicherort hinzufügen", "Add place", Icon::Cloud, Not(Unavailable::Cloud)),
                     item("Homepage", "Homepage", Icon::Web, Run(Cmd::Homepage)),
                     item("Lokale Datei", "Local file", Icon::Open, Run(Cmd::Open)),
                 ]
@@ -143,7 +140,6 @@ fn items(page: Page) -> &'static [Item] {
         Page::SaveAs => {
             const {
                 &[
-                    item("Speicherort hinzufügen", "Add place", Icon::Cloud, Not(Unavailable::Cloud)),
                     item("Homepage", "Homepage", Icon::Web, Run(Cmd::Homepage)),
                     item("Lokale Datei", "Local file", Icon::SaveAs, Run(Cmd::SaveAs)),
                 ]
@@ -174,10 +170,7 @@ fn items(page: Page) -> &'static [Item] {
                         Icon::TextFile,
                         New(NewKind::Text(TextKind::Rtf)),
                     ),
-                    item("Aus Web-Seite", "From web page", Icon::Web, Not(Unavailable::WebImport)),
-                    item("Aus E-Mail", "From e-mail", Icon::Mail, Not(Unavailable::WebImport)),
                     item("Aus Bilddateien", "From image files", Icon::Image, New(NewKind::Images)),
-                    item("Von Scanner", "From scanner", Icon::Camera, Not(Unavailable::Scanner)),
                     group("Aus Zwischenablage", "From clipboard", Icon::Copy, New(NewKind::Clipboard)),
                 ]
             }
@@ -218,15 +211,6 @@ fn items(page: Page) -> &'static [Item] {
                         Icon::Mail,
                         Run(Cmd::EmailAll),
                     ),
-                    group("Zurückgeben", "Check in", Icon::Cloud, Not(Unavailable::Cloud)),
-                    item("Ausleihen", "Check out", Icon::Cloud, Not(Unavailable::Cloud)),
-                    item(
-                        "Ausleihen rückgängig machen",
-                        "Discard check out",
-                        Icon::Cloud,
-                        Not(Unavailable::Cloud),
-                    ),
-                    item("Bearbeitung zulassen", "Enable editing", Icon::Cloud, Not(Unavailable::Cloud)),
                 ]
             }
         }
@@ -322,7 +306,7 @@ fn page_title(ui: &mut Ui, text: &str) {
     ui.add_space(8.0);
 }
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     /// Whether the "Datei" backstage is shown instead of the documents.
     pub fn backstage_open(&self) -> bool {
         self.backstage.is_some()
@@ -425,16 +409,12 @@ impl MrPdfApp {
                         ui.separator();
                     }
                     let label = if de { it.de } else { it.en };
-                    let (enabled, hint) = match it.kind {
-                        Kind::Run(cmd) => (self.cmd_enabled(cmd), None),
-                        Kind::View(_) | Kind::New(_) | Kind::Url => (true, None),
-                        Kind::Not(reason) => (false, Some(reason.reason(lang).to_string())),
+                    let enabled = match it.kind {
+                        Kind::Run(cmd) => self.cmd_enabled(cmd),
+                        Kind::View(_) | Kind::New(_) | Kind::Url => true,
                     };
                     let selected = page == Page::Open && it.kind == Kind::View(open_view);
-                    let response = list_row(ui, it.icon, label, enabled, selected);
-                    if let Some(hint) = hint {
-                        let _ = response.on_disabled_hover_text(format!("{label}\n{hint}"));
-                    } else if response.clicked() {
+                    if list_row(ui, it.icon, label, enabled, selected).clicked() {
                         clicked = Some(it.kind);
                     }
                 }
@@ -785,7 +765,7 @@ impl MrPdfApp {
                 .clicked()
                 && let Some(session) = current.clone()
                 && let Some(path) = rfd::FileDialog::new()
-                    .add_filter(tr("MrPDF-Sitzung", "MrPDF session"), &[SESSION_EXT])
+                    .add_filter(tr("VersoloPDF-Sitzung", "VersoloPDF session"), &[SESSION_EXT])
                     .set_file_name(format!("{}.{SESSION_EXT}", tr("Sitzung", "Session")))
                     .save_file()
                 && let Err(err) = crate::ui::settings::write_session(&path, &session)
@@ -794,7 +774,11 @@ impl MrPdfApp {
             }
             if ui.button(tr("Sitzung aus einer Datei öffnen…", "Open session from a file…")).clicked()
                 && let Some(path) = rfd::FileDialog::new()
-                    .add_filter(tr("MrPDF-Sitzung", "MrPDF session"), &[SESSION_EXT])
+                    // Sessions saved by version 1.0 ("MrPDF") open as well.
+                    .add_filter(
+                        tr("VersoloPDF-Sitzung", "VersoloPDF session"),
+                        &[SESSION_EXT, "mrpdfsession"],
+                    )
                     .pick_file()
             {
                 match crate::ui::settings::read_session(&path) {
@@ -822,7 +806,7 @@ impl MrPdfApp {
         self.settings.url_history.insert(0, url.clone());
         self.settings.url_history.truncate(20);
         let (tx, rx) = std::sync::mpsc::channel();
-        let dir = std::env::temp_dir().join("mrpdf-downloads");
+        let dir = std::env::temp_dir().join("versolopdf-downloads");
         let address = url.clone();
         let repaint = ctx.clone();
         std::thread::spawn(move || {
@@ -876,7 +860,7 @@ impl MrPdfApp {
 /// Size of the pictures in the recent files list.
 const THUMB: Vec2 = Vec2::new(30.0, 40.0);
 /// File extension of session files.
-const SESSION_EXT: &str = "mrpdfsession";
+const SESSION_EXT: &str = "versolopdfsession";
 
 /// Current date and time for display ("26.10.2026, 15:31").
 pub(super) fn now_text(lang: Language) -> String {

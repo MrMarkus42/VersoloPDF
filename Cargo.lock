@@ -2625,40 +2625,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mrpdf"
-version = "1.0.0"
-dependencies = [
- "aes",
- "arboard",
- "cbc",
- "eframe",
- "egui",
- "egui_kittest",
- "env_logger",
- "getrandom 0.4.3",
- "image",
- "log",
- "lopdf",
- "p12-keystore",
- "p256",
- "p384",
- "pdfium-render",
- "quick-xml 0.41.0",
- "regex",
- "rfd",
- "ron",
- "rsa",
- "serde",
- "sha1",
- "sha2 0.11.0",
- "skrifa",
- "stringprep",
- "tempfile",
- "thiserror 2.0.21",
- "windows-sys 0.61.2",
-]
-
-[[package]]
 name = "naga"
 version = "30.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4773,6 +4739,40 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "versolopdf"
+version = "1.1.0"
+dependencies = [
+ "aes",
+ "arboard",
+ "cbc",
+ "eframe",
+ "egui",
+ "egui_kittest",
+ "env_logger",
+ "getrandom 0.4.3",
+ "image",
+ "log",
+ "lopdf",
+ "p12-keystore",
+ "p256",
+ "p384",
+ "pdfium-render",
+ "quick-xml 0.41.0",
+ "regex",
+ "rfd",
+ "ron",
+ "rsa",
+ "serde",
+ "sha1",
+ "sha2 0.11.0",
+ "skrifa",
+ "stringprep",
+ "tempfile",
+ "thiserror 2.0.21",
+ "windows-sys 0.61.2",
+]
 
 [[package]]
 name = "walkdir"

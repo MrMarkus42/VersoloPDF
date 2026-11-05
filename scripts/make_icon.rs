@@ -1,6 +1,6 @@
-//! Prepares the application icon from the drawing in `assets/mrpdf-icon-source.webp`:
+//! Prepares the application icon from the drawing in `assets/versolopdf-icon-source.webp`:
 //! crops it to the red rounded square, makes everything outside the square
-//! transparent and writes `assets/mrpdf.png` (256 px) and `assets/mrpdf.ico`
+//! transparent and writes `assets/versolopdf.png` (256 px) and `assets/versolopdf.ico`
 //! (16 to 256 px).
 //!
 //! Run: `cargo run --release --example make_icon` (registered in Cargo.toml).
@@ -14,7 +14,7 @@ fn is_red(p: &Rgba<u8>) -> bool {
 }
 
 fn main() {
-    let src = image::open("assets/mrpdf-icon-source.webp").expect("icon source").to_rgba8();
+    let src = image::open("assets/versolopdf-icon-source.webp").expect("icon source").to_rgba8();
     // Bounding box of the red square.
     let (mut x0, mut y0, mut x1, mut y1) = (u32::MAX, u32::MAX, 0, 0);
     for (x, y, p) in src.enumerate_pixels() {
@@ -44,7 +44,7 @@ fn main() {
         p[3] = (f32::from(p[3]) * alpha).round() as u8;
     }
     let big = image::imageops::resize(&square, 256, 256, FilterType::Lanczos3);
-    big.save("assets/mrpdf.png").expect("write png");
+    big.save("assets/versolopdf.png").expect("write png");
     let frames: Vec<IcoFrame> = [16u32, 20, 24, 32, 40, 48, 64, 128, 256]
         .iter()
         .map(|&n| {
@@ -52,7 +52,7 @@ fn main() {
             IcoFrame::as_png(img.as_raw(), n, n, ExtendedColorType::Rgba8).expect("frame")
         })
         .collect();
-    let file = std::fs::File::create("assets/mrpdf.ico").expect("ico file");
+    let file = std::fs::File::create("assets/versolopdf.ico").expect("ico file");
     IcoEncoder::new(file).encode_images(&frames).expect("write ico");
     println!("square {side} px at {x0},{y0}, corner radius {radius:.0} px");
 }

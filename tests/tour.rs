@@ -3,7 +3,7 @@
 //! Each command runs in a fresh window with a sample document (3 pages, a
 //! selected comment). The tour notes crashes, error messages, slow commands
 //! and the dialog that opens, saves a picture of every dialog and writes
-//! `target/tour/report.md`. Commands that act outside MrPDF (e-mail, web
+//! `target/tour/report.md`. Commands that act outside VersoloPDF (e-mail, web
 //! pages, moving or deleting files, the registry, speech output, ending
 //! the program) are left out and checked by hand.
 //!
@@ -16,19 +16,19 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use egui_kittest::Harness;
-use mrpdf::geometry::RectF;
-use mrpdf::model::{AnnotKind, AnnotStyle, Rgba};
-use mrpdf::pdf_edit::NewAnnotation;
-use mrpdf::ui::MrPdfApp;
-use mrpdf::ui::app::Dialog;
-use mrpdf::ui::app::commands::{Cmd, SEARCHABLE};
-use mrpdf::ui::i18n::Language;
-use mrpdf::ui::settings::Settings;
+use versolopdf::geometry::RectF;
+use versolopdf::model::{AnnotKind, AnnotStyle, Rgba};
+use versolopdf::pdf_edit::NewAnnotation;
+use versolopdf::ui::VersoloPdfApp;
+use versolopdf::ui::app::Dialog;
+use versolopdf::ui::app::commands::{Cmd, SEARCHABLE};
+use versolopdf::ui::i18n::Language;
+use versolopdf::ui::settings::Settings;
 
-/// Commands with effects outside MrPDF.
+/// Commands with effects outside VersoloPDF.
 fn outside(cmd: Cmd) -> bool {
-    use mrpdf::ui::app::form_cmds::FormCmd;
-    use mrpdf::ui::app::view_cmds::ViewCmd;
+    use versolopdf::ui::app::form_cmds::FormCmd;
+    use versolopdf::ui::app::view_cmds::ViewCmd;
     matches!(
         cmd,
         Cmd::Email
@@ -48,9 +48,9 @@ fn outside(cmd: Cmd) -> bool {
     )
 }
 
-/// Window size: `MRPDF_TOUR_SIZE=1024x700` checks a small screen.
+/// Window size: `VERSOLOPDF_TOUR_SIZE=1024x700` checks a small screen.
 fn tour_size() -> egui::Vec2 {
-    let size = std::env::var("MRPDF_TOUR_SIZE").unwrap_or_default();
+    let size = std::env::var("VERSOLOPDF_TOUR_SIZE").unwrap_or_default();
     let mut parts = size.split('x').filter_map(|p| p.parse::<f32>().ok());
     match (parts.next(), parts.next()) {
         (Some(w), Some(h)) => egui::vec2(w, h),
@@ -64,7 +64,7 @@ fn out_dir() -> PathBuf {
     dir
 }
 
-fn harness(file: PathBuf) -> Harness<'static, MrPdfApp> {
+fn harness(file: PathBuf) -> Harness<'static, VersoloPdfApp> {
     let settings = Settings {
         language: Language::German,
         author: "Tester".into(),
@@ -72,7 +72,7 @@ fn harness(file: PathBuf) -> Harness<'static, MrPdfApp> {
         ..Settings::default()
     };
     let mut h = Harness::builder().with_size(tour_size()).with_max_steps(64).wgpu().build_eframe(move |cc| {
-        let mut app = MrPdfApp::with_settings(&cc.egui_ctx, settings, vec![file]);
+        let mut app = VersoloPdfApp::with_settings(&cc.egui_ctx, settings, vec![file]);
         app.set_recovery_dir(None);
         app
     });
@@ -83,7 +83,7 @@ fn harness(file: PathBuf) -> Harness<'static, MrPdfApp> {
     let mut square = NewAnnotation::new(AnnotKind::Square, style);
     square.rect = RectF::new(100.0, 100.0, 200.0, 180.0);
     tab.doc.add_annotation(0, &square).unwrap();
-    tab.selected_annot = Some(mrpdf::ui::tab::AnnotRef { page: 0, index: 0 });
+    tab.selected_annot = Some(versolopdf::ui::tab::AnnotRef { page: 0, index: 0 });
     h.run_steps(3);
     h
 }
@@ -152,7 +152,7 @@ fn command_tour() {
                     }
                     // The dialog must fit into the window.
                     let screen = h.ctx.content_rect();
-                    let area = h.ctx.memory(|m| m.area_rect(egui::Id::new("mrpdf-dialog")));
+                    let area = h.ctx.memory(|m| m.area_rect(egui::Id::new("versolopdf-dialog")));
                     match area {
                         Some(r) if !screen.expand(1.0).contains_rect(r) => {
                             too_big += 1;

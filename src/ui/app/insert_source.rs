@@ -1,12 +1,12 @@
-//! Source list of "Seiten einfügen": the documents open in MrPDF first,
+//! Source list of "Seiten einfügen": the documents open in VersoloPDF first,
 //! then the recently used PDF files.
 
 use egui::{Context, RichText, Ui};
 
-use super::MrPdfApp;
+use super::VersoloPdfApp;
 use super::page_dialogs::{InsertSource, file_name, tr};
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     /// Draws the entries of the source drop-down; returns the clicked one.
     pub(super) fn insert_source_list(
         &self,

@@ -40,7 +40,7 @@ impl ObjectFilter {
     }
 }
 
-/// An object on a page as MrPDF shows it.
+/// An object on a page as VersoloPDF shows it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ContentObject {
     /// Index among the page objects (back to front).

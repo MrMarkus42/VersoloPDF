@@ -36,8 +36,8 @@ pub struct ViewOptions {
     pub transparency: bool,
     /// "Verweise hervorheben".
     pub highlight_links: bool,
-    /// "Einrasten": (at the grid, at guides); None: off.
-    pub snap: Option<(bool, bool)>,
+    /// "Einrasten": (at the grid, at guides, at page objects); None: off.
+    pub snap: Option<(bool, bool, bool)>,
     /// "Lineale".
     pub rulers: bool,
     pub unit: Unit,
@@ -439,10 +439,10 @@ fn rulers(ui: &mut Ui, tab: &mut DocTab, cx: &mut CanvasCtx, full: Rect, area: R
     }
 }
 
-/// "Einrasten": moves a view point onto the nearest grid line or guide
-/// within a few screen points.
-fn snap_point(tab: &DocTab, cx: &CanvasCtx, v: PointF) -> PointF {
-    let Some((to_grid, to_guides)) = cx.view.snap else { return v };
+/// "Einrasten": moves a view point onto the nearest grid line, guide or
+/// edge of a page object within a few screen points.
+fn snap_point(tab: &DocTab, cx: &CanvasCtx, page: usize, v: PointF) -> PointF {
+    let Some((to_grid, to_guides, to_objects)) = cx.view.snap else { return v };
     let reach = 6.0 / tab.scale();
     let mut x = (v.x, reach);
     let mut y = (v.y, reach);
@@ -464,12 +464,23 @@ fn snap_point(tab: &DocTab, cx: &CanvasCtx, v: PointF) -> PointF {
             consider(g.vertical, g.pos);
         }
     }
+    // Edges of text, images and graphics (read when the drag started).
+    if to_objects && let (Some(objects), Some(geo)) = (tab.cached_objects(page), tab.doc.geometry(page)) {
+        for o in objects.iter().filter(|o| !o.invisible) {
+            let a = geo.pdf_to_view(PointF::new(o.rect.x0, o.rect.y0));
+            let b = geo.pdf_to_view(PointF::new(o.rect.x1, o.rect.y1));
+            consider(true, a.x);
+            consider(true, b.x);
+            consider(false, a.y);
+            consider(false, b.y);
+        }
+    }
     PointF::new(x.0, y.0)
 }
 
 /// Checkerboard texture for "Transparenzgitter" (repeated).
 fn checker_texture(ctx: &egui::Context) -> egui::TextureHandle {
-    let id = egui::Id::new("mrpdf-checker");
+    let id = egui::Id::new("versolopdf-checker");
     if let Some(tex) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
         return tex;
     }
@@ -483,7 +494,7 @@ fn checker_texture(ctx: &egui::Context) -> egui::TextureHandle {
     }
     let options =
         egui::TextureOptions { wrap_mode: egui::TextureWrapMode::Repeat, ..egui::TextureOptions::NEAREST };
-    let tex = ctx.load_texture("mrpdf-checker", img, options);
+    let tex = ctx.load_texture("versolopdf-checker", img, options);
     ctx.data_mut(|d| d.insert_temp(id, tex.clone()));
     tex
 }
@@ -1449,7 +1460,11 @@ fn start_drag(
     }
     let pdf = pos.pdf_at(start);
     let v = pos.view_at(start);
-    let snapped = snap_point(tab, cx, v);
+    if cx.view.snap.is_some_and(|s| s.2) {
+        // Reads the page objects once; dragging then snaps to their edges.
+        let _ = tab.objects(pos.page);
+    }
+    let snapped = snap_point(tab, cx, pos.page, v);
     // While a polygon is being drawn, a press on an existing comment is
     // another corner, not a move.
     if tab.polygon.is_empty()
@@ -1557,7 +1572,7 @@ fn continue_drag(
                 if shift_down && cx.tool.gesture() == Gesture::Line {
                     v = snap_45(*start, v);
                 } else if cx.tool.gesture() != Gesture::Freehand {
-                    v = snap_point(tab, cx, v);
+                    v = snap_point(tab, cx, *page, v);
                 }
                 *current = v;
                 if cx.tool.gesture() == Gesture::Freehand
@@ -1736,6 +1751,7 @@ fn default_size(tool: Tool) -> (f32, f32) {
         Tool::FieldButton => (80.0, 22.0),
         Tool::FieldSignature => (180.0, 50.0),
         Tool::FieldDate => (100.0, 20.0),
+        Tool::FieldBarcode => (80.0, 80.0),
         Tool::FieldImage => (120.0, 90.0),
         Tool::Video | Tool::Model3d => (160.0, 90.0),
         Tool::AudioClip => (120.0, 40.0),

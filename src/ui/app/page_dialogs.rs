@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use super::commands::Cmd;
 use super::dialogs::{Action, Outcome};
 use super::preview::{doc_preview, page_strip};
-use super::{Dialog, MrPdfApp, PaperChoice};
+use super::{Dialog, PaperChoice, VersoloPdfApp};
 use crate::Document;
 use crate::compose::{
     Align, Fit, ImageLayout, JoinMode, PageSizeMode, ParagraphMode, TextEncoding, TextFont, TextLayout,
@@ -27,7 +27,7 @@ use crate::ui::pickers::{
 use crate::ui::widgets::{icon_button, small_button};
 
 /// Image files accepted by "Bilder einfügen".
-/// Image files MrPDF can read (the image crate's enabled decoders).
+/// Image files VersoloPDF can read (the image crate's enabled decoders).
 pub(super) const IMAGE_EXT: [&str; 14] =
     ["png", "jpg", "jpeg", "gif", "bmp", "tif", "tiff", "webp", "pbm", "pgm", "ppm", "pnm", "tga", "ico"];
 /// Upper bounds for file lists and text files.
@@ -266,7 +266,7 @@ pub enum OrientationFilter {
 #[derive(Debug, Clone, PartialEq)]
 pub enum InsertSource {
     File(PathBuf),
-    /// A document open in MrPDF (its current state, saved or not): tab id
+    /// A document open in VersoloPDF (its current state, saved or not): tab id
     /// and name.
     Open(u64, String),
 }
@@ -389,11 +389,11 @@ pub(super) struct FooterRequest {
 }
 
 fn footer_request_id() -> egui::Id {
-    egui::Id::new("mrpdf-dialog-footer-request")
+    egui::Id::new("versolopdf-dialog-footer-request")
 }
 
 fn footer_result_id() -> egui::Id {
-    egui::Id::new("mrpdf-dialog-footer-result")
+    egui::Id::new("versolopdf-dialog-footer-result")
 }
 
 /// Footer with optional "Einstellungen" button; returns (ok, cancel,
@@ -786,7 +786,7 @@ pub fn read_clipboard() -> (Option<String>, Option<RgbaImage>) {
     (text, image)
 }
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     fn pd_de(&self) -> bool {
         self.settings.language == Language::German
     }
@@ -2463,7 +2463,7 @@ impl MrPdfApp {
                                     ui.checkbox(&mut off, tr(de, "Bildfehler korrigieren", "Correct image defects"));
                                     ui.checkbox(&mut off, tr(de, "Texterkennung ausführen", "Run text recognition"));
                                 });
-                                ui.label(RichText::new(tr(de, "Bildnachbearbeitung und Texterkennung (OCR) sind in MrPDF nicht enthalten.", "Image post-processing and text recognition (OCR) are not included in MrPDF.")).weak());
+                                ui.label(RichText::new(tr(de, "Bildnachbearbeitung und Texterkennung (OCR) sind in VersoloPDF nicht enthalten.", "Image post-processing and text recognition (OCR) are not included in VersoloPDF.")).weak());
                             }
                         }
                     });

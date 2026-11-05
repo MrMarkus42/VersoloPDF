@@ -9,7 +9,7 @@ use super::commands::Cmd;
 use super::dialogs::Outcome;
 use super::page_dialogs::tr;
 use super::ribbon::Entry;
-use super::{Dialog, MrPdfApp, RangePurpose};
+use super::{Dialog, RangePurpose, VersoloPdfApp};
 use crate::model::{FieldKind, SearchHit};
 use crate::spell::{Dictionary, find_dictionaries, words};
 use crate::text::TextRange;
@@ -92,7 +92,7 @@ fn unknown_words(dict: &Dictionary, text: &str, place: Place, out: &mut Vec<Find
     }
 }
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     fn rv_de(&self) -> bool {
         self.settings.language == Language::German
     }
@@ -268,8 +268,8 @@ impl MrPdfApp {
             ui.label(
                 RichText::new(tr(
                     de,
-                    "MrPDF bringt kein Wörterbuch mit. Es nutzt Hunspell-Wörterbücher (.dic mit .aff daneben), wie sie LibreOffice mitbringt. Mit „Andere…“ die .dic-Datei wählen.",
-                    "MrPDF ships no dictionary. It uses Hunspell dictionaries (.dic with the .aff beside it), as LibreOffice ships them. Choose the .dic file with \"Other…\".",
+                    "VersoloPDF bringt kein Wörterbuch mit. Es nutzt Hunspell-Wörterbücher (.dic mit .aff daneben), wie sie LibreOffice mitbringt. Mit „Andere…“ die .dic-Datei wählen.",
+                    "VersoloPDF ships no dictionary. It uses Hunspell dictionaries (.dic with the .aff beside it), as LibreOffice ships them. Choose the .dic file with \"Other…\".",
                 ))
                 .small()
                 .weak(),

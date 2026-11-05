@@ -356,7 +356,7 @@ pub fn read(bytes: &[u8], password: Option<&str>) -> Result<DocProps> {
 
 /// "Alle JavaScripte": every JavaScript of the document as (where, code):
 /// document level, document actions, open action, page actions, links and
-/// form fields. Only read for display; MrPDF never runs JavaScript.
+/// form fields. Only read for display; VersoloPDF never runs JavaScript.
 pub fn all_javascripts(bytes: &[u8], password: Option<&str>) -> Result<Vec<(String, String)>> {
     guarded(|| {
         let doc = load(bytes, password)?;

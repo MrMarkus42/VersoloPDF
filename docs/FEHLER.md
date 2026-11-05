@@ -43,7 +43,7 @@ Umbenennen/Verschieben/Papierkorb, Beenden.
 | 2 | Sechs echte PDFs (1,5 bis 274 MB, 9 bis 1476 Seiten): drehen, Anmerkung, löschen, einfügen, umkehren, herausziehen, alles rückgängig, speichern; nach jedem Schritt neu geöffnet und verglichen (`tests/real_files.rs`) | 5 von 6 Dateien fehlerfrei; bei 274 MB siehe F4 |
 | 3 | 300 beschädigte Mini-PDFs und 200 beschädigte Varianten einer echten Datei: öffnen, zeichnen, Text, bearbeiten, speichern (`tests/robustness.rs`) | 0 Abstürze, nichts hängt; beschädigte Dateien werden geöffnet oder sauber abgelehnt |
 
-Nicht automatisch geprüft, weil sie außerhalb von MrPDF wirken: E-Mail
+Nicht automatisch geprüft, weil sie außerhalb von VersoloPDF wirken: E-Mail
 senden, Datei umbenennen/verschieben/löschen, Weblinks (Handbuch, Support,
 Startseite, Update), Dateizuordnung in Windows, Vorlesen. Ebenso wenig das
 echte Drucken und das Arbeiten mit der Maus in jedem Werkzeug.
@@ -63,7 +63,7 @@ echte Drucken und das Arbeiten mit der Maus in jedem Werkzeug.
 | F4 | C | Bei sehr großen Dateien blieb nur **ein** Rückgängig-Schritt: Jeder Schritt speichert die ganze Datei, der Verlauf durfte 512 MB belegen, ältere Schritte wurden ohne Hinweis verworfen | Ältere Schritte werden in temporäre Dateien ausgelagert statt verworfen (höchstens 4 GB, wie bisher höchstens 50 Schritte). Die Dateien verschwinden mit dem Schritt bzw. beim Schließen; Reste nach einem Absturz räumt der nächste Start auf. Mit 274 MB: sechs Änderungen und „alles rückgängig“ ergeben wieder genau den Anfangszustand |
 | F5 | C | Änderungen der Seitenstruktur dauerten bei 274 MB / 1476 Seiten 1,5 bis 2 s, weil danach jede Seite geladen wurde, nur um ihre Größe zu lesen | Rahmen und Drehung werden direkt aus der Datei gelesen und mit PDFiums schneller Größenabfrage abgeglichen; nur abweichende Seiten werden geladen. Drehen 0,40 s, Seite löschen 0,25 s; bei 50 MB 20 bis 80 ms |
 | F6 | C | Öffnen der 274-MB-Datei dauerte 1,6 s | Gleiche Lösung: 0,18 s |
-| F7 | B | Bei Seiten, deren Seitenrahmen nur vom übergeordneten Seitenknoten geerbt wird, nahm MrPDF einen Rahmen am Nullpunkt an; Klickpositionen konnten dort leicht versetzt sein. Beim Bau von F5 gefunden | Der geerbte Rahmen wird jetzt gelesen; ein Test vergleicht gedrehte, zugeschnittene und geerbte Seiten mit PDFium |
+| F7 | B | Bei Seiten, deren Seitenrahmen nur vom übergeordneten Seitenknoten geerbt wird, nahm VersoloPDF einen Rahmen am Nullpunkt an; Klickpositionen konnten dort leicht versetzt sein. Beim Bau von F5 gefunden | Der geerbte Rahmen wird jetzt gelesen; ein Test vergleicht gedrehte, zugeschnittene und geerbte Seiten mit PDFium |
 
 ### Offen
 
@@ -71,7 +71,7 @@ Keine offenen Punkte aus dieser Prüfung.
 ## Werkzeuge der Prüfung
 
 * `cargo test --release --test tour -- --ignored --nocapture` – Befehls-Rundgang,
-  Bericht und Dialogfotos in `target/tour/`; `MRPDF_TOUR_SIZE=1024x680` prüft
+  Bericht und Dialogfotos in `target/tour/`; `VERSOLOPDF_TOUR_SIZE=1024x680` prüft
   einen kleinen Bildschirm. Auf Linux ohne Desktop vorher
   `DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent/bus` setzen, sonst wartet
   der Datei-Dialog des Systems auf eine Eingabe.
@@ -80,7 +80,7 @@ Keine offenen Punkte aus dieser Prüfung.
   `handling.md`); einzeln: `cargo test --release --test mouse <Name> --
   --ignored --nocapture` mit `mouse_tour`, `annotation_handling`,
   `text_tools`, `polygon_gestures`, `dialog_previews`.
-* `MRPDF_TESTFILES=<Ordner> cargo test --release --test real_files -- --ignored --nocapture`
+* `VERSOLOPDF_TESTFILES=<Ordner> cargo test --release --test real_files -- --ignored --nocapture`
   – Messungen und Rundläufe mit echten Dateien.
-* `MRPDF_TESTFILES=<Ordner> cargo test --release --test robustness -- --include-ignored`
+* `VERSOLOPDF_TESTFILES=<Ordner> cargo test --release --test robustness -- --include-ignored`
   – beschädigte Varianten einer echten Datei.

@@ -6,12 +6,12 @@ mod common;
 use std::process::Command;
 
 use lopdf::{Dictionary, IncrementalDocument, Object};
-use mrpdf::document::Document;
-use mrpdf::geometry::RectF;
-use mrpdf::sign::cert::NewId;
-use mrpdf::sign::cms::Check;
-use mrpdf::sign::id::DigitalId;
-use mrpdf::sign::pdf::{self, Place, SignOptions};
+use versolopdf::document::Document;
+use versolopdf::geometry::RectF;
+use versolopdf::sign::cert::NewId;
+use versolopdf::sign::cms::Check;
+use versolopdf::sign::id::DigitalId;
+use versolopdf::sign::pdf::{self, Place, SignOptions};
 
 const NOW: i64 = 1_793_808_000; // 4.11.2026
 
@@ -26,7 +26,74 @@ fn id() -> DigitalId {
 }
 
 fn opts(place: Place) -> SignOptions {
-    SignOptions { place, reason: "Freigabe".into(), location: "Köln".into(), contact: String::new() }
+    SignOptions { place, reason: "Freigabe".into(), location: "Köln".into(), ..SignOptions::default() }
+}
+
+/// A time stamp authority made with a self-made ID (no network).
+fn fake_stamp(hash: &[u8]) -> versolopdf::Result<Vec<u8>> {
+    use versolopdf::sign::{cert, cms, der};
+    let tsa =
+        DigitalId::create(&NewId { name: "Test-Zeitstempeldienst", email: "", organisation: "", years: 1 })?;
+    let imprint = der::seq(&[&der::alg(cert::SHA256, true), &der::octets(hash)]);
+    let info = der::seq(&[
+        &der::small_int(1),
+        &der::oid("1.2.3.4.1"),
+        &imprint,
+        &der::small_int(7),
+        &der::tlv(der::GENERALIZED_TIME, b"20261105101500Z"),
+    ]);
+    cms::encapsulated(&tsa, cms::TST_INFO, &info)
+}
+
+#[test]
+fn certification_and_time_stamps() {
+    let src = {
+        let _g = common::lock();
+        common::text_pdf(1)
+    };
+    // Certify: DocMDP level in the signature and the catalogue.
+    let certified =
+        pdf::sign(&src, &id(), &SignOptions { certify: Some(2), ..opts(visible()) }, NOW, 0).unwrap();
+    let sigs = pdf::signatures(&certified);
+    assert_eq!(sigs.len(), 1);
+    assert!(sigs[0].valid() && sigs[0].certified == Some(2), "{sigs:?}");
+    let doc = lopdf::Document::load_mem(&certified).unwrap();
+    assert!(doc.catalog().unwrap().get(b"Perms").is_ok(), "/Perms /DocMDP");
+    // Only as the first signature.
+    let again =
+        pdf::sign(&certified, &id(), &SignOptions { certify: Some(1), ..opts(Place::Invisible) }, NOW, 0);
+    assert!(again.is_err());
+    if let Some(out) = pdfsig(&certified, "certified") {
+        assert!(out.contains("Signature is Valid"), "pdfsig:\n{out}");
+    }
+
+    // A signature with a time stamp of its signature value.
+    let stamped = pdf::sign_with_stamper(&src, &id(), &opts(Place::Invisible), &fake_stamp, NOW).unwrap();
+    let s = &pdf::signatures(&stamped)[0];
+    assert!(s.valid(), "{s:?}");
+    let t = s.time_stamp.as_ref().expect("time stamp read back");
+    assert_eq!(t.check, Check::Valid);
+    assert_eq!(t.time, "05.11.2026 10:15:00 UTC");
+    assert_eq!(t.authority, "Test-Zeitstempeldienst");
+    if let Some(out) = pdfsig(&stamped, "stamped") {
+        assert!(out.contains("Signature is Valid"), "pdfsig:\n{out}");
+    }
+
+    // A document time stamp after the signature.
+    let doc_stamped = pdf::time_stamp_document_with(&stamped, &fake_stamp).unwrap();
+    let sigs = pdf::signatures(&doc_stamped);
+    assert_eq!(sigs.len(), 2, "{sigs:?}");
+    let ts = &sigs[1];
+    assert!(ts.doc_time_stamp && ts.valid() && ts.whole_file, "{ts:?}");
+    assert_eq!(ts.sub_filter, "ETSI.RFC3161");
+    assert_eq!(ts.time, "05.11.2026 10:15:00 UTC");
+    assert_eq!(ts.field, "Zeitstempel1");
+    assert!(sigs[0].valid() && !sigs[0].whole_file);
+    // A changed byte in the stamped part is found.
+    let mut bad = doc_stamped.clone();
+    bad[7] = if bad[7] == b'4' { b'5' } else { b'4' };
+    assert_eq!(pdf::signatures(&bad)[1].check, Check::DigestMismatch);
+    opens(doc_stamped);
 }
 
 fn visible() -> Place {
@@ -35,7 +102,7 @@ fn visible() -> Place {
 
 /// Runs `pdfsig` on `bytes`; None when it is not installed.
 fn pdfsig(bytes: &[u8], name: &str) -> Option<String> {
-    let path = std::env::temp_dir().join(format!("mrpdf-sign-{}-{name}.pdf", std::process::id()));
+    let path = std::env::temp_dir().join(format!("versolopdf-sign-{}-{name}.pdf", std::process::id()));
     std::fs::write(&path, bytes).unwrap();
     let out = Command::new("pdfsig").arg(&path).output().ok();
     let _ = std::fs::remove_file(&path);
@@ -196,10 +263,37 @@ fn encrypted_documents_are_refused() {
     assert!(err.to_string().contains("Verschlüsselte"), "{err}");
 }
 
+/// A real time stamp authority over the network (run by hand:
+/// `cargo test --test sign real_time_stamp -- --ignored`).
+#[test]
+#[ignore = "needs the internet"]
+fn real_time_stamp_authority() {
+    let src = {
+        let _g = common::lock();
+        common::text_pdf(1)
+    };
+    let url = versolopdf::sign::tsa::DEFAULT_URL;
+    let stamped =
+        pdf::sign(&src, &id(), &SignOptions { time_stamp: Some(url.into()), ..opts(visible()) }, NOW, 0)
+            .unwrap();
+    let s = &pdf::signatures(&stamped)[0];
+    let t = s.time_stamp.as_ref().expect("time stamp");
+    assert!(s.valid() && t.check == Check::Valid, "{s:?}");
+    eprintln!("Zeitstempel: {} von {}", t.time, t.authority);
+    let doc = pdf::time_stamp_document(&stamped, url).unwrap();
+    let ts = &pdf::signatures(&doc)[1];
+    assert!(ts.doc_time_stamp && ts.valid(), "{ts:?}");
+    if let Some(out) = pdfsig(&doc, "real-tsa") {
+        eprintln!("{out}");
+        // Older pdfsig versions do not check document time stamps (ETSI.RFC3161).
+        assert!(out.matches("Signature is Valid").count() >= 1, "pdfsig:\n{out}");
+    }
+}
+
 /// An RSA ID made by OpenSSL (as from a certificate authority).
 #[test]
 fn rsa_pfx_from_openssl() {
-    let dir = std::env::temp_dir().join(format!("mrpdf-rsa-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("versolopdf-rsa-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let run = |args: &[&str]| {
         Command::new("openssl").args(args).current_dir(&dir).output().is_ok_and(|o| o.status.success())

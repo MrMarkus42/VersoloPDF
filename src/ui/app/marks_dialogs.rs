@@ -11,7 +11,7 @@ use super::dialogs::{Action, Outcome};
 use super::page_dialogs::{align_combo, file_name, footer, macro_menu, pages_text, tr, unique_path};
 use super::preview::{doc_preview, page_strip};
 use super::structure::MarkKind;
-use super::{Dialog, MrPdfApp};
+use super::{Dialog, VersoloPdfApp};
 use crate::Document;
 use crate::compose::{Align, TextFont};
 use crate::marks::{BatesFormat, FontSpec, ImageData, Kind, MarkDef, Source, Visibility};
@@ -240,7 +240,7 @@ const MACROS: [(&str, &str, &str); 6] = [
     ("%[Bates]", "Paginierungsnummer", "Bates number"),
 ];
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     fn md_de(&self) -> bool {
         self.settings.language == Language::German
     }

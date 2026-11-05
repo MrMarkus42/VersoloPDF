@@ -2,12 +2,12 @@
 
 mod common;
 
-use mrpdf::Document;
-use mrpdf::error::Error;
-use mrpdf::geometry::{PointF, RectF, Rotation};
-use mrpdf::model::{AnnotKind, AnnotStyle, FieldKind, Metadata, Rgba, SearchOptions};
-use mrpdf::pdf_edit::{AnnotUpdate, NewAnnotation};
-use mrpdf::search::search_page;
+use versolopdf::Document;
+use versolopdf::error::Error;
+use versolopdf::geometry::{PointF, RectF, Rotation};
+use versolopdf::model::{AnnotKind, AnnotStyle, FieldKind, Metadata, Rgba, SearchOptions};
+use versolopdf::pdf_edit::{AnnotUpdate, NewAnnotation};
+use versolopdf::search::search_page;
 
 fn open(pages: usize) -> Document {
     Document::from_bytes(common::text_pdf(pages), "test.pdf", None).unwrap()
@@ -27,6 +27,32 @@ fn opens_and_reports_pages() {
     assert!((w - 595.0).abs() < 1.0 && (h - 842.0).abs() < 1.0, "{w}x{h}");
     assert!(!doc.is_modified());
     assert!(!doc.is_encrypted());
+}
+
+use common::layered_pdf;
+
+#[test]
+fn layers_are_listed_and_switched() {
+    let _guard = common::lock();
+    let mut doc = Document::from_bytes(layered_pdf(), "plan.pdf", None).unwrap();
+    let names =
+        |d: &mut Document| d.layers().unwrap().into_iter().map(|l| (l.name, l.visible)).collect::<Vec<_>>();
+    assert_eq!(names(&mut doc), vec![("Grundriss".into(), true), ("Bemaßung".into(), false)]);
+    let blue = |d: &Document| common::average(&d.render_page(0, 595, 842).unwrap(), 150, 100, 250, 200);
+    assert!(blue(&doc)[2] > 200.0 && blue(&doc)[0] < 60.0, "square shown: {:?}", blue(&doc));
+    // Hide the first layer: gone from the rendering, saved in the file, undoable.
+    doc.set_layer_visible(0, false).unwrap();
+    assert_eq!(names(&mut doc), vec![("Grundriss".into(), false), ("Bemaßung".into(), false)]);
+    assert!(blue(&doc)[0] > 200.0, "square hidden: {:?}", blue(&doc));
+    let saved = doc.to_bytes().unwrap();
+    let mut again = Document::from_bytes(saved, "plan.pdf", None).unwrap();
+    assert!(!again.layers().unwrap()[0].visible);
+    doc.undo().unwrap();
+    assert!(doc.layers().unwrap()[0].visible);
+    doc.set_layer_visible(1, true).unwrap();
+    assert!(doc.layers().unwrap()[1].visible);
+    // Documents without layers have none.
+    assert!(open(1).layers().unwrap().is_empty());
 }
 
 #[test]
@@ -57,8 +83,9 @@ fn renders_page_and_tiles() {
     assert!(has_dark);
 
     // A tile equals the corresponding area of the full render.
-    let tile =
-        doc.render_tile(0, 300, 424, 20, 40, 100, 50, mrpdf::document::RenderOptions::default()).unwrap();
+    let tile = doc
+        .render_tile(0, 300, 424, 20, 40, 100, 50, versolopdf::document::RenderOptions::default())
+        .unwrap();
     for y in 0..50 {
         for x in 0..100 {
             let a = ((y * 100 + x) * 4) as usize;
@@ -130,7 +157,7 @@ fn page_geometry_matches_pdfium() {
     let _guard = common::lock();
     let check = |bytes: Vec<u8>| {
         let doc = Document::from_bytes(bytes.clone(), "g.pdf", None).unwrap();
-        let pdfium = mrpdf::engine::pdfium().unwrap();
+        let pdfium = versolopdf::engine::pdfium().unwrap();
         let raw = pdfium.load_pdf_from_byte_vec(bytes, None).unwrap();
         for (i, page) in raw.pages().iter().enumerate() {
             let g = doc.geometry(i).unwrap();
@@ -355,8 +382,8 @@ fn annotation_on_rotated_page_lands_where_drawn() {
 
 #[test]
 fn comment_filter_and_content_objects() {
-    use mrpdf::document::RenderOptions;
-    use mrpdf::model::AnnotFilter;
+    use versolopdf::document::RenderOptions;
+    use versolopdf::model::AnnotFilter;
     let _guard = common::lock();
     let mut doc = open(1);
     for (x, author) in [(100.0, "Tester"), (300.0, "Other")] {
@@ -377,7 +404,7 @@ fn comment_filter_and_content_objects() {
             .unwrap()
     };
     // PDF y 100..150 is image row 692..742.
-    let dark = |img: &mrpdf::document::RenderedImage, x: u32| {
+    let dark = |img: &versolopdf::document::RenderedImage, x: u32| {
         common::average(img, x + 10, 702, x + 40, 732)[0] < 60.0
     };
     assert_eq!(doc.filter_key(), 0);
@@ -409,7 +436,7 @@ fn comment_filter_and_content_objects() {
 /// A page with "Name: ____" (for "Formulare erkennen").
 fn underscore_pdf() -> Vec<u8> {
     use pdfium_render::prelude::*;
-    let pdfium = mrpdf::engine::pdfium().unwrap();
+    let pdfium = versolopdf::engine::pdfium().unwrap();
     let mut doc = pdfium.create_new_pdf().unwrap();
     let font = doc.fonts_mut().helvetica();
     let mut page = doc.pages_mut().create_page_at_end(PdfPagePaperSize::a4()).unwrap();
@@ -427,7 +454,7 @@ fn underscore_pdf() -> Vec<u8> {
 
 #[test]
 fn form_tab_core() {
-    use mrpdf::forms::NewFieldKind;
+    use versolopdf::forms::NewFieldKind;
     let _guard = common::lock();
     let mut doc = open(1);
     doc.create_field(
@@ -446,7 +473,7 @@ fn form_tab_core() {
     assert!(!doc.field_extras(0, date).unwrap().image);
 
     // The image is drawn into the button.
-    let red = mrpdf::pdf_edit::RgbaImage { width: 2, height: 2, rgba: [220, 20, 20, 255].repeat(4) };
+    let red = versolopdf::pdf_edit::RgbaImage { width: 2, height: 2, rgba: [220, 20, 20, 255].repeat(4) };
     doc.set_button_image(0, image, &red).unwrap();
     let img = doc.render_page(0, 595, 842).unwrap();
     let c = common::average(&img, 330, 480, 370, 520);
@@ -470,7 +497,7 @@ fn form_tab_core() {
     let form = doc.to_bytes().unwrap();
     let dir = tempfile::tempdir().unwrap();
     let table = vec![vec!["Anna".to_string()], vec!["Bernd".to_string()]];
-    let files = mrpdf::form_fill::fill_all(
+    let files = versolopdf::form_fill::fill_all(
         &form,
         "Antrag",
         &table,
@@ -498,7 +525,7 @@ fn form_tab_core() {
 /// One page with a heading and a red picture below it.
 fn picture_pdf() -> Vec<u8> {
     use pdfium_render::prelude::*;
-    let pdfium = mrpdf::engine::pdfium().unwrap();
+    let pdfium = versolopdf::engine::pdfium().unwrap();
     let mut doc = pdfium.create_new_pdf().unwrap();
     let font = doc.fonts_mut().helvetica();
     let mut page = doc.pages_mut().create_page_at_end(PdfPagePaperSize::a4()).unwrap();
@@ -539,7 +566,7 @@ fn picture_pdf() -> Vec<u8> {
 
 #[test]
 fn office_exports() {
-    use mrpdf::office::{ExcelOptions, NumberFormat, PowerPointOptions};
+    use versolopdf::office::{ExcelOptions, NumberFormat, PowerPointOptions};
     let _guard = common::lock();
     let dir = tempfile::tempdir().unwrap();
     let mut doc = open(2);
@@ -553,7 +580,7 @@ fn office_exports() {
         row_per_paragraph: false,
         ocr: None,
     };
-    mrpdf::office::export_excel(&doc, &xlsx, &[0, 1], &o).unwrap();
+    versolopdf::office::export_excel(&doc, &xlsx, &[0, 1], &o).unwrap();
     let bytes = std::fs::read(&xlsx).unwrap();
     let s = String::from_utf8_lossy(&bytes);
     assert!(
@@ -571,13 +598,13 @@ fn office_exports() {
         links: true,
         curves: false,
     };
-    mrpdf::office::export_powerpoint(&mut doc, &pptx, &[0, 1], &o).unwrap();
+    versolopdf::office::export_powerpoint(&mut doc, &pptx, &[0, 1], &o).unwrap();
     // Original font of the heading (Helvetica -> Arial) and colour.
     assert!(String::from_utf8_lossy(&std::fs::read(&pptx).unwrap()).contains("typeface=\"Arial\""));
     // "In Kurven umwandeln": shapes instead of text boxes.
     let curves = dir.path().join("k.pptx");
     let o = PowerPointOptions { curves: true, ..o };
-    mrpdf::office::export_powerpoint_protected(&mut doc, &curves, &[0], &o, Some("geheim")).unwrap();
+    versolopdf::office::export_powerpoint_protected(&mut doc, &curves, &[0], &o, Some("geheim")).unwrap();
     let k = String::from_utf8_lossy(&std::fs::read(&curves).unwrap()).into_owned();
     assert!(k.contains("<a:custGeom>") && !k.contains("<a:t>Page 1 Hello World</a:t>"), "curves");
     assert!(k.contains("<p:modifyVerifier"));
@@ -608,7 +635,7 @@ fn office_exports() {
 /// A page with a small two-column table ("Posten" / "Betrag").
 fn table_pdf() -> Vec<u8> {
     use pdfium_render::prelude::*;
-    let pdfium = mrpdf::engine::pdfium().unwrap();
+    let pdfium = versolopdf::engine::pdfium().unwrap();
     let mut doc = pdfium.create_new_pdf().unwrap();
     let font = doc.fonts_mut().helvetica();
     let mut page = doc.pages_mut().create_page_at_end(PdfPagePaperSize::a4()).unwrap();
@@ -626,20 +653,20 @@ fn table_pdf() -> Vec<u8> {
 
 #[test]
 fn word_layout_tables_and_protection() {
-    use mrpdf::office::WordOptions;
+    use versolopdf::office::WordOptions;
     let _guard = common::lock();
     let dir = tempfile::tempdir().unwrap();
     let mut doc = Document::from_bytes(table_pdf(), "t.pdf", None).unwrap();
     let flow = WordOptions { keep_layout: false, tables: true, images: true, dpi: 72.0, ocr: None };
     let path = dir.path().join("flow.docx");
-    mrpdf::office::export_word(&mut doc, &path, &[0], &flow, Some("geheim")).unwrap();
+    versolopdf::office::export_word(&mut doc, &path, &[0], &flow, Some("geheim")).unwrap();
     let s = String::from_utf8_lossy(&std::fs::read(&path).unwrap()).into_owned();
     assert!(s.contains("<w:tbl>") && s.contains(">Miete<") && s.contains(">850,00<"), "table");
     assert!(s.contains("<w:writeProtection") && s.contains("w:algorithmName=\"SHA-512\""), "protection");
 
     let layout = WordOptions { keep_layout: true, ..flow };
     let path = dir.path().join("layout.docx");
-    mrpdf::office::export_word(&mut doc, &path, &[0], &layout, None).unwrap();
+    versolopdf::office::export_word(&mut doc, &path, &[0], &layout, None).unwrap();
     let s = String::from_utf8_lossy(&std::fs::read(&path).unwrap()).into_owned();
     assert!(s.contains("<w:framePr") && s.contains("w:hAnchor=\"page\"") && s.contains("behindDoc=\"1\""));
     assert!(s.contains("<w:pgSz w:w=\"11906\" w:h=\"16838\"/>"), "page size of the PDF page");
@@ -681,7 +708,7 @@ fn ocr_adds_invisible_text() {
     )
     .unwrap();
     std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let engine = mrpdf::ocr::Engine { exe, languages: "deu".into() };
+    let engine = versolopdf::ocr::Engine { exe, languages: "deu".into() };
     let mut doc = Document::from_bytes(picture_pdf(), "scan.pdf", None).unwrap();
     // The page has text, so it is skipped unless asked.
     assert_eq!(doc.recognize_text(&[0], &engine, 300.0, true).unwrap(), 0);
@@ -871,7 +898,7 @@ fn document_permissions_are_respected() {
 fn password_protection_round_trip() {
     let _guard = common::lock();
     let mut doc = open(1);
-    let opts = mrpdf::security::ProtectOptions {
+    let opts = versolopdf::security::ProtectOptions {
         user_password: "lesen".into(),
         owner_password: "admin".into(),
         allow_copy: false,
@@ -979,8 +1006,8 @@ fn image_stamp_is_rendered() {
 #[test]
 fn view_rotation_matches_geometry() {
     let _guard = common::lock();
-    use mrpdf::document::RenderOptions;
-    use mrpdf::geometry::PageGeometry;
+    use versolopdf::document::RenderOptions;
+    use versolopdf::geometry::PageGeometry;
     let mut doc = open(1);
     // A black square at a known PDF position.
     let mut sq = NewAnnotation::new(
@@ -1070,7 +1097,7 @@ fn page_shape_operations() {
     assert!((w - 419.5).abs() < 1.0 && (h - 595.3).abs() < 1.0, "{w}x{h}");
     assert!(doc.page_text(0).unwrap().all_text().contains("Page 1"));
     // The text was scaled and moved with the page.
-    let hits = mrpdf::search::search_page(
+    let hits = versolopdf::search::search_page(
         0,
         &doc.page_text(0).unwrap(),
         "Hello",
@@ -1089,7 +1116,7 @@ fn page_shape_operations() {
 
 #[test]
 fn page_marks_and_labels() {
-    use mrpdf::pages::{Anchor, LabelStyle, PageMark, TextMark};
+    use versolopdf::pages::{Anchor, LabelStyle, PageMark, TextMark};
     let _guard = common::lock();
     let mut doc = open(3);
     let mark = |text: &str, anchor: Anchor| TextMark {
@@ -1106,8 +1133,10 @@ fn page_marks_and_labels() {
         marks: vec![mark("Seite <<page>> von <<pages>>", Anchor::BottomCenter)],
         behind: false,
     };
-    doc.add_page_marks(&[0, 1, 2], &footer, &|t, p| mrpdf::pages::expand_placeholders(t, p, 3, "", "x.pdf"))
-        .unwrap();
+    doc.add_page_marks(&[0, 1, 2], &footer, &|t, p| {
+        versolopdf::pages::expand_placeholders(t, p, 3, "", "x.pdf")
+    })
+    .unwrap();
     assert!(doc.page_text(1).unwrap().all_text().contains("Seite 2 von 3"));
 
     let mut wm = mark("ENTWURF", Anchor::Center);
@@ -1120,7 +1149,7 @@ fn page_marks_and_labels() {
     assert!(doc.page_text(0).unwrap().all_text().contains("ENTWURF"));
 
     let bates = PageMark::Texts { marks: vec![mark("", Anchor::BottomRight)], behind: false };
-    doc.add_page_marks(&[0, 1], &bates, &|_, p| mrpdf::pages::bates_number("ABC", 1 + p as u64, 6, ""))
+    doc.add_page_marks(&[0, 1], &bates, &|_, p| versolopdf::pages::bates_number("ABC", 1 + p as u64, 6, ""))
         .unwrap();
     assert!(doc.page_text(1).unwrap().all_text().contains("ABC000002"));
 
@@ -1142,12 +1171,12 @@ fn page_marks_and_labels() {
 }
 
 fn temp_file(name: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join(format!("mrpdf-test-{}-{name}", std::process::id()))
+    std::env::temp_dir().join(format!("versolopdf-test-{}-{name}", std::process::id()))
 }
 
 #[test]
 fn form_fields_can_be_created_reset_and_exchanged() {
-    use mrpdf::forms::NewFieldKind;
+    use versolopdf::forms::NewFieldKind;
     let _guard = common::lock();
     let mut doc = open(1);
     let r = |x: f32, y: f32, w: f32, h: f32| RectF::new(x, y, x + w, y + h);
@@ -1180,7 +1209,7 @@ fn form_fields_can_be_created_reset_and_exchanged() {
         r(300.0, 460.0, 80.0, 24.0),
         &NewFieldKind::Button {
             caption: "Zurücksetzen".into(),
-            action: mrpdf::forms::ButtonAction::ResetForm,
+            action: versolopdf::forms::ButtonAction::ResetForm,
         },
         "",
     )
@@ -1197,7 +1226,7 @@ fn form_fields_can_be_created_reset_and_exchanged() {
     assert!(kinds.contains(&FieldKind::PushButton) && kinds.contains(&FieldKind::Signature));
     // The button keeps its action, and "ü" of its caption is one WinAnsi byte.
     let button = fields.iter().find(|f| f.kind == FieldKind::PushButton).unwrap().annot_index;
-    assert_eq!(doc.field_extras(0, button).unwrap().action, mrpdf::forms::ButtonAction::ResetForm);
+    assert_eq!(doc.field_extras(0, button).unwrap().action, versolopdf::forms::ButtonAction::ResetForm);
     let saved = lopdf::Document::load_mem(&doc.to_bytes().unwrap()).unwrap();
     let caption_ok = saved.objects.values().any(|o| {
         o.as_stream()
@@ -1252,12 +1281,12 @@ fn comments_are_exchanged_summarized_and_deleted() {
     let xml = std::fs::read_to_string(&path).unwrap();
     assert!(xml.contains("<text") && xml.contains("<square"), "{xml}");
 
-    let summary = mrpdf::report::build_pdf(
+    let summary = versolopdf::report::build_pdf(
         "Summary",
         &doc.comments()
             .unwrap()
             .iter()
-            .map(|c| mrpdf::report::Line::new(format!("{} {}", c.page + 1, c.contents)))
+            .map(|c| versolopdf::report::Line::new(format!("{} {}", c.page + 1, c.contents)))
             .collect::<Vec<_>>(),
     )
     .unwrap();
@@ -1281,14 +1310,14 @@ fn table_of_contents_pages_link_to_targets() {
     let _guard = common::lock();
     let mut doc = open(3);
     let lines: Vec<_> = (0..3)
-        .map(|p| mrpdf::report::Line {
+        .map(|p| versolopdf::report::Line {
             link: Some(p),
             right: (p + 2).to_string(),
-            ..mrpdf::report::Line::new(format!("Kapitel {p}"))
+            ..versolopdf::report::Line::new(format!("Kapitel {p}"))
         })
         .collect();
     let mut bytes = doc.to_bytes().unwrap();
-    let (new, inserted) = mrpdf::report::insert_front(&bytes, None, &lines).unwrap();
+    let (new, inserted) = versolopdf::report::insert_front(&bytes, None, &lines).unwrap();
     bytes = new;
     assert_eq!(inserted, 1);
     let doc = Document::from_bytes(bytes, "toc.pdf", None).unwrap();
@@ -1296,7 +1325,7 @@ fn table_of_contents_pages_link_to_targets() {
     assert!(doc.page_text(0).unwrap().all_text().contains("Kapitel 2"));
     let links = doc.links(0).unwrap();
     assert_eq!(links.len(), 3, "{links:?}");
-    assert!(links.iter().any(|l| matches!(l.target, mrpdf::model::LinkTarget::Page(3))), "{links:?}");
+    assert!(links.iter().any(|l| matches!(l.target, versolopdf::model::LinkTarget::Page(3))), "{links:?}");
 }
 
 #[test]
@@ -1356,7 +1385,7 @@ fn redaction_removes_content_for_good() {
 
 #[test]
 fn bookmark_tools() {
-    use mrpdf::outline::NewBookmark;
+    use versolopdf::outline::NewBookmark;
     let _guard = common::lock();
     let mut doc = open(3);
     let nb = |title: &str, page: usize, level: usize| NewBookmark { title: title.into(), page, level };
@@ -1376,7 +1405,7 @@ fn bookmark_tools() {
     assert_eq!(doc.bookmarks()[0].children[0].title, "unterpunkt");
 
     assert_eq!(doc.remove_duplicate_bookmarks().unwrap(), 1);
-    assert_eq!(doc.map_bookmark_titles(mrpdf::outline::title_case).unwrap(), 3);
+    assert_eq!(doc.map_bookmark_titles(versolopdf::outline::title_case).unwrap(), 3);
     doc.sort_bookmarks(false).unwrap();
     assert_eq!(titles(&doc), ["Kapitel 2", "Kapitel 10"]);
     assert_eq!(doc.bookmarks()[1].children[0].title, "Unterpunkt", "children move with their parent");
@@ -1384,7 +1413,7 @@ fn bookmark_tools() {
     // Text export can be read back as a bookmark list.
     let text = doc.export_bookmarks(false);
     assert_eq!(text, "Kapitel 2\t2\nKapitel 10\t3\n\tUnterpunkt\t3\n");
-    let parsed = mrpdf::outline::parse_bookmark_list(&text, 3);
+    let parsed = versolopdf::outline::parse_bookmark_list(&text, 3);
     assert_eq!(parsed[2], nb("Unterpunkt", 2, 1));
     assert!(doc.export_bookmarks(true).contains("<li>Kapitel 10 <span class=\"page\">3</span>"));
 
@@ -1417,8 +1446,8 @@ fn with_first_bookmark_action(doc: &mut Document, action: lopdf::Dictionary) -> 
 
 #[test]
 fn bookmark_destinations_and_order() {
-    use mrpdf::outline::NewBookmark;
-    use mrpdf::outline_edit::{Problem, Scope, Zoom, ZoomTargets};
+    use versolopdf::outline::NewBookmark;
+    use versolopdf::outline_edit::{Problem, Scope, Zoom, ZoomTargets};
     let _guard = common::lock();
     let mut doc = open(4);
     let all = Scope::all();
@@ -1461,11 +1490,11 @@ fn bookmark_destinations_and_order() {
     );
     // Links from bookmark titles on the contents page (3 exist already).
     assert_eq!(doc.links_from_bookmarks(&[0]).unwrap(), 0, "existing links are kept free");
-    let opts = mrpdf::document::LinkOptions {
+    let opts = versolopdf::document::LinkOptions {
         pages: vec![0],
         ignore_case: true,
         over_existing: true,
-        look: mrpdf::pdf_edit::LinkLook { width: 1.0, ..Default::default() },
+        look: versolopdf::pdf_edit::LinkLook { width: 1.0, ..Default::default() },
         ..Default::default()
     };
     assert_eq!(doc.links_from_bookmarks_with(&opts).unwrap(), 3);
@@ -1490,9 +1519,9 @@ fn bookmark_destinations_and_order() {
 
 #[test]
 fn bookmark_titles_actions_and_merging() {
-    use mrpdf::outline::NewBookmark;
-    use mrpdf::outline_edit::{ActionKind, Appearance, MergeOptions, Placement, Problem, Scope};
-    use mrpdf::outline_format::{CaseMode, change_case};
+    use versolopdf::outline::NewBookmark;
+    use versolopdf::outline_edit::{ActionKind, Appearance, MergeOptions, Placement, Problem, Scope};
+    use versolopdf::outline_format::{CaseMode, change_case};
     let _guard = common::lock();
     let mut doc = open(3);
     let all = Scope::all();
@@ -1544,7 +1573,8 @@ fn bookmark_titles_actions_and_merging() {
     assert_eq!(titles(&doc), ["Kapitel  Eins"], "the web bookmark is gone");
 
     // Styled new bookmarks in front of the existing ones.
-    let look = Appearance { color: mrpdf::model::Rgba::rgb(200, 0, 0), bold: true, ..Default::default() };
+    let look =
+        Appearance { color: versolopdf::model::Rgba::rgb(200, 0, 0), bold: true, ..Default::default() };
     doc.add_bookmarks_styled(&[(nb("Vorwort", 0, 0), look)], Placement::Before).unwrap();
     assert_eq!(titles(&doc), ["Vorwort", "Kapitel  Eins"]);
     let raw = lopdf::Document::load_mem(&doc.to_bytes().unwrap()).unwrap();
@@ -1558,9 +1588,9 @@ fn bookmark_titles_actions_and_merging() {
 
 #[test]
 fn bookmarks_from_text_rules_and_contents_options() {
-    use mrpdf::document::{TextBookmarkOptions, TocOptions};
-    use mrpdf::outline_edit::{Appearance, Placement};
-    use mrpdf::outline_format::{CaseMode, TitleFormat};
+    use versolopdf::document::{TextBookmarkOptions, TocOptions};
+    use versolopdf::outline_edit::{Appearance, Placement};
+    use versolopdf::outline_format::{CaseMode, TitleFormat};
     let _guard = common::lock();
     let mut doc = open(3);
     // The 24 pt headings are suggested as the only rule.
@@ -1584,7 +1614,7 @@ fn bookmarks_from_text_rules_and_contents_options() {
     let toc = TocOptions {
         title: None,
         before: None,
-        numbering: Some(mrpdf::outline_format::NumberStyle::RomanUpper),
+        numbering: Some(versolopdf::outline_format::NumberStyle::RomanUpper),
         ..Default::default()
     };
     assert_eq!(doc.insert_toc_with(&toc).unwrap(), 1);
@@ -1597,8 +1627,8 @@ fn bookmarks_from_text_rules_and_contents_options() {
 
 #[test]
 fn page_objects_are_edited() {
-    use mrpdf::content::{Affine, Align, ObjectKind, ObjectStyle, TextStyle, ZOrder, text_blocks};
-    use mrpdf::model::Rgba;
+    use versolopdf::content::{Affine, Align, ObjectKind, ObjectStyle, TextStyle, ZOrder, text_blocks};
+    use versolopdf::model::Rgba;
     let _guard = common::lock();
     let mut doc = open(1);
     let objects = doc.page_objects(0).unwrap();
@@ -1703,11 +1733,11 @@ fn review_and_conversion() {
 
     // Comparison: the longer document adds the lines of page 3.
     let longer = open(3);
-    let changes = mrpdf::compare::diff(&doc.text_lines().unwrap(), &longer.text_lines().unwrap());
+    let changes = versolopdf::compare::diff(&doc.text_lines().unwrap(), &longer.text_lines().unwrap());
     let added: Vec<_> = changes
         .iter()
         .filter_map(|c| match c {
-            mrpdf::compare::Change::Added(p, t) => Some((*p, t.clone())),
+            versolopdf::compare::Change::Added(p, t) => Some((*p, t.clone())),
             _ => None,
         })
         .collect();
@@ -1744,7 +1774,7 @@ fn review_and_conversion() {
     rect.rect = RectF::new(300.0, 300.0, 400.0, 400.0);
     doc.add_annotation(1, &rect).unwrap();
     doc.to_grayscale().unwrap();
-    let is_gray = |img: &mrpdf::document::RenderedImage| {
+    let is_gray = |img: &versolopdf::document::RenderedImage| {
         img.rgba.as_chunks::<4>().0.iter().all(|p| p[0].abs_diff(p[1]) < 8 && p[1].abs_diff(p[2]) < 8)
     };
     assert!(is_gray(&doc.render_page(0, 298, 421).unwrap()), "page 1 should be gray");
@@ -1777,7 +1807,7 @@ fn page_texts(doc: &Document) -> Vec<String> {
 
 #[test]
 fn page_dialog_operations() {
-    use mrpdf::outline::NewBookmark;
+    use versolopdf::outline::NewBookmark;
     let _guard = common::lock();
     let src = temp_file("source.pdf");
     std::fs::write(&src, common::text_pdf(4)).unwrap();
@@ -1808,9 +1838,9 @@ fn page_dialog_operations() {
     doc.delete_pages(&[0]).unwrap();
 
     // Generated text pages with a bookmark.
-    let (pdf, marks) = mrpdf::compose::text_to_pdf(
+    let (pdf, marks) = versolopdf::compose::text_to_pdf(
         &[("notiz.txt".into(), "Eingefuegter Text".into())],
-        &mrpdf::compose::TextLayout { bookmark_per_file: true, ..Default::default() },
+        &versolopdf::compose::TextLayout { bookmark_per_file: true, ..Default::default() },
     )
     .unwrap();
     assert_eq!(doc.insert_pdf_bytes(4, pdf, &marks).unwrap(), 1);
@@ -1847,11 +1877,11 @@ fn page_dialog_operations() {
     note.rect = RectF::new(50.0, 50.0, 70.0, 70.0);
     d.add_annotation(1, &note).unwrap();
     let opts =
-        mrpdf::import::ReplaceOptions { keep_annotations: true, fit_target: true, scale_content: true };
+        versolopdf::import::ReplaceOptions { keep_annotations: true, fit_target: true, scale_content: true };
     assert_eq!(d.replace_pages_from(&[1], &src, &[2], opts).unwrap(), 1);
     assert_eq!(page_texts(&d), ["Page 1 Hello World", "Page 3 Hello World", "Page 3 Hello World"]);
     assert!(d.annotations(1).unwrap().iter().any(|a| a.kind == AnnotKind::Note));
-    let opts = mrpdf::import::ReplaceOptions { keep_annotations: false, ..opts };
+    let opts = versolopdf::import::ReplaceOptions { keep_annotations: false, ..opts };
     d.replace_pages_from(&[1], &src, &[3], opts).unwrap();
     assert!(d.annotations(1).unwrap().is_empty());
     assert_eq!(page_texts(&d)[1], "Page 4 Hello World");
@@ -1885,10 +1915,10 @@ fn page_dialog_operations() {
     ])
     .unwrap();
     d.add_annotation(2, &note).unwrap();
-    let opts = mrpdf::document::ExtractOptions {
-        comments: mrpdf::document::Handling::Remove,
-        forms: mrpdf::document::Handling::Copy,
-        bookmarks: mrpdf::document::BookmarkCopy::Related,
+    let opts = versolopdf::document::ExtractOptions {
+        comments: versolopdf::document::Handling::Remove,
+        forms: versolopdf::document::Handling::Copy,
+        bookmarks: versolopdf::document::BookmarkCopy::Related,
     };
     let out = Document::from_bytes(d.extract_pages_with(&[1, 2], &opts).unwrap(), "x.pdf", None).unwrap();
     assert_eq!(out.page_count(), 2);
@@ -1901,8 +1931,8 @@ fn page_dialog_operations() {
 
 #[test]
 fn combine_split_and_overlay() {
-    use mrpdf::import::{NUpLayout, OverlayOptions};
-    use mrpdf::outline::NewBookmark;
+    use versolopdf::import::{NUpLayout, OverlayOptions};
+    use versolopdf::outline::NewBookmark;
     let _guard = common::lock();
 
     // Six pages on one A4 sheet (2 x 3), seven pages need two sheets.
@@ -1941,7 +1971,7 @@ fn combine_split_and_overlay() {
 
     // Split pages into a left and a right half.
     let mut d = open(2);
-    d.split_pages_at(&[0], &[0.5], &[], false, mrpdf::pages::SplitMethod::CropBox).unwrap();
+    d.split_pages_at(&[0], &[0.5], &[], false, versolopdf::pages::SplitMethod::CropBox).unwrap();
     assert_eq!(d.page_count(), 3);
     let (w0, _) = d.geometry(0).unwrap().view_size();
     let (w1, _) = d.geometry(1).unwrap().view_size();
@@ -1974,7 +2004,7 @@ fn combine_split_and_overlay() {
 
 #[test]
 fn page_shape_dialog_operations() {
-    use mrpdf::pages::{CropOptions, ResizeSpec, SizeMode};
+    use versolopdf::pages::{CropOptions, ResizeSpec, SizeMode};
     let _guard = common::lock();
     let size = |d: &Document, p: usize| d.geometry(p).unwrap().view_size();
 
@@ -2074,8 +2104,8 @@ fn foreign_watermark_pdf() -> Vec<u8> {
 
 #[test]
 fn managed_page_marks() {
-    use mrpdf::compose::Align;
-    use mrpdf::marks::{BatesFormat, FontSpec, ImageData, Kind, MarkDef, Source};
+    use versolopdf::compose::Align;
+    use versolopdf::marks::{BatesFormat, FontSpec, ImageData, Kind, MarkDef, Source};
     let _guard = common::lock();
     let mut d = open(2);
     let text = |d: &Document, p: usize| d.page_text(p).unwrap().all_text();
@@ -2161,7 +2191,7 @@ fn managed_page_marks() {
     assert_eq!(d.marks().unwrap().len(), 2);
 
     // Image watermark with preview.
-    let img = mrpdf::pdf_edit::RgbaImage { width: 20, height: 10, rgba: [255, 0, 0, 255].repeat(200) };
+    let img = versolopdf::pdf_edit::RgbaImage { width: 20, height: 10, rgba: [255, 0, 0, 255].repeat(200) };
     let pic = MarkDef {
         source: Source::Image { name: "rot.png".into() },
         pages: vec![0],
@@ -2186,7 +2216,7 @@ fn managed_page_marks() {
 
 #[test]
 fn page_label_ranges() {
-    use mrpdf::pages::{LabelRange, LabelStyle};
+    use versolopdf::pages::{LabelRange, LabelStyle};
     let _guard = common::lock();
     let mut d = open(6);
     assert_eq!(d.page_label_ranges().unwrap().len(), 1);
@@ -2261,7 +2291,7 @@ fn annotations_pdf() -> Vec<u8> {
 
 #[test]
 fn optimizer_embeds_only_chosen_annotations() {
-    use mrpdf::optimize::{EmbedAnnots, park_annotations, restore_annotations};
+    use versolopdf::optimize::{EmbedAnnots, park_annotations, restore_annotations};
     let _guard = common::lock();
     let subtypes = |pdf: &[u8]| -> Vec<String> {
         let doc = lopdf::Document::load_mem(pdf).unwrap();
@@ -2295,7 +2325,7 @@ fn optimizer_embeds_only_chosen_annotations() {
         assert_eq!(subtypes(&out), left, "{embed:?}");
         // An embedded comment is page content: visible with comments hidden.
         let check = Document::from_bytes(out, "b.pdf", None).unwrap();
-        let opts = mrpdf::document::RenderOptions { annotations: false, ..Default::default() };
+        let opts = versolopdf::document::RenderOptions { annotations: false, ..Default::default() };
         let img = check.render_tile(0, 595, 842, 0, 0, 595, 842, opts).unwrap();
         let red = common::average(&img, 110, 100, 190, 135);
         let is_red = red[0] > 200.0 && red[1] < 60.0;

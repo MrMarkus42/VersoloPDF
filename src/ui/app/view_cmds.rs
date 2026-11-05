@@ -1,11 +1,11 @@
-//! Commands of the ribbon tab "Ansicht" that MrPDF had not had before:
+//! Commands of the ribbon tab "Ansicht" that VersoloPDF had not had before:
 //! page display options, rulers, grid, guides, split
 //! view, tab and pane menus, designs, loupe, pan & zoom and read aloud.
 
 use egui::{Context, Ui};
 
 use super::settings_dialog::Cat;
-use super::{MrPdfApp, SidePanel};
+use super::{SidePanel, VersoloPdfApp};
 use crate::geometry::PointF;
 use crate::ui::i18n::Language;
 use crate::ui::icons::Icon;
@@ -31,6 +31,7 @@ pub enum ViewCmd {
     Snap,
     SnapGrid,
     SnapGuides,
+    SnapObjects,
     SnapSettings,
     ReplaceColors,
     AutoScroll,
@@ -96,6 +97,7 @@ impl ViewCmd {
             Snap => ("Einrasten", "Snap"),
             SnapGrid => ("Am Gitter", "To grid"),
             SnapGuides => ("An Hilfslinien", "To guides"),
+            SnapObjects => ("An Objekten", "To objects"),
             SnapSettings => ("Einstellungen für das Einrasten…", "Snap settings…"),
             ReplaceColors => ("Dokumentfarben ersetzen", "Replace document colours"),
             AutoScroll => ("Automatisch blättern", "Auto scroll"),
@@ -161,7 +163,7 @@ impl ViewCmd {
             Grid | Transparency => Icon::Thumbnails,
             Guides => Icon::Line,
             PageInfo => Icon::Resize,
-            Snap | SnapGrid | SnapGuides | SnapSettings => Icon::Margins,
+            Snap | SnapGrid | SnapGuides | SnapObjects | SnapSettings => Icon::Margins,
             ReplaceColors => Icon::Accessibility,
             AutoScroll => Icon::Next,
             HighlightLinks => Icon::Link,
@@ -231,7 +233,7 @@ fn reading_text(tab: &mut crate::ui::tab::DocTab, page: usize, fields: bool, ann
     text
 }
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     fn vc_de(&self) -> bool {
         self.settings.language == Language::German
     }
@@ -242,8 +244,8 @@ impl MrPdfApp {
         match cmd {
             ReplaceColors | Design(_) | CustomizeUi | SnapshotSettings | ResetPanes | ResetDocPanes
             | NewTab | Rulers | Grid | Guides | Transparency | PageInfo | Snap | SnapGrid | SnapGuides
-            | SnapSettings | HighlightLinks | PageGaps | RightToLeft | StandardLayout | SideBySide
-            | ReadFields | ReadAnnots | ReadFollow => true,
+            | SnapObjects | SnapSettings | HighlightLinks | PageGaps | RightToLeft | StandardLayout
+            | SideBySide | ReadFields | ReadAnnots | ReadFollow => true,
             ReopenClosed => !self.closed_files.is_empty(),
             SortTabs | CloseOthers | MoveTabs => self.tabs.len() > 1,
             NewPortfolio => true,
@@ -281,6 +283,7 @@ impl MrPdfApp {
             Snap => s.snap,
             SnapGrid => s.snap_grid,
             SnapGuides => s.snap_guides,
+            SnapObjects => s.snap_objects,
             ReplaceColors => s.recolor,
             AutoScroll => self.auto_scroll.is_some(),
             HighlightLinks => s.highlight_links,
@@ -325,6 +328,7 @@ impl MrPdfApp {
             Snap => s.snap = !s.snap,
             SnapGrid => s.snap_grid = !s.snap_grid,
             SnapGuides => s.snap_guides = !s.snap_guides,
+            SnapObjects => s.snap_objects = !s.snap_objects,
             SnapSettings => self.open_settings_at(Cat::Measure),
             ReplaceColors => s.recolor = !s.recolor,
             AutoScroll => {
@@ -561,7 +565,7 @@ impl MrPdfApp {
         if self.settings.show_loupe {
             let mut open = true;
             egui::Window::new(if de { "Lupe" } else { "Loupe" })
-                .id(egui::Id::new("mrpdf-loupe"))
+                .id(egui::Id::new("versolopdf-loupe"))
                 .open(&mut open)
                 .resizable(false)
                 .default_pos(ctx.content_rect().left_top() + egui::vec2(260.0, 200.0))
@@ -576,7 +580,7 @@ impl MrPdfApp {
         if self.settings.show_pan_zoom {
             let mut open = true;
             egui::Window::new(if de { "Ausschnitt und Vergrößerung" } else { "Pan and zoom" })
-                .id(egui::Id::new("mrpdf-pan-zoom"))
+                .id(egui::Id::new("versolopdf-pan-zoom"))
                 .open(&mut open)
                 .resizable(false)
                 .default_pos(ctx.content_rect().right_bottom() + egui::vec2(-300.0, -420.0))
@@ -631,7 +635,7 @@ impl MrPdfApp {
                     [img.width as usize, img.height as usize],
                     &img.rgba,
                 );
-                let tex = ctx.load_texture("mrpdf-loupe", image, egui::TextureOptions::LINEAR);
+                let tex = ctx.load_texture("versolopdf-loupe", image, egui::TextureOptions::LINEAR);
                 self.loupe = Some((tex, key));
             }
         }
@@ -675,7 +679,7 @@ impl MrPdfApp {
                 &img.rgba,
             );
             self.pan_zoom_tex =
-                Some((ctx.load_texture("mrpdf-pan-zoom", image, egui::TextureOptions::LINEAR), key));
+                Some((ctx.load_texture("versolopdf-pan-zoom", image, egui::TextureOptions::LINEAR), key));
         }
         if let Some((tex, _)) = &self.pan_zoom_tex {
             painter.image(

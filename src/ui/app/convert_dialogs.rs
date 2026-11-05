@@ -8,7 +8,7 @@ use egui::{Color32, RichText, Ui};
 
 use super::dialogs::{Action, Outcome};
 use super::page_dialogs::{footer, tr};
-use super::{Dialog, MrPdfApp};
+use super::{Dialog, VersoloPdfApp};
 use crate::font_replace::{STANDARD_FONTS, replaceable, suggestion};
 use crate::ui::i18n::Language;
 use crate::ui::pickers::{PageRange, RangeMode, section};
@@ -53,7 +53,7 @@ fn rgb(c: Color32) -> [u8; 3] {
     [c.r(), c.g(), c.b()]
 }
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     fn cv_de(&self) -> bool {
         self.settings.language == Language::German
     }
@@ -102,8 +102,8 @@ impl MrPdfApp {
                     Color32::from_rgb(190, 90, 0),
                     tr(
                         de,
-                        "Für die Texterkennung nutzt MrPDF das kostenlose Programm Tesseract (Open Source, Apache-Lizenz). Es wurde nicht gefunden.",
-                        "For text recognition MrPDF uses the free program Tesseract (open source, Apache licence). It was not found.",
+                        "Für die Texterkennung nutzt VersoloPDF das kostenlose Programm Tesseract (Open Source, Apache-Lizenz). Es wurde nicht gefunden.",
+                        "For text recognition VersoloPDF uses the free program Tesseract (open source, Apache licence). It was not found.",
                     ),
                 );
                 ui.horizontal(|ui| {

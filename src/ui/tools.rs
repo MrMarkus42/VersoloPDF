@@ -50,6 +50,8 @@ pub enum Tool {
     FieldSignature,
     /// "Datum": text field for a date.
     FieldDate,
+    /// "Barcode": a QR code field.
+    FieldBarcode,
     /// "Bild": button showing an image chosen when it is clicked.
     FieldImage,
     /// Draw a rectangle to crop the page (Seite zuschneiden).
@@ -167,6 +169,7 @@ impl Tool {
             Tool::FieldCombo => Icon::ComboBox,
             Tool::FieldSignature => Icon::Signature,
             Tool::FieldDate => Icon::Numbering,
+            Tool::FieldBarcode => Icon::Barcode,
             Tool::FieldImage => Icon::Image,
             Tool::Crop => Icon::Crop,
             Tool::DynamicZoom => Icon::ZoomIn,
@@ -222,6 +225,7 @@ impl Tool {
             | Tool::FieldCombo
             | Tool::FieldSignature
             | Tool::FieldDate
+            | Tool::FieldBarcode
             | Tool::FieldImage
             | Tool::Crop => Gesture::Rect,
             Tool::Line | Tool::Arrow | Tool::MeasureDistance | Tool::Callout => Gesture::Line,
@@ -271,6 +275,7 @@ impl Tool {
                 | Tool::FieldCombo
                 | Tool::FieldSignature
                 | Tool::FieldDate
+                | Tool::FieldBarcode
                 | Tool::FieldImage
         )
     }

@@ -1,6 +1,6 @@
 //! Printing.
 //!
-//! MrPDF prepares the sheets itself (see [`crate::print_layout`]) and shows
+//! VersoloPDF prepares the sheets itself (see [`crate::print_layout`]) and shows
 //! its own print dialog. The finished sheets are sent to the printer:
 //!
 //! * Windows: rendered by PDFium and drawn through GDI on a printer device

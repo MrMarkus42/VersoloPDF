@@ -1,6 +1,6 @@
 //! Timings with real, large PDF files (not part of the repository).
 //!
-//! Run with `MRPDF_TESTFILES=<folder> cargo test --release --test real_files
+//! Run with `VERSOLOPDF_TESTFILES=<folder> cargo test --release --test real_files
 //! -- --ignored --nocapture`. Every PDF in the folder is opened, rendered,
 //! searched, edited (comment added and moved) and saved; the times are
 //! printed and checked against generous limits.
@@ -10,13 +10,13 @@ mod common;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use mrpdf::Document;
-use mrpdf::geometry::RectF;
-use mrpdf::model::{AnnotKind, AnnotStyle, Rgba};
-use mrpdf::pdf_edit::NewAnnotation;
+use versolopdf::Document;
+use versolopdf::geometry::RectF;
+use versolopdf::model::{AnnotKind, AnnotStyle, Rgba};
+use versolopdf::pdf_edit::NewAnnotation;
 
 fn files() -> Vec<PathBuf> {
-    let Some(dir) = std::env::var_os("MRPDF_TESTFILES") else { return Vec::new() };
+    let Some(dir) = std::env::var_os("VERSOLOPDF_TESTFILES") else { return Vec::new() };
     let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
         .map(|d| d.filter_map(|e| e.ok().map(|e| e.path())).collect())
         .unwrap_or_default();
@@ -30,11 +30,11 @@ fn ms(d: Duration) -> String {
 }
 
 #[test]
-#[ignore = "needs MRPDF_TESTFILES"]
+#[ignore = "needs VERSOLOPDF_TESTFILES"]
 fn timings_with_real_files() {
     let _guard = common::lock();
     let files = files();
-    assert!(!files.is_empty(), "MRPDF_TESTFILES must name a folder with PDFs");
+    assert!(!files.is_empty(), "VERSOLOPDF_TESTFILES must name a folder with PDFs");
     for path in files {
         let name = path.file_name().unwrap().to_string_lossy().to_string();
         let size = std::fs::metadata(&path).unwrap().len() as f64 / 1e6;
@@ -86,9 +86,9 @@ fn timings_with_real_files() {
         let bytes = doc.to_bytes().unwrap();
         let save = t.elapsed();
         // Parts of an edit: the byte edit alone and loading the result.
-        let update = mrpdf::pdf_edit::AnnotUpdate { translate: Some((5.0, 5.0)), ..Default::default() };
+        let update = versolopdf::pdf_edit::AnnotUpdate { translate: Some((5.0, 5.0)), ..Default::default() };
         let t = Instant::now();
-        let edited = mrpdf::pdf_edit::update_annotation(&bytes, None, 0, index, &update).unwrap();
+        let edited = versolopdf::pdf_edit::update_annotation(&bytes, None, 0, index, &update).unwrap();
         let byte_edit = t.elapsed();
         let t = Instant::now();
         let reloaded = Document::from_bytes(edited, "x.pdf", None).unwrap();
@@ -122,17 +122,17 @@ fn text_of(doc: &Document, page: usize) -> String {
     chars.into_iter().collect()
 }
 
-fn reopen(doc: &mut Document) -> mrpdf::Result<Document> {
+fn reopen(doc: &mut Document) -> versolopdf::Result<Document> {
     Document::from_bytes(doc.to_bytes()?, "check.pdf", None)
 }
 
 /// Edits every real file, saves, opens the result again and compares.
 #[test]
-#[ignore = "needs MRPDF_TESTFILES"]
+#[ignore = "needs VERSOLOPDF_TESTFILES"]
 fn round_trips_with_real_files() {
     let _guard = common::lock();
     let files = files();
-    assert!(!files.is_empty(), "MRPDF_TESTFILES must name a folder with PDFs");
+    assert!(!files.is_empty(), "VERSOLOPDF_TESTFILES must name a folder with PDFs");
     let mut problems: Vec<String> = Vec::new();
     for path in files {
         let name = path.file_name().unwrap().to_string_lossy().to_string();
@@ -162,7 +162,7 @@ fn round_trips_with_real_files() {
             println!("{line}");
         };
         let step = |doc: &mut Document,
-                    f: &dyn Fn(&mut Document) -> mrpdf::Result<()>|
+                    f: &dyn Fn(&mut Document) -> versolopdf::Result<()>|
          -> Result<Document, String> {
             f(doc).map_err(|e| e.to_string())?;
             reopen(doc).map_err(|e| format!("neu öffnen: {e}"))
@@ -231,7 +231,7 @@ fn round_trips_with_real_files() {
         check("alles rückgängig = Anfangszustand", r, t.elapsed());
 
         let t = Instant::now();
-        let out = std::env::temp_dir().join(format!("mrpdf-roundtrip-{}.pdf", std::process::id()));
+        let out = std::env::temp_dir().join(format!("versolopdf-roundtrip-{}.pdf", std::process::id()));
         let r = doc.save_as(&out).map_err(|e| e.to_string()).and_then(|_| {
             let r = Document::open(&out, None).map_err(|e| e.to_string())?;
             Ok(r.page_count() == n && text_of(&r, 0) == first)
@@ -249,9 +249,9 @@ fn round_trips_with_real_files() {
 /// "Hintergrund" with a colour on the first page of every file: share of
 /// pixels that change (0 % = the page covers its background completely).
 #[test]
-#[ignore = "needs MRPDF_TESTFILES"]
+#[ignore = "needs VERSOLOPDF_TESTFILES"]
 fn background_colour_on_real_files() {
-    use mrpdf::marks::{Kind, MarkDef, Source};
+    use versolopdf::marks::{Kind, MarkDef, Source};
     let _guard = common::lock();
     let mut problems = Vec::new();
     for path in files() {
@@ -294,10 +294,10 @@ fn background_colour_on_real_files() {
 
 /// Probe: reading page geometry by loading every page vs. page_sizes().
 #[test]
-#[ignore = "needs MRPDF_TESTFILES"]
+#[ignore = "needs VERSOLOPDF_TESTFILES"]
 fn probe_geometry_speed() {
     let _guard = common::lock();
-    let pdfium = mrpdf::engine::pdfium().unwrap();
+    let pdfium = versolopdf::engine::pdfium().unwrap();
     for path in files() {
         let name = path.file_name().unwrap().to_string_lossy().to_string();
         let t = Instant::now();

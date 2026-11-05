@@ -33,7 +33,7 @@ impl DigitalId {
         let key = Key::from_pkcs8(&pkcs8)?;
         let certs: Vec<Vec<u8>> = chain.certs().iter().map(|c| c.as_der().to_vec()).collect();
         // The signer's certificate is the one whose key matches; usually the first.
-        let probe = cert::digest(cert::SHA256, &[b"mrpdf"])?;
+        let probe = cert::digest(cert::SHA256, &[b"versolopdf"])?;
         let (sig, _) = key.sign_sha256(&probe)?;
         let mut parsed: Vec<Cert> = certs.iter().filter_map(|d| cert::parse(d).ok()).collect();
         let pos = parsed
@@ -80,10 +80,10 @@ impl DigitalId {
     }
 }
 
-/// Folder of the digital IDs MrPDF created.
-/// `MRPDF_IDS_DIR` replaces it (tests).
+/// Folder of the digital IDs VersoloPDF created.
+/// `VERSOLOPDF_IDS_DIR` replaces it (tests).
 pub fn ids_dir() -> Option<PathBuf> {
-    if let Some(dir) = std::env::var_os("MRPDF_IDS_DIR") {
+    if let Some(dir) = std::env::var_os("VERSOLOPDF_IDS_DIR") {
         return Some(PathBuf::from(dir));
     }
     crate::files::data_dir().map(|d| d.join("digitale-ids"))

@@ -8,7 +8,7 @@ You will get an answer within a few days.
 
 ## Security design
 
-MrPDF opens files from untrusted sources, so it is built defensively:
+VersoloPDF opens files from untrusted sources, so it is built defensively:
 
 * **Memory safety** – the application is written in Rust. `unsafe` code is
   denied crate-wide; the only exception is the small, reviewed Windows printing

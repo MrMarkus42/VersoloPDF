@@ -159,7 +159,7 @@ const MARKUP_SUBTYPES: [&[u8]; 17] = [
 ];
 
 /// Private page key that holds the annotations a partial embed keeps.
-const PARKED_ANNOTS: &[u8] = b"MrPDFKeptAnnots";
+const PARKED_ANNOTS: &[u8] = b"VersoloPDFKeptAnnots";
 
 /// All settings of the "PDF optimieren" dialog.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

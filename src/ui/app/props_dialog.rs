@@ -8,7 +8,7 @@ use egui::{RichText, Ui, vec2};
 use super::commands::Cmd;
 use super::dialogs::{Action, Outcome};
 use super::page_dialogs::tr;
-use super::{Dialog, MrPdfApp};
+use super::{Dialog, VersoloPdfApp};
 use crate::doc_props::{
     DocProps, DuplexPreset, FontEntry, LayoutMode, OpenAction, OpenZoom, PageMode, Trapped,
 };
@@ -108,7 +108,7 @@ fn size_text(bytes: u64) -> String {
     }
 }
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     fn pp_de(&self) -> bool {
         self.settings.language == crate::ui::i18n::Language::German
     }
@@ -924,8 +924,8 @@ fn props_actions(ui: &mut Ui, de: bool, s: &mut PropsState) {
     ui.label(
         RichText::new(tr(
             de,
-            "MrPDF speichert JavaScript, führt es aber aus Sicherheitsgründen nicht aus.",
-            "MrPDF stores JavaScript but does not run it for security reasons.",
+            "VersoloPDF speichert JavaScript, führt es aber aus Sicherheitsgründen nicht aus.",
+            "VersoloPDF stores JavaScript but does not run it for security reasons.",
         ))
         .small()
         .weak(),
@@ -982,8 +982,8 @@ fn props_javascript(ui: &mut Ui, de: bool, s: &mut PropsState) {
     ui.label(
         RichText::new(tr(
             de,
-            "MrPDF speichert JavaScript, führt es aber aus Sicherheitsgründen nicht aus.",
-            "MrPDF stores JavaScript but does not run it for security reasons.",
+            "VersoloPDF speichert JavaScript, führt es aber aus Sicherheitsgründen nicht aus.",
+            "VersoloPDF stores JavaScript but does not run it for security reasons.",
         ))
         .small()
         .weak(),

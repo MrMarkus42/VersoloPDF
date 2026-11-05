@@ -7,7 +7,7 @@ use egui::{Context, Ui};
 
 use super::commands::Cmd;
 use super::dialogs::{Action, Outcome, buttons};
-use super::{Dialog, MrPdfApp};
+use super::{Dialog, VersoloPdfApp};
 use crate::ui::i18n::Language;
 
 /// The four kinds of page marks (see `marks_dialogs`).
@@ -30,7 +30,7 @@ pub(super) fn today(de: bool) -> String {
     if de { format!("{day}.{m}.{y}") } else { format!("{y}-{m}-{day}") }
 }
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     fn de(&self) -> bool {
         self.settings.language == Language::German
     }

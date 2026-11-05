@@ -7,7 +7,7 @@ use egui::{Color32, Context, Key, Painter, PointerButton, Pos2, Rect, TextureHan
 
 use super::dialogs::{Action, Outcome};
 use super::page_dialogs::tr;
-use super::{Dialog, MrPdfApp};
+use super::{Dialog, VersoloPdfApp};
 use crate::transitions::{Direction, Speed, Style, Transition};
 use crate::ui::i18n::Language;
 use crate::ui::pickers::{PageRange, section};
@@ -225,7 +225,7 @@ pub fn draw_transition(
     }
 }
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     fn ps_de(&self) -> bool {
         self.settings.language == Language::German
     }
@@ -515,7 +515,7 @@ impl MrPdfApp {
                 );
                 p.textures.insert(
                     pg,
-                    ctx.load_texture(format!("mrpdf-show-{pg}"), image, egui::TextureOptions::LINEAR),
+                    ctx.load_texture(format!("versolopdf-show-{pg}"), image, egui::TextureOptions::LINEAR),
                 );
             }
         }

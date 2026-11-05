@@ -3,19 +3,19 @@
 
 use std::path::PathBuf;
 
-use mrpdf::ui::MrPdfApp;
+use versolopdf::ui::VersoloPdfApp;
 
 /// Window and taskbar icon (the same picture as the program file's icon).
 fn app_icon() -> egui::IconData {
-    let (width, height, rgba) = mrpdf::ui::icons::logo_rgba();
+    let (width, height, rgba) = versolopdf::ui::icons::logo_rgba();
     egui::IconData { rgba, width, height }
 }
 
 fn options(renderer: eframe::Renderer) -> eframe::NativeOptions {
     eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("MrPDF")
-            .with_app_id("mrpdf")
+            .with_title("VersoloPDF")
+            .with_app_id("versolopdf")
             .with_inner_size([1280.0, 860.0])
             .with_min_inner_size([640.0, 420.0])
             .with_drag_and_drop(true)
@@ -26,37 +26,39 @@ fn options(renderer: eframe::Renderer) -> eframe::NativeOptions {
 }
 
 fn main() -> eframe::Result {
+    // Data of the former name "MrPDF" first, before anything is written.
+    versolopdf::files::take_over_old_data();
     // Error log and crash reports ("Fehlerprotokoll").
-    mrpdf::crashlog::init();
-    let crash = mrpdf::crashlog::take_crash_notice();
+    versolopdf::crashlog::init();
+    let crash = versolopdf::crashlog::take_crash_notice();
     // For testing the crash report only.
-    if std::env::var_os("MRPDF_TEST_CRASH").is_some() {
-        panic!("Testabsturz (MRPDF_TEST_CRASH gesetzt)");
+    if std::env::var_os("VERSOLOPDF_TEST_CRASH").is_some() {
+        panic!("Testabsturz (VERSOLOPDF_TEST_CRASH gesetzt)");
     }
 
     let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
-    // "--opengl" (or MRPDF_RENDERER=opengl) uses OpenGL instead of the
+    // "--opengl" (or VERSOLOPDF_RENDERER=opengl) uses OpenGL instead of the
     // default DirectX/Vulkan/Metal drawing through wgpu.
     let opengl = args.iter().any(|a| a == "--opengl")
-        || std::env::var("MRPDF_RENDERER").is_ok_and(|v| v.eq_ignore_ascii_case("opengl"));
+        || std::env::var("VERSOLOPDF_RENDERER").is_ok_and(|v| v.eq_ignore_ascii_case("opengl"));
     let files: Vec<PathBuf> = args.iter().map(PathBuf::from).filter(|p| p.is_file()).collect();
 
-    // One program window: a running MrPDF opens the files as tabs instead
+    // One program window: a running VersoloPDF opens the files as tabs instead
     // ("--new-window" starts a separate window anyway).
     let inbox = if args.iter().any(|a| a == "--new-window") {
         None
     } else {
-        match mrpdf::instance::start(mrpdf::files::data_dir().as_deref(), &files) {
-            mrpdf::instance::Start::Forwarded => return Ok(()),
-            mrpdf::instance::Start::First(inbox) => inbox,
+        match versolopdf::instance::start(versolopdf::files::data_dir().as_deref(), &files) {
+            versolopdf::instance::Start::Forwarded => return Ok(()),
+            versolopdf::instance::Start::First(inbox) => inbox,
         }
     };
-    mrpdf::document::clean_old_undo_files();
+    versolopdf::document::clean_old_undo_files();
     let inbox = std::sync::Arc::new(std::sync::Mutex::new(inbox));
 
     let start = |renderer: eframe::Renderer, files: Vec<PathBuf>| {
         log::info!(
-            "MrPDF {} gestartet ({} {}, Grafik: {renderer:?}, {} Datei(en))",
+            "VersoloPDF {} gestartet ({} {}, Grafik: {renderer:?}, {} Datei(en))",
             env!("CARGO_PKG_VERSION"),
             std::env::consts::OS,
             std::env::consts::ARCH,
@@ -65,10 +67,10 @@ fn main() -> eframe::Result {
         let inbox = inbox.clone();
         let crash = crash.clone();
         eframe::run_native(
-            "MrPDF",
+            "VersoloPDF",
             options(renderer),
             Box::new(move |cc| {
-                let mut app = MrPdfApp::new(cc, files);
+                let mut app = VersoloPdfApp::new(cc, files);
                 if let Some(inbox) = inbox.lock().ok().and_then(|mut i| i.take()) {
                     app.set_inbox(&cc.egui_ctx, inbox);
                 }

@@ -13,6 +13,10 @@ const CONTENT_TYPE: &str = "1.2.840.113549.1.9.3";
 const MESSAGE_DIGEST: &str = "1.2.840.113549.1.9.4";
 const SIGNING_TIME: &str = "1.2.840.113549.1.9.5";
 const SIGNING_CERT_V2: &str = "1.2.840.113549.1.9.16.2.47";
+/// Unsigned attribute with a time stamp token over the signature value.
+pub const SIGNATURE_TIME_STAMP: &str = "1.2.840.113549.1.9.16.2.14";
+/// Content type of a time stamp token (TSTInfo).
+pub const TST_INFO: &str = "1.2.840.113549.1.9.16.1.4";
 
 fn bad(what: &str) -> Error {
     Error::Invalid(format!("Signatur: {what}"))
@@ -22,13 +26,38 @@ fn attribute(oid: &str, value: &[u8]) -> Vec<u8> {
     der::seq(&[&der::oid(oid), &der::set_of(&[value])])
 }
 
+/// Makes a time stamp token (CMS ContentInfo) over a SHA-256 hash.
+pub type Stamper<'a> = &'a dyn Fn(&[u8]) -> Result<Vec<u8>>;
+
 /// SignedData over a SHA-256 `digest` of the signed byte ranges.
 pub fn signed_data(id: &DigitalId, digest: &[u8]) -> Result<Vec<u8>> {
+    build(id, DATA, None, digest, None)
+}
+
+/// Like [`signed_data`]; `stamp` adds a time stamp of the signature value.
+pub fn signed_data_with(id: &DigitalId, digest: &[u8], stamp: Option<Stamper<'_>>) -> Result<Vec<u8>> {
+    build(id, DATA, None, digest, stamp)
+}
+
+/// SignedData that contains `content` of type `content_type` (as a time
+/// stamp authority makes it for a TSTInfo).
+pub fn encapsulated(id: &DigitalId, content_type: &str, content: &[u8]) -> Result<Vec<u8>> {
+    let digest = cert::digest(cert::SHA256, &[content])?;
+    build(id, content_type, Some(content), &digest, None)
+}
+
+fn build(
+    id: &DigitalId,
+    content_type: &str,
+    content: Option<&[u8]>,
+    digest: &[u8],
+    stamp: Option<Stamper<'_>>,
+) -> Result<Vec<u8>> {
     let cert_hash = cert::digest(cert::SHA256, &[&id.cert.der])?;
     // ESS signing-certificate-v2 (hash algorithm SHA-256 is the default).
     let ess = der::seq(&[&der::seq(&[&der::seq(&[&der::octets(&cert_hash)])])]);
     let attrs = [
-        attribute(CONTENT_TYPE, &der::oid(DATA)),
+        attribute(CONTENT_TYPE, &der::oid(content_type)),
         attribute(MESSAGE_DIGEST, &der::octets(digest)),
         attribute(SIGNING_CERT_V2, &ess),
     ];
@@ -40,14 +69,33 @@ pub fn signed_data(id: &DigitalId, digest: &[u8]) -> Result<Vec<u8>> {
     signed_attrs[0] = 0xa0;
     let sid = der::seq(&[&id.cert.issuer_der, &der::uint(&id.cert.serial)]);
     let sha256 = der::alg(cert::SHA256, true);
-    let signer_info =
-        der::seq(&[&der::small_int(1), &sid, &sha256, &signed_attrs, &sig_alg, &der::octets(&signature)]);
+    // The time stamp covers the signature value (RFC 3161, appendix A).
+    let unsigned = match stamp {
+        Some(stamp) => {
+            let token = stamp(&cert::digest(cert::SHA256, &[&signature])?)?;
+            der::implicit(1, &attribute(SIGNATURE_TIME_STAMP, &token))
+        }
+        None => Vec::new(),
+    };
+    let signer_info = der::seq(&[
+        &der::small_int(1),
+        &sid,
+        &sha256,
+        &signed_attrs,
+        &sig_alg,
+        &der::octets(&signature),
+        &unsigned,
+    ]);
     let mut certs: Vec<&[u8]> = vec![&id.cert.der];
     certs.extend(id.chain.iter().map(Vec::as_slice));
+    let encap = match content {
+        Some(c) => der::seq(&[&der::oid(content_type), &der::explicit(0, &der::octets(c))]),
+        None => der::seq(&[&der::oid(content_type)]),
+    };
     let signed = der::seq(&[
-        &der::small_int(1),
+        &der::small_int(if content.is_some() { 3 } else { 1 }),
         &der::set_of(&[&sha256]),
-        &der::seq(&[&der::oid(DATA)]),
+        &encap,
         &der::implicit(0, &certs.concat()),
         &der::set_of(&[&signer_info]),
     ]);
@@ -67,6 +115,11 @@ pub struct Parsed {
     pub signing_time: Option<String>,
     pub sig_alg: String,
     pub signature: Vec<u8>,
+    /// Type and bytes of encapsulated content (a time stamp's TSTInfo).
+    pub content_type: String,
+    pub content: Option<Vec<u8>>,
+    /// Time stamp token of the signature (unsigned attribute), if any.
+    pub time_stamp: Option<Vec<u8>>,
 }
 
 /// Reads a CMS ContentInfo with SignedData (trailing zero padding of the
@@ -82,6 +135,17 @@ pub fn parse(data: &[u8]) -> Result<Parsed> {
     let sd = der::expect(inner.first().ok_or_else(|| bad("leer"))?, der::SEQUENCE, "SignedData")?;
     let mut certs = Vec::new();
     let mut signer_infos: Option<Tlv<'_>> = None;
+    // version, digestAlgorithms, encapContentInfo, ...
+    let (mut content_type, mut content) = (String::new(), None);
+    if let Some(encap) = sd.get(2).filter(|t| t.tag == der::SEQUENCE) {
+        let parts = der::children(encap.content)?;
+        content_type = parts.first().map(der::oid_string).unwrap_or_default();
+        if let Some(wrapped) = parts.get(1).filter(|t| t.tag == 0xa0)
+            && let Some(octets) = der::children(wrapped.content)?.into_iter().next()
+        {
+            content = Some(octets.content.to_vec());
+        }
+    }
     for t in &sd {
         match t.tag {
             0xa0 => {
@@ -137,12 +201,36 @@ pub fn parse(data: &[u8]) -> Result<Parsed> {
         .filter(|t| t.tag == der::OCTET_STRING)
         .map(|t| t.content.to_vec())
         .ok_or_else(|| bad("keine Signatur"))?;
+    // Unsigned attributes [1]: a time stamp of the signature.
+    let mut time_stamp = None;
+    if let Some(u) = si.get(i + 2).filter(|t| t.tag == 0xa1) {
+        for attr in der::children(u.content)? {
+            let parts = der::children(attr.content)?;
+            if parts.first().map(der::oid_string).as_deref() == Some(SIGNATURE_TIME_STAMP)
+                && let Some(vals) = parts.get(1)
+            {
+                time_stamp = der::children(vals.content)?.into_iter().next().map(|v| v.raw.to_vec());
+            }
+        }
+    }
     // Find the signer's certificate: IssuerAndSerialNumber.
     let signer = der::children(sid.content).ok().and_then(|p| {
         let (issuer, serial) = (p.first()?, p.get(1)?);
         certs.iter().position(|c| c.issuer_der == issuer.raw && c.serial == serial.content)
     });
-    Ok(Parsed { certs, signer, digest_alg, signed_attrs, message_digest, signing_time, sig_alg, signature })
+    Ok(Parsed {
+        certs,
+        signer,
+        digest_alg,
+        signed_attrs,
+        message_digest,
+        signing_time,
+        sig_alg,
+        signature,
+        content_type,
+        content,
+        time_stamp,
+    })
 }
 
 /// Result of checking a SignedData against the digest of the document.

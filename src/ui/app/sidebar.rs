@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use egui::{Color32, Panel, RichText, ScrollArea, Sense, Stroke, StrokeKind, Ui, vec2};
 
-use super::{MrPdfApp, SidePanel};
+use super::{SidePanel, VersoloPdfApp};
 use crate::model::{AnnotKind, Bookmark, SearchOptions};
 use crate::ui::cache::Budget;
 use crate::ui::i18n::Strings;
@@ -33,9 +33,16 @@ pub fn kind_icon(kind: AnnotKind) -> Icon {
     }
 }
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     pub(super) fn sidebar(&mut self, ui: &mut Ui) {
         let t = self.t();
+        let de = self.settings.language == crate::ui::i18n::Language::German;
+        let layers_label = if de { "Ebenen" } else { "Layers" };
+        // "Ebenen" only for documents that have layers.
+        let has_layers = self.tabs.get_mut(self.active).is_some_and(|tab| !tab.layers().is_empty());
+        if self.side == SidePanel::Layers && !has_layers {
+            self.side = SidePanel::Thumbnails;
+        }
         Panel::left("side-strip").resizable(false).exact_size(34.0).show(ui, |ui| {
             ui.add_space(4.0);
             for (panel, icon, label) in [
@@ -45,7 +52,11 @@ impl MrPdfApp {
                 (SidePanel::Attachments, Icon::Attachment, t.attachments),
                 (SidePanel::Fields, Icon::Form, t.form_pane),
                 (SidePanel::Search, Icon::Search, t.search),
+                (SidePanel::Layers, Icon::Background, layers_label),
             ] {
+                if panel == SidePanel::Layers && !has_layers {
+                    continue;
+                }
                 if icon_button(ui, icon, label, self.side == panel, true).clicked() {
                     self.side = panel;
                 }
@@ -62,6 +73,7 @@ impl MrPdfApp {
                         SidePanel::Attachments => t.attachments,
                         SidePanel::Fields => t.form_pane,
                         SidePanel::Search => t.search,
+                        SidePanel::Layers => layers_label,
                     };
                     ui.strong(title);
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -78,9 +90,43 @@ impl MrPdfApp {
                     SidePanel::Attachments => self.attachments_panel(ui),
                     SidePanel::Fields => self.fields_panel(ui),
                     SidePanel::Search => self.search_panel(ui),
+                    SidePanel::Layers => self.layers_panel(ui),
                 }
             },
         );
+    }
+
+    /// "Ebenen": a check box per layer; switching is saved with the
+    /// document (as the view other programs open it with) and undoable.
+    fn layers_panel(&mut self, ui: &mut Ui) {
+        let de = self.settings.language == crate::ui::i18n::Language::German;
+        let ctx = ui.ctx().clone();
+        let Some(tab) = self.tabs.get_mut(self.active) else { return };
+        let layers = tab.layers();
+        let mut change = None;
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            for (i, layer) in layers.iter().enumerate() {
+                let mut on = layer.visible;
+                let name = if layer.name.is_empty() { format!("Ebene {}", i + 1) } else { layer.name.clone() };
+                let resp = ui.add_enabled(!layer.locked, egui::Checkbox::new(&mut on, name));
+                if resp.changed() {
+                    change = Some((i, on));
+                }
+            }
+            ui.add_space(6.0);
+            ui.label(
+                egui::RichText::new(if de {
+                    "Die Sichtbarkeit wird mit dem Dokument gespeichert und gilt dann auch in anderen PDF-Programmen. Rückgängig mit Strg+Z."
+                } else {
+                    "The visibility is saved with the document and then applies in other PDF programs too. Undo with Ctrl+Z."
+                })
+                .small()
+                .weak(),
+            );
+        });
+        if let Some((i, on)) = change {
+            self.edit(&ctx, |tab| tab.doc.set_layer_visible(i, on));
+        }
     }
 
     fn thumbnails(&mut self, ui: &mut Ui) {

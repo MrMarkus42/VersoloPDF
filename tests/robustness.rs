@@ -3,10 +3,10 @@
 
 mod common;
 
-use mrpdf::Document;
-use mrpdf::geometry::RectF;
-use mrpdf::model::{AnnotKind, AnnotStyle};
-use mrpdf::pdf_edit::{self, NewAnnotation};
+use versolopdf::Document;
+use versolopdf::geometry::RectF;
+use versolopdf::model::{AnnotKind, AnnotStyle};
+use versolopdf::pdf_edit::{self, NewAnnotation};
 
 /// Small deterministic pseudo random generator (no external crates needed).
 struct Lcg(u64);
@@ -99,12 +99,12 @@ fn mutated_documents_never_crash() {
 }
 
 /// The same with a real document: the smallest PDF of the folder named in
-/// `MRPDF_TESTFILES` (real files are not part of the repository).
+/// `VERSOLOPDF_TESTFILES` (real files are not part of the repository).
 #[test]
-#[ignore = "needs MRPDF_TESTFILES"]
+#[ignore = "needs VERSOLOPDF_TESTFILES"]
 fn mutated_real_document_never_crashes() {
     let _guard = common::lock();
-    let dir = std::env::var_os("MRPDF_TESTFILES").expect("MRPDF_TESTFILES");
+    let dir = std::env::var_os("VERSOLOPDF_TESTFILES").expect("VERSOLOPDF_TESTFILES");
     let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(dir)
         .unwrap()
         .filter_map(|e| e.ok().map(|e| e.path()))

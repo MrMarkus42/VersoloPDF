@@ -6,7 +6,7 @@ use egui::{Context, RichText, Ui};
 
 use super::dialogs::{Action, Outcome};
 use super::page_dialogs::tr;
-use super::{Dialog, MrPdfApp};
+use super::{Dialog, VersoloPdfApp};
 use crate::ui::i18n::Language;
 use crate::ui::icons::Icon;
 use crate::ui::theme;
@@ -51,7 +51,7 @@ enum StripAction {
     Move(usize, MoveTarget),
 }
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     fn wn_de(&self) -> bool {
         self.settings.language == Language::German
     }
@@ -95,7 +95,7 @@ impl MrPdfApp {
         }
     }
 
-    /// Moves tabs to a target; "Neues Fenster" starts a separate MrPDF with
+    /// Moves tabs to a target; "Neues Fenster" starts a separate VersoloPDF with
     /// the full ribbon for them.
     pub(super) fn move_tabs_to(&mut self, ctx: &Context, ids: &[u64], target: MoveTarget) {
         if target == MoveTarget::NewWindow {
@@ -107,7 +107,7 @@ impl MrPdfApp {
     }
 
     /// Next step of "Neues Fenster": asks about unsaved changes one document
-    /// at a time, then starts the new MrPDF and closes the tabs here.
+    /// at a time, then starts the new VersoloPDF and closes the tabs here.
     pub(super) fn continue_new_window(&mut self, ctx: &Context) {
         let Some((ids, asked)) = self.new_window.clone() else { return };
         let ask =
@@ -143,9 +143,9 @@ impl MrPdfApp {
             self.dialog = Some(Dialog::Message {
                 title: tr(de, "Neues Fenster", "New window").into(),
                 text: if de {
-                    format!("MrPDF konnte kein neues Fenster starten:\n{err}")
+                    format!("VersoloPDF konnte kein neues Fenster starten:\n{err}")
                 } else {
-                    format!("MrPDF could not start a new window:\n{err}")
+                    format!("VersoloPDF could not start a new window:\n{err}")
                 },
             });
             return;
@@ -389,10 +389,11 @@ impl MrPdfApp {
     /// Documents moved into their own windows.
     pub(super) fn doc_windows(&mut self, ctx: &Context) {
         for w in self.extra_windows() {
-            let id = egui::ViewportId::from_hash_of(("mrpdf-window", w));
-            let title = self
-                .shown_in_group(w, 0)
-                .map_or_else(|| "MrPDF".to_string(), |i| format!("{} - MrPDF", self.tabs[i].title()));
+            let id = egui::ViewportId::from_hash_of(("versolopdf-window", w));
+            let title = self.shown_in_group(w, 0).map_or_else(
+                || "VersoloPDF".to_string(),
+                |i| format!("{} - VersoloPDF", self.tabs[i].title()),
+            );
             let builder = egui::ViewportBuilder::default().with_title(title).with_inner_size([900.0, 720.0]);
             let close = ctx.show_viewport_immediate(id, builder, |ui, _class| self.doc_window_ui(ui, w));
             if close {
@@ -559,8 +560,8 @@ impl MrPdfApp {
     }
 }
 
-/// Starts a separate MrPDF window with the files (not handed to this one).
-/// Automated tests (`MRPDF_NO_EXTERNAL`) start nothing.
+/// Starts a separate VersoloPDF window with the files (not handed to this one).
+/// Automated tests (`VERSOLOPDF_NO_EXTERNAL`) start nothing.
 fn start_new_window(paths: &[std::path::PathBuf]) -> std::io::Result<()> {
     if crate::mail::no_external() {
         return Ok(());

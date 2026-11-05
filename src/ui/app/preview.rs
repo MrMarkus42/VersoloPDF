@@ -7,7 +7,7 @@
 
 use egui::{Color32, Pos2, Rect, Response, Sense, Stroke, StrokeKind, TextureHandle, Ui, Vec2, vec2};
 
-use super::MrPdfApp;
+use super::VersoloPdfApp;
 use crate::Document;
 use crate::geometry::{PageGeometry, PointF};
 
@@ -109,7 +109,7 @@ impl PreviewArea {
     }
 }
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     /// Preview of `page` of the active document.
     pub(super) fn page_preview(
         &mut self,

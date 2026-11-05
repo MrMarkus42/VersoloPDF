@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.1.0 – 2026-11-05
+
+* **New name: VersoloPDF** (formerly MrPDF). Settings, digital IDs, recovery
+  copies and the error log of the old name are taken over at the first
+  start; sessions saved as `.mrpdfsession` still open.
+* Certify documents (first signature with the allowed later changes:
+  none, filling in forms and signing, or also comments)
+* Time stamps (RFC 3161): signatures can get a time stamp of a time stamp
+  authority, and "Protect › Time stamp" adds a document time stamp; only a
+  hash value is sent. "Check signatures" shows certifications and time
+  stamps. Settings › Signatures: the authority and the default.
+* Barcode form field: a QR code of any text or web address (own encoder,
+  error correction level M, checked with an independent reader)
+* Layers: the "Ebenen" pane switches the layers of a document (saved as the
+  document's default view, undoable)
+* Snapping to objects: drawing snaps to the edges of text, images and
+  graphics (View › Snap › To objects)
+* Split pages at guides: the split dialog takes the guides as split lines
+* Read aloud in the Accessibility tab
+* Greyed-out placeholders removed: cloud and SharePoint places, JavaScript
+  console and settings, web page and e-mail to PDF, scanning and scan
+  cleanup, panes and settings categories without function, thin lines,
+  word highlighting while reading aloud
+
 ## 1.0.0 – 2026-11-05
 
 First public release. Everything below is new in this version:
@@ -50,7 +74,7 @@ First public release. Everything below is new in this version:
   a tab's commands over the document until one is used
 * The ribbon has the same height on every tab and in every window width (the
   document no longer jumps); the tab names no longer move on hover
-* "Move to: New window" starts a separate MrPDF with the full ribbon for the
+* "Move to: New window" starts a separate VersoloPDF with the full ribbon for the
   document (unsaved changes are asked about first)
 * Form buttons: name, caption and action (reset form, open a web address,
   go to a page, next/previous page) are chosen when the button is drawn, and
@@ -62,4 +86,4 @@ First public release. Everything below is new in this version:
   corner of a visible signature
 * Settings › Updates: looks for the newest release on GitHub (by hand or once
   a day at start); on Windows it downloads the package, checks its SHA-256
-  checksum, installs it and restarts MrPDF
+  checksum, installs it and restarts VersoloPDF

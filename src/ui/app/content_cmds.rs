@@ -5,7 +5,7 @@
 
 use egui::{Context, RichText, Ui};
 
-use super::MrPdfApp;
+use super::VersoloPdfApp;
 use super::bookmark_dialogs::color_button;
 use super::commands::Cmd;
 use crate::content::{
@@ -41,7 +41,7 @@ fn tr(de: bool, g: &'static str, e: &'static str) -> &'static str {
     if de { g } else { e }
 }
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     fn ct_de(&self) -> bool {
         self.settings.language == Language::German
     }
@@ -741,7 +741,7 @@ impl MrPdfApp {
         let mut run: Option<ContentCmd> = None;
         // Small buttons with their own icon (the last argument is a fallback
         // for commands without one).
-        let mut btn = |app: &MrPdfApp, ui: &mut Ui, c: ContentCmd, label: (&str, &str), _icon: Icon| {
+        let mut btn = |app: &VersoloPdfApp, ui: &mut Ui, c: ContentCmd, label: (&str, &str), _icon: Icon| {
             let text = if de { label.0 } else { label.1 };
             let (g, e) = c.names();
             let resp = crate::ui::widgets::small_button(

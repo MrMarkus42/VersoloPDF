@@ -1,6 +1,6 @@
 //! "In MS Excel" and "In MS PowerPoint" (ribbon tab "Umwandeln"): the page
 //! text is split into positioned pieces, arranged as table cells or as text
-//! boxes on slides, and written as Office Open XML files. MrPDF writes the
+//! boxes on slides, and written as Office Open XML files. VersoloPDF writes the
 //! files itself; no Office program is needed.
 
 use std::path::Path;
@@ -509,7 +509,7 @@ pub fn xlsx(title: &str, sheets: &[(String, Vec<Vec<Option<Cell>>>)], password: 
     let sharing = password.filter(|p| !p.is_empty()).map_or(String::new(), |p| {
         let (hash, salt) = protect(p);
         format!(
-            "<fileSharing userName=\"MrPDF\" algorithmName=\"SHA-512\" hashValue=\"{hash}\" saltValue=\"{salt}\" spinCount=\"{SPIN_COUNT}\"/>"
+            "<fileSharing userName=\"VersoloPDF\" algorithmName=\"SHA-512\" hashValue=\"{hash}\" saltValue=\"{salt}\" spinCount=\"{SPIN_COUNT}\"/>"
         )
     });
     let workbook = format!(
@@ -529,7 +529,7 @@ const ROOT_RELS: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"y
 
 fn core(title: &str) -> String {
     format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<cp:coreProperties xmlns:cp=\"http://schemas.openxmlformats.org/package/2006/metadata/core-properties\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:title>{}</dc:title><dc:creator>MrPDF</dc:creator></cp:coreProperties>",
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<cp:coreProperties xmlns:cp=\"http://schemas.openxmlformats.org/package/2006/metadata/core-properties\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:title>{}</dc:title><dc:creator>VersoloPDF</dc:creator></cp:coreProperties>",
         xml_escape(title)
     )
 }
@@ -839,7 +839,7 @@ fn emu(pt: f32) -> i64 {
     (pt * EMU).round() as i64
 }
 
-const THEME: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<a:theme xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" name=\"MrPDF\"><a:themeElements><a:clrScheme name=\"MrPDF\"><a:dk1><a:srgbClr val=\"000000\"/></a:dk1><a:lt1><a:srgbClr val=\"FFFFFF\"/></a:lt1><a:dk2><a:srgbClr val=\"1F1F1F\"/></a:dk2><a:lt2><a:srgbClr val=\"EEEEEE\"/></a:lt2><a:accent1><a:srgbClr val=\"1E64DC\"/></a:accent1><a:accent2><a:srgbClr val=\"E53935\"/></a:accent2><a:accent3><a:srgbClr val=\"2EA043\"/></a:accent3><a:accent4><a:srgbClr val=\"FB8C00\"/></a:accent4><a:accent5><a:srgbClr val=\"8E24AA\"/></a:accent5><a:accent6><a:srgbClr val=\"00ACC1\"/></a:accent6><a:hlink><a:srgbClr val=\"0563C1\"/></a:hlink><a:folHlink><a:srgbClr val=\"954F72\"/></a:folHlink></a:clrScheme><a:fontScheme name=\"MrPDF\"><a:majorFont><a:latin typeface=\"Arial\"/><a:ea typeface=\"\"/><a:cs typeface=\"\"/></a:majorFont><a:minorFont><a:latin typeface=\"Arial\"/><a:ea typeface=\"\"/><a:cs typeface=\"\"/></a:minorFont></a:fontScheme><a:fmtScheme name=\"MrPDF\"><a:fillStyleLst><a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill><a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill><a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill></a:fillStyleLst><a:lnStyleLst><a:ln w=\"6350\"><a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill></a:ln><a:ln w=\"12700\"><a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill></a:ln><a:ln w=\"19050\"><a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill></a:ln></a:lnStyleLst><a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle></a:effectStyleLst><a:bgFillStyleLst><a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill><a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill><a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill></a:bgFillStyleLst></a:fmtScheme></a:themeElements></a:theme>";
+const THEME: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<a:theme xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" name=\"VersoloPDF\"><a:themeElements><a:clrScheme name=\"VersoloPDF\"><a:dk1><a:srgbClr val=\"000000\"/></a:dk1><a:lt1><a:srgbClr val=\"FFFFFF\"/></a:lt1><a:dk2><a:srgbClr val=\"1F1F1F\"/></a:dk2><a:lt2><a:srgbClr val=\"EEEEEE\"/></a:lt2><a:accent1><a:srgbClr val=\"1E64DC\"/></a:accent1><a:accent2><a:srgbClr val=\"E53935\"/></a:accent2><a:accent3><a:srgbClr val=\"2EA043\"/></a:accent3><a:accent4><a:srgbClr val=\"FB8C00\"/></a:accent4><a:accent5><a:srgbClr val=\"8E24AA\"/></a:accent5><a:accent6><a:srgbClr val=\"00ACC1\"/></a:accent6><a:hlink><a:srgbClr val=\"0563C1\"/></a:hlink><a:folHlink><a:srgbClr val=\"954F72\"/></a:folHlink></a:clrScheme><a:fontScheme name=\"VersoloPDF\"><a:majorFont><a:latin typeface=\"Arial\"/><a:ea typeface=\"\"/><a:cs typeface=\"\"/></a:majorFont><a:minorFont><a:latin typeface=\"Arial\"/><a:ea typeface=\"\"/><a:cs typeface=\"\"/></a:minorFont></a:fontScheme><a:fmtScheme name=\"VersoloPDF\"><a:fillStyleLst><a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill><a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill><a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill></a:fillStyleLst><a:lnStyleLst><a:ln w=\"6350\"><a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill></a:ln><a:ln w=\"12700\"><a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill></a:ln><a:ln w=\"19050\"><a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill></a:ln></a:lnStyleLst><a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle></a:effectStyleLst><a:bgFillStyleLst><a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill><a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill><a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill></a:bgFillStyleLst></a:fmtScheme></a:themeElements></a:theme>";
 
 const NS: &str = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\"";
 
@@ -1191,7 +1191,7 @@ mod tests {
         let s = String::from_utf8_lossy(&x);
         assert_eq!(&x[..4], b"PK\x03\x04");
         assert!(s.contains("xl/worksheets/sheet1.xml") && s.contains("a&lt;b") && s.contains("<v>1.5</v>"));
-        assert!(s.contains("<fileSharing userName=\"MrPDF\" algorithmName=\"SHA-512\""));
+        assert!(s.contains("<fileSharing userName=\"VersoloPDF\" algorithmName=\"SHA-512\""));
         let look = Look { family: "Times New Roman".into(), bold: true, italic: false, color: [200, 0, 0] };
         let text = |outline| SlideText {
             x: 10.0,

@@ -3,7 +3,7 @@
 
 use egui::{Context, RichText, Ui, vec2};
 
-use super::MrPdfApp;
+use super::VersoloPdfApp;
 use crate::calculator::{Calculator, Key, format_number};
 use crate::geometry::RectF;
 use crate::model::AnnotKind;
@@ -101,7 +101,7 @@ fn keypad(ui: &mut Ui, calc: &mut Calculator, de: bool) {
     });
 }
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     fn calc_de(&self) -> bool {
         self.settings.language == Language::German
     }

@@ -8,7 +8,7 @@ use std::process::Command;
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=assets/mrpdf.ico");
+    println!("cargo:rerun-if-changed=assets/versolopdf.ico");
     let windows = std::env::var("CARGO_CFG_TARGET_OS").is_ok_and(|os| os == "windows");
     let gnu = std::env::var("CARGO_CFG_TARGET_ENV").is_ok_and(|env| env == "gnu");
     if !windows || !gnu {
@@ -16,7 +16,7 @@ fn main() {
     }
     let out = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
     let root = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
-    let icon = root.join("assets").join("mrpdf.ico");
+    let icon = root.join("assets").join("versolopdf.ico");
     let version = std::env::var("CARGO_PKG_VERSION").unwrap_or_default();
     let parts: Vec<u32> = version.split('.').filter_map(|p| p.parse().ok()).collect();
     let v = |i: usize| parts.get(i).copied().unwrap_or(0);
@@ -30,11 +30,11 @@ BEGIN
   BEGIN
     BLOCK "040704B0"
     BEGIN
-      VALUE "FileDescription", "MrPDF"
-      VALUE "ProductName", "MrPDF"
+      VALUE "FileDescription", "VersoloPDF"
+      VALUE "ProductName", "VersoloPDF"
       VALUE "FileVersion", "{version}"
       VALUE "ProductVersion", "{version}"
-      VALUE "OriginalFilename", "MrPDF.exe"
+      VALUE "OriginalFilename", "VersoloPDF.exe"
     END
   END
   BLOCK "VarFileInfo"
@@ -48,13 +48,13 @@ END
         b = v(1),
         c = v(2),
     );
-    let rc_path = out.join("mrpdf.rc");
+    let rc_path = out.join("versolopdf.rc");
     std::fs::write(&rc_path, rc).expect("write resource script");
-    let obj = out.join("mrpdf-resources.o");
+    let obj = out.join("versolopdf-resources.o");
     let tool = std::env::var("WINDRES").unwrap_or_else(|_| "x86_64-w64-mingw32-windres".into());
     let status = Command::new(&tool).arg(&rc_path).args(["-O", "coff", "-o"]).arg(&obj).status();
     match status {
         Ok(s) if s.success() => println!("cargo:rustc-link-arg-bins={}", obj.display()),
-        _ => println!("cargo:warning=no Windows resource compiler ({tool}); MrPDF.exe gets no icon"),
+        _ => println!("cargo:warning=no Windows resource compiler ({tool}); VersoloPDF.exe gets no icon"),
     }
 }

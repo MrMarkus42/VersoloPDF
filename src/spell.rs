@@ -1,5 +1,5 @@
 //! "Rechtschreibprüfung" with Hunspell dictionaries (.aff/.dic) found on
-//! the computer (LibreOffice, Linux packages) or chosen by the user; MrPDF
+//! the computer (LibreOffice, Linux packages) or chosen by the user; VersoloPDF
 //! ships no dictionary. Supported: word lists with prefix and suffix rules
 //! (also combined), forbidden words and, for compound languages such as
 //! German, words made of dictionary words with linking "s", "es", "n",
@@ -561,8 +561,8 @@ mod tests {
         assert_eq!(d.suggest("Hasu", 3).first().map(String::as_str), Some("Haus"));
         assert!(d.suggest("Tühr", 5).contains(&"Tür".to_string()));
         let mut d = d;
-        d.add_personal("MrPDF");
-        assert!(d.check("MrPDF"));
+        d.add_personal("VersoloPDF");
+        assert!(d.check("VersoloPDF"));
         assert_eq!(
             words("Ein Haus-Tür, 12 Wege!"),
             vec![

@@ -6,7 +6,7 @@ use egui::{RichText, Ui};
 use super::commands::Cmd;
 use super::dialogs::{Action, Outcome};
 use super::page_dialogs::{footer, tr};
-use super::{Dialog, MrPdfApp};
+use super::{Dialog, VersoloPdfApp};
 use crate::office::{ExcelOptions, NumberFormat, PowerPointOptions};
 use crate::ui::i18n::Language;
 use crate::ui::pickers::{PageRange, RangeMode, section};
@@ -89,7 +89,7 @@ impl Protect {
 
 const DPIS: [u32; 5] = [72, 96, 150, 200, 300];
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     fn od_de(&self) -> bool {
         self.settings.language == Language::German
     }

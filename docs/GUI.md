@@ -1,6 +1,6 @@
 # Look and operation of the user interface
 
-Overhaul of 2026-10-30. All icons are MrPDF's own drawings
+Overhaul of 2026-10-30. All icons are VersoloPDF's own drawings
 (`src/ui/icons.rs`); nothing is taken from other programs.
 
 ## Icons
@@ -96,20 +96,20 @@ Overhaul of 2026-10-30. All icons are MrPDF's own drawings
 * Comment edits no longer re-read the size of every page after reloading:
   moving a comment in a 274 MB / 1476 page file went from 2.95 s to 0.26 s
   (timings with real files: `tests/real_files.rs`, ignored by default).
-* Application icon (2026-11-01): Mr. M's drawing `assets/mrpdf-icon-source.webp`
+* Application icon (2026-11-01): Mr. M's drawing `assets/versolopdf-icon-source.webp`
   is prepared by `cargo run --release --example make_icon` into
-  `assets/mrpdf.png` (256 px, transparent corners) and `assets/mrpdf.ico`
+  `assets/versolopdf.png` (256 px, transparent corners) and `assets/versolopdf.ico`
   (16–256 px). Used for the window and taskbar (`main.rs`), the logo inside
   the program (`Icon::Logo`, drawn from the PNG with mipmaps) and the
   program file (`build.rs` adds icon and version information with the MinGW
   resource compiler).
 * One program window (2026-11-01): a second start hands its files to the
-  running MrPDF, which opens them as tabs and comes to the front; the second
+  running VersoloPDF, which opens them as tabs and comes to the front; the second
   start ends (`src/instance.rs`). Since 2026-11-02 through a named pipe
-  `\\.\pipe\MrPDF-<hash>` on Windows (remote clients rejected, default
+  `\\.\pipe\VersoloPDF-<hash>` on Windows (remote clients rejected, default
   security: other users may not write) and a Unix socket in the private
-  folder `ipc/` (mode 0700) of MrPDF's data folder on Linux and macOS; no
+  folder `ipc/` (mode 0700) of VersoloPDF's data folder on Linux and macOS; no
   network port. `--new-window` starts a separate window anyway.
 * Drawing goes through wgpu (DirectX on Windows) instead of OpenGL, which
-  showed brief black flashes on Windows; without a usable driver MrPDF falls
-  back to OpenGL, `--opengl` or `MRPDF_RENDERER=opengl` forces it.
+  showed brief black flashes on Windows; without a usable driver VersoloPDF falls
+  back to OpenGL, `--opengl` or `VERSOLOPDF_RENDERER=opengl` forces it.

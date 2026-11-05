@@ -142,7 +142,7 @@ pub struct RenderedImage {
 
 /// Folder for undo steps moved out of memory.
 fn spill_dir() -> PathBuf {
-    std::env::temp_dir().join("mrpdf-undo")
+    std::env::temp_dir().join("versolopdf-undo")
 }
 
 /// Removes undo files left behind by earlier runs (for example after a
@@ -312,6 +312,10 @@ pub struct Document {
     /// Serialised state; stale while `engine_dirty` is set.
     bytes: Vec<u8>,
     engine_dirty: bool,
+    /// The layers of `bytes` (None: not read yet). Edits through PDFium
+    /// (comments, fields) never change layers, so this stays valid until
+    /// the bytes are replaced.
+    layers_cache: Option<Vec<crate::layers::Layer>>,
     path: Option<PathBuf>,
     display_name: String,
     password: Option<String>,
@@ -430,7 +434,7 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
         path.file_name().ok_or_else(|| Error::Invalid("invalid file name".into()))?.to_string_lossy();
     let nonce =
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
-    let tmp = dir.join(format!(".{file_name}.{}-{nonce:x}.mrpdf-tmp", std::process::id()));
+    let tmp = dir.join(format!(".{file_name}.{}-{nonce:x}.versolopdf-tmp", std::process::id()));
     let result = (|| -> std::io::Result<()> {
         // create_new refuses to follow a pre-existing file or symlink.
         let mut file = fs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
@@ -466,6 +470,7 @@ impl Document {
             pdf,
             bytes,
             engine_dirty: false,
+            layers_cache: None,
             path: None,
             display_name: display_name.to_string(),
             password: password.map(str::to_string),
@@ -811,7 +816,7 @@ impl Document {
         let px = |v: f32| ((v * scale).round() as u32).clamp(1, MAX_BITMAP_EDGE);
         let opts = RenderOptions { annotations: false, ..RenderOptions::default() };
         let img = self.render_tile(index, px(w), px(h), 0, 0, px(w), px(h), opts)?;
-        let dir = std::env::temp_dir().join("mrpdf-ocr");
+        let dir = std::env::temp_dir().join("versolopdf-ocr");
         fs::create_dir_all(&dir).map_err(|e| Error::io(&dir, e))?;
         let png = dir.join(format!("{}-{index}.png", std::process::id()));
         image::RgbaImage::from_raw(img.width, img.height, img.rgba)
@@ -1309,6 +1314,7 @@ impl Document {
         self.pdf = pdf;
         self.bytes = bytes;
         self.engine_dirty = false;
+        self.layers_cache = None;
         // Comment edits keep every page's size and rotation; reading them
         // again takes seconds in documents with thousands of pages.
         if self.local_page.is_none() || self.geometry.len() != self.pdf.pages().len() as usize {
@@ -2233,6 +2239,32 @@ impl Document {
     pub fn field_values(&mut self) -> Result<Vec<(String, String)>> {
         self.sync_bytes()?;
         forms::field_values(&self.bytes, self.password.as_deref())
+    }
+
+    /// "Ebenen": the layers of the document.
+    pub fn layers(&mut self) -> Result<Vec<crate::layers::Layer>> {
+        if let Some(cached) = &self.layers_cache {
+            return Ok(cached.clone());
+        }
+        // Reading the whole file takes long: only when the bytes mention
+        // layers, or when the catalogue may hide in a compressed object
+        // stream (files up to 32 MB).
+        const LARGE: usize = 32 * 1024 * 1024;
+        let has = |needle: &[u8]| self.bytes.windows(needle.len()).any(|w| w == needle);
+        let worth = has(b"/OCProperties") || (self.bytes.len() <= LARGE && has(b"/ObjStm"));
+        let found = if worth {
+            crate::layers::layers(&self.bytes, self.password.as_deref()).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        self.layers_cache = Some(found.clone());
+        Ok(found)
+    }
+
+    /// Shows or hides a layer (in the default view saved with the file).
+    pub fn set_layer_visible(&mut self, index: usize, visible: bool) -> Result<()> {
+        let label = if visible { "Ebene einblenden" } else { "Ebene ausblenden" };
+        self.edit_bytes(label, |b, p| crate::layers::set_visible(b, p, index, visible))
     }
 
     pub fn reset_form(&mut self) -> Result<()> {

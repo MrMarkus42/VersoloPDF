@@ -2,12 +2,12 @@
 
 use egui::{Panel, RichText, Ui};
 
-use super::MrPdfApp;
+use super::VersoloPdfApp;
 use crate::ui::icons::Icon;
 use crate::ui::view::{self, ZoomMode};
 use crate::ui::widgets::icon_button;
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     pub(super) fn tab_bar(&mut self, ui: &mut Ui) {
         // "Tab-Leiste verbergen, wenn nur ein Dokument geöffnet ist"; with
         // several tab groups every group has its own bar.

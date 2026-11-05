@@ -5,7 +5,7 @@
 use egui::Context;
 
 use super::commands::Cmd;
-use super::{Dialog, MrPdfApp, RangePurpose};
+use super::{Dialog, RangePurpose, VersoloPdfApp};
 use crate::model::Rgba;
 use crate::report::Line;
 use crate::ui::i18n::Language;
@@ -13,7 +13,7 @@ use crate::ui::i18n::Language;
 const GREEN: Rgba = Rgba::rgb(20, 130, 50);
 const RED: Rgba = Rgba::rgb(190, 30, 30);
 
-impl MrPdfApp {
+impl VersoloPdfApp {
     fn review_de(&self) -> bool {
         self.settings.language == Language::German
     }

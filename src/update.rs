@@ -1,12 +1,12 @@
-//! "Neue Version": looks for the newest MrPDF release on GitHub and, on
+//! "Neue Version": looks for the newest VersoloPDF release on GitHub and, on
 //! Windows, installs it.
 //!
 //! Like "Von URL öffnen", the system's `curl` program does the network work
-//! (MrPDF has no own network or TLS library). The release package is only
+//! (VersoloPDF has no own network or TLS library). The release package is only
 //! taken from this project's GitHub releases, must match its SHA-256
 //! checksum and is unpacked with the `tar` program that is part of Windows.
 //! A small batch file copies the new files over the program folder after
-//! MrPDF has closed and starts the new version.
+//! VersoloPDF has closed and starts the new version.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -14,7 +14,7 @@ use std::process::Command;
 use crate::error::{Error, Result};
 
 /// GitHub repository ("owner/name") whose releases are used.
-pub const REPOSITORY: &str = "MrMarkus42/MrPDF";
+pub const REPOSITORY: &str = "MrMarkus42/VersoloPDF";
 
 /// Largest accepted release package.
 const MAX_PACKAGE: u64 = 512 * 1024 * 1024;
@@ -299,7 +299,7 @@ fn curl() -> Command {
     cmd.args(["--silent", "--show-error", "--location"])
         .args(["--proto", "=https", "--proto-redir", "=https"])
         .args(["--max-redirs", "10", "--connect-timeout", "20"])
-        .args(["--user-agent", "MrPDF-update-check"]);
+        .args(["--user-agent", "VersoloPDF-update-check"]);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -386,7 +386,7 @@ pub fn download_package(release: &Release, dir: &Path) -> Result<PathBuf> {
         }
         (None, None) => return Err(Error::Invalid("the release has no checksum".into())),
     };
-    let dest = dir.join("MrPDF-update.zip");
+    let dest = dir.join("VersoloPDF-update.zip");
     download(asset, &dest, MAX_PACKAGE)?;
     if sha256_file(&dest)? != expected {
         std::fs::remove_file(&dest).ok();
@@ -395,9 +395,9 @@ pub fn download_package(release: &Release, dir: &Path) -> Result<PathBuf> {
     Ok(dest)
 }
 
-/// The folder in `dir` (or below) that holds `MrPDF.exe`.
+/// The folder in `dir` (or below) that holds `VersoloPDF.exe`.
 fn program_folder(dir: &Path, depth: usize) -> Option<PathBuf> {
-    if dir.join("MrPDF.exe").is_file() {
+    if dir.join("VersoloPDF.exe").is_file() {
         return Some(dir.to_path_buf());
     }
     if depth == 0 {
@@ -412,7 +412,7 @@ fn program_folder(dir: &Path, depth: usize) -> Option<PathBuf> {
 
 /// True if new files can be written into `dir`.
 pub fn folder_writable(dir: &Path) -> bool {
-    let probe = dir.join(".mrpdf-update-probe");
+    let probe = dir.join(".versolopdf-update-probe");
     let ok = std::fs::write(&probe, b"x").is_ok();
     std::fs::remove_file(&probe).ok();
     ok
@@ -439,7 +439,7 @@ pub fn prepare_install(zip: &Path, target: &Path, pid: u32, args: &[String]) -> 
         return Err(curl_error(&output));
     }
     let source = program_folder(&work, 2)
-        .ok_or_else(|| Error::Invalid("MrPDF.exe not found in the package".into()))?;
+        .ok_or_else(|| Error::Invalid("VersoloPDF.exe not found in the package".into()))?;
     let script = zip.with_file_name("install-update.cmd");
     std::fs::write(&script, install_script(&source, target, pid, args)).map_err(|e| Error::io(&script, e))?;
     Ok(script)
@@ -452,7 +452,7 @@ fn install_script(source: &Path, target: &Path, pid: u32, args: &[String]) -> St
     format!(
         "@echo off\r\n\
          chcp 65001 >nul\r\n\
-         rem MrPDF update: waits for MrPDF to close, copies the new files, starts it again.\r\n\
+         rem VersoloPDF update: waits for VersoloPDF to close, copies the new files, starts it again.\r\n\
          :wait\r\n\
          tasklist /FI \"PID eq {pid}\" 2>nul | find \"{pid}\" >nul\r\n\
          if not errorlevel 1 (\r\n\
@@ -460,14 +460,14 @@ fn install_script(source: &Path, target: &Path, pid: u32, args: &[String]) -> St
          \x20 goto wait\r\n\
          )\r\n\
          robocopy \"{src}\" \"{dst}\" /E /R:5 /W:1 /NFL /NDL /NJH /NJS /NP >nul\r\n\
-         start \"\" \"{dst}\\MrPDF.exe\" {args}\r\n",
+         start \"\" \"{dst}\\VersoloPDF.exe\" {args}\r\n",
         src = q(source),
         dst = q(target),
         args = args.join(" "),
     )
 }
 
-/// Starts the batch file of `prepare_install` (hidden); it waits for MrPDF
+/// Starts the batch file of `prepare_install` (hidden); it waits for VersoloPDF
 /// to close.
 pub fn run_install(script: &Path) -> Result<()> {
     let mut cmd = Command::new("cmd.exe");
@@ -502,14 +502,14 @@ mod tests {
     #[test]
     fn release_answer_is_read() {
         let json = r#"{
-            "tag_name": "v0.2.0", "html_url": "https://github.com/MrMarkus42/MrPDF/releases/tag/v0.2.0",
+            "tag_name": "v0.2.0", "html_url": "https://github.com/MrMarkus42/VersoloPDF/releases/tag/v0.2.0",
             "body": "Neu: \u00c4nderungen \ud83d\ude00\nZeile 2", "draft": false, "id": 12,
             "assets": [
-              {"name": "MrPDF-0.2.0-windows-x64.zip", "size": 12345,
-               "browser_download_url": "https://github.com/MrMarkus42/MrPDF/releases/download/v0.2.0/MrPDF-0.2.0-windows-x64.zip",
+              {"name": "VersoloPDF-0.2.0-windows-x64.zip", "size": 12345,
+               "browser_download_url": "https://github.com/MrMarkus42/VersoloPDF/releases/download/v0.2.0/VersoloPDF-0.2.0-windows-x64.zip",
                "digest": "sha256:ABCDEF0123456789abcdef0123456789abcdef0123456789abcdef0123456789"},
-              {"name": "MrPDF-0.2.0-windows-x64.zip.sha256", "size": 99,
-               "browser_download_url": "https://github.com/MrMarkus42/MrPDF/releases/download/v0.2.0/MrPDF-0.2.0-windows-x64.zip.sha256",
+              {"name": "VersoloPDF-0.2.0-windows-x64.zip.sha256", "size": 99,
+               "browser_download_url": "https://github.com/MrMarkus42/VersoloPDF/releases/download/v0.2.0/VersoloPDF-0.2.0-windows-x64.zip.sha256",
                "digest": null},
               {"name": "evil-windows-x64.zip", "size": 1,
                "browser_download_url": "https://example.org/evil-windows-x64.zip"}
@@ -524,7 +524,7 @@ mod tests {
             w.sha256.as_deref(),
             Some("abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789")
         );
-        assert!(w.url.starts_with("https://github.com/MrMarkus42/MrPDF/releases/download/"));
+        assert!(w.url.starts_with("https://github.com/MrMarkus42/VersoloPDF/releases/download/"));
         assert!(r.windows_sha.is_some());
         assert!(parse_release("{\"message\": \"Not Found\"}").is_err());
         assert!(parse_release("{\"tag_name\": ").is_err());
@@ -534,13 +534,13 @@ mod tests {
     #[test]
     fn install_script_waits_and_copies() {
         let s = install_script(
-            Path::new(r"C:\T\files\MrPDF"),
-            Path::new(r"C:\Programme\MrPDF"),
+            Path::new(r"C:\T\files\VersoloPDF"),
+            Path::new(r"C:\Programme\VersoloPDF"),
             4711,
             &["--opengl".into()],
         );
         assert!(s.contains("PID eq 4711"));
-        assert!(s.contains(r#"robocopy "C:\T\files\MrPDF" "C:\Programme\MrPDF" /E"#));
-        assert!(s.contains(r#"start "" "C:\Programme\MrPDF\MrPDF.exe" "--opengl""#));
+        assert!(s.contains(r#"robocopy "C:\T\files\VersoloPDF" "C:\Programme\VersoloPDF" /E"#));
+        assert!(s.contains(r#"start "" "C:\Programme\VersoloPDF\VersoloPDF.exe" "--opengl""#));
     }
 }
