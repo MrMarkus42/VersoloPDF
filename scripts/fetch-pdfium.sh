@@ -7,14 +7,16 @@
 #        (default: linux-x64 win-x64 mac-x64 mac-arm64)
 set -euo pipefail
 
-RELEASE="chromium/7881"
+# Keep this current (security fixes in the PDF parser): the newest release
+# that is at least 14 days old. Checksums from the GitHub release digests.
+RELEASE="chromium/8111"
 declare -A SHA256=(
-  [linux-x64]=1470e21b8b4a3b4ad7f85684e2da11d94f3b69a86d81dee11b9b6709d927ac1d
-  [linux-arm64]=ee7f7b7d5468958336a818c1cd580bdd20972846b7377b13f9a923d92d1d4674
-  [win-x64]=73cc0de638ac2095e7445bf56a38200a5b7c7ca0e9f4ba144598f2457377ac08
-  [win-arm64]=d3035d4d2cacac6ecd1a2ece197a3d702a1b2a58466276b9f870b8cb278a9d84
-  [mac-arm64]=52e94ca5aa8847934330daf3f8150c190682c5ca93831468794f8b90d4392e40
-  [mac-x64]=6dedf83990e0e3d6b7c93c9e7589c5a126b0ae14b7464d76120cff7a26afb18b
+  [linux-x64]=bdc60126399f39fe768566a18d4be055a7b3681bc9e248e8a6656b4f6cae0aa2
+  [linux-arm64]=042de247138f96341534cccf24ed21c2550a7245b936bb4a60d2340120000f05
+  [win-x64]=3452d11031050ec65e57f180215b57b9e6d465e3fbedafa8a77ad90885c7d23e
+  [win-arm64]=99ec8b76d5ac30602a8488da745397393ff6cddc824ef36f398146f6b4f76d4e
+  [mac-arm64]=46c674298c60123f1195c2a03c65ee08c4783c84874ce4f5b3a054abb3ecaf30
+  [mac-x64]=e7fece4693f65a7e47f84fa38099068d573d4dcbd46b1a3c8d2c26581c308466
 )
 
 cd "$(dirname "$0")/.."

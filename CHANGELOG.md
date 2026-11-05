@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.1.1 – 2026-11-05
+
+Security and maintenance update:
+
+* PDFium (the PDF engine) updated from chromium/7881 (June 2026) to
+  chromium/8111 (October 2026) with the security fixes of these months
+* lopdf (reads and writes the PDF structure) updated to 0.46
+* About 60 further libraries updated to their newest versions that are at
+  least 14 days old; all licences checked again
+* The release checklist now always includes checking PDFium and all
+  libraries for newer versions
+
 ## 1.1.0 – 2026-11-05
 
 * **New name: VersoloPDF** (formerly MrPDF). Settings, digital IDs, recovery

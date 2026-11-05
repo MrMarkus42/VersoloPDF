@@ -1,6 +1,6 @@
 [package]
 name = "versolopdf"
-version = "1.1.0"
+version = "1.1.1"
 edition = "2024"
 rust-version = "1.88"
 description = "VersoloPDF - a free, open-source PDF viewer and editor"
@@ -23,8 +23,10 @@ path = "src/main.rs"
 [dependencies]
 eframe = { version = "=0.36.2", default-features = false, features = ["accesskit", "default_fonts", "glow", "links", "persistence", "wayland", "wgpu", "x11"] }
 egui = "=0.36.2"
+# "pdfium_7881": the API level of the bindings; newer PDFium builds
+# (scripts/fetch-pdfium.sh) keep this API.
 pdfium-render = { version = "=0.9.4", default-features = false, features = ["image_025", "pdfium_7881", "thread_safe"] }
-lopdf = { version = "=0.45.0", default-features = false }
+lopdf = { version = "=0.46.0", default-features = false }
 rfd = "=0.17.2"
 aes = "0.9"
 cbc = "0.2"

@@ -22,6 +22,15 @@ ALLOWED = {
 TOKEN = re.compile(r"\(|\)|AND|OR|WITH\s+\S+|[A-Za-z0-9.+\-]+")
 
 
+def pdfium_release() -> str:
+    """The PDFium release named in scripts/fetch-pdfium.sh."""
+    from pathlib import Path
+
+    text = (Path(__file__).parent / "fetch-pdfium.sh").read_text(encoding="utf-8")
+    m = re.search(r'^RELEASE="([^"]+)"', text, re.M)
+    return m.group(1) if m else "unknown"
+
+
 def satisfiable(expr: str) -> bool:
     """Evaluates an SPDX expression (also the legacy `A/B` form)."""
     expr = expr.replace("/", " OR ")
@@ -117,7 +126,7 @@ def main():
             f.write("## PDFium\n\n")
             f.write(
                 "PDF rendering engine by Google and the PDFium authors, prebuilt by\n"
-                "https://github.com/bblanchon/pdfium-binaries (release chromium/7881).\n"
+                f"https://github.com/bblanchon/pdfium-binaries (release {pdfium_release()}).\n"
                 "Licence: BSD-3-Clause and Apache-2.0; bundled third-party code\n"
                 "(FreeType, libjpeg-turbo, OpenJPEG, LittleCMS, zlib, libpng, libtiff, ICU,\n"
                 "Abseil, AGG 2.3, fast_float, simdutf, LLVM libc) under their respective\n"
