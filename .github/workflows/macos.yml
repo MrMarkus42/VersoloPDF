@@ -46,13 +46,15 @@ jobs:
         run: |
           app="$(ls -d dist/VersoloPDF-*-macos/VersoloPDF.app)"
           file "$app/Contents/MacOS/VersoloPDF" "$app/Contents/Frameworks/libpdfium.dylib"
-          # The app must start and keep running (window, PDFium loaded).
-          "$app/Contents/MacOS/VersoloPDF" &
+          # The app must start with a PDF and keep running (window, PDFium loaded).
+          printf '%%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj\ntrailer<</Root 1 0 R>>\n%%%%EOF\n' > "$RUNNER_TEMP/start.pdf"
+          "$app/Contents/MacOS/VersoloPDF" "$RUNNER_TEMP/start.pdf" &
           pid=$!
           sleep 15
           kill -0 "$pid"
           kill "$pid"
-          grep -h "PDFium" ~/Library/Application\ Support/VersoloPDF/*.log | tail -3 || true
+          grep -h "gestartet\|PDFium" ~/Library/Application\ Support/VersoloPDF/logs/*.log | tail -4
+          grep -q "loaded PDFium from .*VersoloPDF.app/Contents/Frameworks" ~/Library/Application\ Support/VersoloPDF/logs/*.log
 
       - uses: actions/upload-artifact@v4
         with:
