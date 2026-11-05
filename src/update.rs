@@ -5,8 +5,10 @@
 //! (VersoloPDF has no own network or TLS library). The release package is only
 //! taken from this project's GitHub releases, must match its SHA-256
 //! checksum and is unpacked with the `tar` program that is part of Windows.
-//! A small batch file copies the new files over the program folder after
-//! VersoloPDF has closed and starts the new version.
+//! The new program then copies itself into the program folder
+//! (`--install-update`, with administrator rights when the folder is
+//! write-protected); the running files are renamed to "….old" first, which
+//! Windows allows. Afterwards the new version is started.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -418,10 +420,9 @@ pub fn folder_writable(dir: &Path) -> bool {
     ok
 }
 
-/// Unpacks the package and writes the batch file that replaces the program
-/// in `target` once the process `pid` has ended, then starts it with `args`.
-/// Returns the batch file. Windows only.
-pub fn prepare_install(zip: &Path, target: &Path, pid: u32, args: &[String]) -> Result<PathBuf> {
+/// Unpacks the package; returns the folder with the new `VersoloPDF.exe`.
+/// Windows only (uses the `tar.exe` of Windows).
+pub fn unpack(zip: &Path) -> Result<PathBuf> {
     let work = zip.parent().ok_or_else(|| Error::Invalid("no folder".into()))?.join("files");
     std::fs::remove_dir_all(&work).ok();
     std::fs::create_dir_all(&work).map_err(|e| Error::io(&work, e))?;
@@ -438,48 +439,220 @@ pub fn prepare_install(zip: &Path, target: &Path, pid: u32, args: &[String]) -> 
     if !output.status.success() {
         return Err(curl_error(&output));
     }
-    let source = program_folder(&work, 2)
-        .ok_or_else(|| Error::Invalid("VersoloPDF.exe not found in the package".into()))?;
-    let script = zip.with_file_name("install-update.cmd");
-    std::fs::write(&script, install_script(&source, target, pid, args)).map_err(|e| Error::io(&script, e))?;
-    Ok(script)
+    program_folder(&work, 2).ok_or_else(|| Error::Invalid("VersoloPDF.exe not found in the package".into()))
 }
 
-/// Text of the batch file (see `prepare_install`).
-fn install_script(source: &Path, target: &Path, pid: u32, args: &[String]) -> String {
-    let q = |p: &Path| p.display().to_string().replace('"', "");
-    let args: Vec<String> = args.iter().map(|a| format!("\"{}\"", a.replace('"', ""))).collect();
-    format!(
-        "@echo off\r\n\
-         chcp 65001 >nul\r\n\
-         rem VersoloPDF update: waits for VersoloPDF to close, copies the new files, starts it again.\r\n\
-         :wait\r\n\
-         tasklist /FI \"PID eq {pid}\" 2>nul | find \"{pid}\" >nul\r\n\
-         if not errorlevel 1 (\r\n\
-         \x20 timeout /t 1 /nobreak >nul\r\n\
-         \x20 goto wait\r\n\
-         )\r\n\
-         robocopy \"{src}\" \"{dst}\" /E /R:5 /W:1 /NFL /NDL /NJH /NJS /NP >nul\r\n\
-         start \"\" \"{dst}\\VersoloPDF.exe\" {args}\r\n",
-        src = q(source),
-        dst = q(target),
-        args = args.join(" "),
-    )
-}
+/// Argument with which the new program copies itself into a folder.
+pub const INSTALL_ARG: &str = "--install-update";
+/// Argument with which the new version waits until the old one has closed
+/// (followed by its process id).
+pub const WAIT_ARG: &str = "--after-update";
 
-/// Starts the batch file of `prepare_install` (hidden); it waits for VersoloPDF
-/// to close.
-pub fn run_install(script: &Path) -> Result<()> {
-    let mut cmd = Command::new("cmd.exe");
-    cmd.arg("/C").arg(script);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        const DETACHED_PROCESS: u32 = 0x0000_0008;
-        cmd.creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS);
+/// Waits until the process `pid` has ended, at most `seconds`. Returns
+/// false if it still runs.
+#[cfg(windows)]
+#[allow(unsafe_code)]
+pub fn wait_for_exit(pid: u32, seconds: u32) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
+    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject};
+    // SAFETY: plain calls; the handle is checked and closed once.
+    unsafe {
+        let handle = OpenProcess(PROCESS_SYNCHRONIZE, 0, pid);
+        if handle.is_null() {
+            return true; // already gone
+        }
+        let done = WaitForSingleObject(handle, seconds.saturating_mul(1000)) == WAIT_OBJECT_0;
+        CloseHandle(handle);
+        done
     }
-    cmd.spawn().map(drop).map_err(|e| Error::Invalid(format!("cmd: {e}")))
+}
+
+#[cfg(not(windows))]
+pub fn wait_for_exit(pid: u32, seconds: u32) -> bool {
+    let proc = PathBuf::from(format!("/proc/{pid}"));
+    for _ in 0..seconds * 10 {
+        if !proc.exists() {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    !proc.exists()
+}
+/// Ending of files replaced by an update (removed by the next update).
+const OLD: &str = "old";
+
+/// All files below `dir` (relative paths), at most a few folders deep.
+fn files_below(dir: &Path, rel: &Path, depth: usize, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(dir.join(rel))? {
+        let entry = entry?;
+        let path = rel.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            if depth > 0 {
+                files_below(dir, &path, depth - 1, out)?;
+            }
+        } else {
+            out.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn with_old_ending(path: &Path) -> PathBuf {
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(".");
+    name.push(OLD);
+    path.with_file_name(name)
+}
+
+/// Copies the program files of `source` into `target`. Files that exist
+/// are first renamed to "….old": Windows allows that even for the running
+/// program and its libraries, so the old version may still run. If
+/// anything fails, the old files are put back. Returns the number of files.
+pub fn install_files(source: &Path, target: &Path) -> Result<usize> {
+    if !source.join("VersoloPDF.exe").is_file() && !source.join("versolopdf").is_file() {
+        return Err(Error::Invalid("no program in the source folder".into()));
+    }
+    let mut files = Vec::new();
+    files_below(source, Path::new(""), 4, &mut files).map_err(|e| Error::io(source, e))?;
+    let mut moved: Vec<(PathBuf, PathBuf)> = Vec::new();
+    let mut created: Vec<PathBuf> = Vec::new();
+    let result = (|| -> Result<()> {
+        for rel in &files {
+            let (src, dest) = (source.join(rel), target.join(rel));
+            if let Some(parent) = dest.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| Error::io(parent, e))?;
+            }
+            if dest.exists() {
+                let old = with_old_ending(&dest);
+                std::fs::remove_file(&old).ok();
+                std::fs::rename(&dest, &old).map_err(|e| Error::io(&dest, e))?;
+                moved.push((dest.clone(), old));
+            }
+            std::fs::copy(&src, &dest).map_err(|e| Error::io(&dest, e))?;
+            created.push(dest);
+        }
+        Ok(())
+    })();
+    if let Err(err) = result {
+        // Back to the old version.
+        for f in &created {
+            std::fs::remove_file(f).ok();
+        }
+        for (dest, old) in moved.iter().rev() {
+            std::fs::rename(old, dest).ok();
+        }
+        return Err(err);
+    }
+    // Only the files renamed here are removed later (never other ".old" files).
+    let list: String = moved
+        .iter()
+        .filter_map(|(_, old)| old.strip_prefix(target).ok())
+        .map(|rel| format!("{}\n", rel.display()))
+        .collect();
+    let list_path = target.join(LEFTOVER_LIST);
+    let mut all = std::fs::read_to_string(&list_path).unwrap_or_default();
+    all.push_str(&list);
+    std::fs::write(&list_path, all).map_err(|e| Error::io(&list_path, e))?;
+    Ok(files.len())
+}
+
+/// List of the "….old" files an update left behind.
+const LEFTOVER_LIST: &str = "update-old-files.txt";
+
+/// Removes the "….old" files of an earlier update in `dir` (if allowed).
+pub fn remove_leftovers(dir: &Path) {
+    let list_path = dir.join(LEFTOVER_LIST);
+    let Ok(list) = std::fs::read_to_string(&list_path) else { return };
+    let mut left = String::new();
+    for rel in list.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        let path = dir.join(rel);
+        // Only "….old" files inside the program folder.
+        let safe = !rel.contains("..") && path.extension().is_some_and(|e| e == OLD);
+        if safe && path.exists() && std::fs::remove_file(&path).is_err() {
+            left.push_str(rel);
+            left.push('\n');
+        }
+    }
+    if left.is_empty() {
+        std::fs::remove_file(&list_path).ok();
+    } else {
+        std::fs::write(&list_path, left).ok();
+    }
+}
+
+/// Lets the new program (`new_exe`) copy itself into `target` and waits
+/// until it is done. A write-protected folder (e.g. under "Programme")
+/// makes Windows ask for administrator rights first.
+pub fn run_installer(new_exe: &Path, target: &Path) -> Result<()> {
+    if crate::mail::no_external() {
+        return Err(Error::Invalid("Testbetrieb: keine Installation".into()));
+    }
+    let code = if folder_writable(target) {
+        let mut cmd = Command::new(new_exe);
+        cmd.arg(INSTALL_ARG).arg(target);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_0000);
+        }
+        cmd.status().map_err(|e| Error::Invalid(format!("{}: {e}", new_exe.display())))?.code().unwrap_or(1)
+            as u32
+    } else {
+        elevated(new_exe, target)?
+    };
+    if code == 0 {
+        Ok(())
+    } else {
+        Err(Error::Invalid(
+            "Die neuen Dateien konnten nicht kopiert werden (Details im Fehlerprotokoll).".into(),
+        ))
+    }
+}
+
+/// Runs the installer with administrator rights (Windows asks the user).
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn elevated(new_exe: &Path, target: &Path) -> Result<u32> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{GetExitCodeProcess, INFINITE, WaitForSingleObject};
+    use windows_sys::Win32::UI::Shell::{SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW};
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE;
+    let wide = |s: &std::ffi::OsStr| s.encode_wide().chain(std::iter::once(0)).collect::<Vec<u16>>();
+    let verb = wide(std::ffi::OsStr::new("runas"));
+    let file = wide(new_exe.as_os_str());
+    let params = wide(std::ffi::OsStr::new(&format!("{INSTALL_ARG} \"{}\"", target.display())));
+    // SAFETY: plain C struct, all fields may be zero.
+    let mut info: SHELLEXECUTEINFOW = unsafe { std::mem::zeroed() };
+    info.cbSize = std::mem::size_of::<SHELLEXECUTEINFOW>() as u32;
+    info.fMask = SEE_MASK_NOCLOSEPROCESS;
+    info.lpVerb = verb.as_ptr();
+    info.lpFile = file.as_ptr();
+    info.lpParameters = params.as_ptr();
+    info.nShow = SW_HIDE;
+    // SAFETY: `info` and the strings it points to live until the call returns.
+    if unsafe { ShellExecuteExW(&mut info) } == 0 || info.hProcess.is_null() {
+        let err = std::io::Error::last_os_error();
+        // 1223: the user said no to the administrator question.
+        return Err(Error::Invalid(if err.raw_os_error() == Some(1223) {
+            "Die Installation wurde abgebrochen (keine Administratorrechte).".into()
+        } else {
+            format!("Installation nicht gestartet: {err}")
+        }));
+    }
+    let mut code = 1u32;
+    // SAFETY: valid process handle from ShellExecuteExW, closed once.
+    unsafe {
+        WaitForSingleObject(info.hProcess, INFINITE);
+        GetExitCodeProcess(info.hProcess, &mut code);
+        CloseHandle(info.hProcess);
+    }
+    Ok(code)
+}
+
+#[cfg(not(windows))]
+fn elevated(_new_exe: &Path, target: &Path) -> Result<u32> {
+    Err(Error::Invalid(format!("{} ist schreibgeschützt.", target.display())))
 }
 
 #[cfg(test)]
@@ -532,15 +705,33 @@ mod tests {
     }
 
     #[test]
-    fn install_script_waits_and_copies() {
-        let s = install_script(
-            Path::new(r"C:\T\files\VersoloPDF"),
-            Path::new(r"C:\Programme\VersoloPDF"),
-            4711,
-            &["--opengl".into()],
-        );
-        assert!(s.contains("PID eq 4711"));
-        assert!(s.contains(r#"robocopy "C:\T\files\VersoloPDF" "C:\Programme\VersoloPDF" /E"#));
-        assert!(s.contains(r#"start "" "C:\Programme\VersoloPDF\VersoloPDF.exe" "--opengl""#));
+    fn files_are_installed_and_old_ones_kept_aside() {
+        let base = std::env::temp_dir().join(format!("versolopdf-install-{}", std::process::id()));
+        let (src, dst) = (base.join("neu"), base.join("Programme"));
+        std::fs::create_dir_all(src.join("licenses")).unwrap();
+        std::fs::create_dir_all(&dst).unwrap();
+        std::fs::write(src.join("VersoloPDF.exe"), b"neu").unwrap();
+        std::fs::write(src.join("pdfium.dll"), b"neu-dll").unwrap();
+        std::fs::write(src.join("licenses").join("a.txt"), b"lizenz").unwrap();
+        std::fs::write(dst.join("VersoloPDF.exe"), b"alt").unwrap();
+        std::fs::write(dst.join("eigene.txt"), b"bleibt").unwrap();
+        std::fs::write(dst.join("fremd.txt.old"), b"bleibt auch").unwrap();
+        assert_eq!(install_files(&src, &dst).unwrap(), 3);
+        assert_eq!(std::fs::read(dst.join("VersoloPDF.exe")).unwrap(), b"neu");
+        assert_eq!(std::fs::read(dst.join("VersoloPDF.exe.old")).unwrap(), b"alt");
+        assert_eq!(std::fs::read(dst.join("licenses").join("a.txt")).unwrap(), b"lizenz");
+        assert_eq!(std::fs::read(dst.join("eigene.txt")).unwrap(), b"bleibt");
+        // A second update replaces the leftover; the clean-up removes it.
+        std::fs::write(src.join("VersoloPDF.exe"), b"neuer").unwrap();
+        install_files(&src, &dst).unwrap();
+        assert_eq!(std::fs::read(dst.join("VersoloPDF.exe.old")).unwrap(), b"neu");
+        remove_leftovers(&dst);
+        assert!(!dst.join("VersoloPDF.exe.old").exists() && dst.join("VersoloPDF.exe").exists());
+        // Other ".old" files are never touched.
+        assert!(dst.join("fremd.txt.old").exists());
+        assert!(!dst.join(LEFTOVER_LIST).exists());
+        // Without a program in the source nothing happens.
+        assert!(install_files(&dst.join("licenses"), &dst).is_err());
+        std::fs::remove_dir_all(&base).ok();
     }
 }

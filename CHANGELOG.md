@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.2 – 2026-11-05
+
+* Updates install reliably: the new version copies itself into the program
+  folder (no console windows any more); a protected folder such as
+  "C:\Programme" makes Windows ask for administrator rights once. Files of
+  the running version are put aside and removed by the next start.
+* Help › "Check for updates" opens the update page and starts the search
+  instead of opening the web site
+
 ## 1.1.1 – 2026-11-05
 
 Security and maintenance update:

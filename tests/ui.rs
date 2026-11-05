@@ -2931,6 +2931,13 @@ fn layers_barcode_certify_and_no_placeholders() {
     h.key_press(egui::Key::Escape);
     h.run_steps(3);
 
+    // Help › "Nach neuer Version suchen" opens the update page (no web page).
+    run(&mut h, Cmd::CheckUpdate);
+    assert!(matches!(h.state().dialog(), Some(Dialog::Settings(_))), "settings opened");
+    assert!(h.query_by_label_contains("Installierte Version:").is_some(), "update page shown");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+
     // "Vorlesen" works in the Accessibility tab too.
     tab(&mut h, "Barrierefreiheit");
     assert!(h.query_all_by_label("Vorlesen").next().is_some());

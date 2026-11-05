@@ -27,10 +27,18 @@ pub enum UpdateState {
     NoRelease,
     Failed(String),
     Available(Release),
-    /// Downloading, checking and unpacking; the result is the batch file.
+    /// Downloading, checking and unpacking; the result is the folder of the
+    /// new program.
     Downloading(Release, Receiver<crate::Result<PathBuf>>),
-    /// Ready to install: the batch file and the new version.
+    /// Ready to install: the folder of the new program and its version.
     Ready(PathBuf, String),
+    /// The new program copies itself into the program folder.
+    Installing(Receiver<crate::Result<()>>),
+}
+
+/// The folder of the running program.
+fn program_dir() -> Option<PathBuf> {
+    std::env::current_exe().ok().and_then(|e| e.parent().map(PathBuf::from))
 }
 
 /// Seconds since 1970.
@@ -120,10 +128,45 @@ impl VersoloPdfApp {
                     Err(TryRecvError::Disconnected) => self.update = UpdateState::Idle,
                 }
             }
+            UpdateState::Installing(rx) => match rx.try_recv() {
+                Ok(Ok(())) => {
+                    // The new version starts as its own window, this one closes
+                    // (asking about unsaved changes first).
+                    let exe = program_dir().map(|d| d.join("VersoloPDF.exe"));
+                    let started = exe.as_ref().is_some_and(|exe| {
+                        std::process::Command::new(exe)
+                            .arg(update::WAIT_ARG)
+                            .arg(std::process::id().to_string())
+                            .args(restart_args())
+                            .spawn()
+                            .is_ok()
+                    });
+                    if started {
+                        log::info!("Neue Version installiert, wird gestartet");
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        self.update = UpdateState::Idle;
+                    } else {
+                        self.update = UpdateState::Failed(
+                            tr(
+                                de,
+                                "Die neue Version ist installiert. Bitte VersoloPDF beenden und neu starten.",
+                                "The new version is installed. Please close and start VersoloPDF again.",
+                            )
+                            .into(),
+                        );
+                    }
+                }
+                Ok(Err(err)) => {
+                    log::warn!("Neue Version nicht installiert: {err}");
+                    self.update = UpdateState::Failed(err.to_string());
+                }
+                Err(TryRecvError::Empty) => ctx.request_repaint_after(std::time::Duration::from_millis(300)),
+                Err(TryRecvError::Disconnected) => self.update = UpdateState::Idle,
+            },
             UpdateState::Downloading(release, rx) => match rx.try_recv() {
-                Ok(Ok(script)) => {
+                Ok(Ok(folder)) => {
                     let version = release.version.clone();
-                    self.update = UpdateState::Ready(script, version);
+                    self.update = UpdateState::Ready(folder, version);
                 }
                 Ok(Err(err)) => {
                     log::warn!("Neue Version nicht geladen: {err}");
@@ -142,21 +185,32 @@ impl VersoloPdfApp {
 
     /// Downloads, checks and unpacks the Windows package in the background.
     fn start_update_download(&mut self, ctx: &Context, release: Release) {
-        let Some(target) = std::env::current_exe().ok().and_then(|e| e.parent().map(PathBuf::from)) else {
-            self.update = UpdateState::Failed("program folder unknown".into());
-            return;
-        };
         let (tx, rx) = std::sync::mpsc::channel();
         let repaint = ctx.clone();
         let job = release.clone();
         std::thread::spawn(move || {
             let dir = std::env::temp_dir().join("versolopdf-update").join(&job.version);
-            let result = update::download_package(&job, &dir)
-                .and_then(|zip| update::prepare_install(&zip, &target, std::process::id(), &restart_args()));
+            let result = update::download_package(&job, &dir).and_then(|zip| update::unpack(&zip));
             let _ = tx.send(result);
             repaint.request_repaint();
         });
         self.update = UpdateState::Downloading(release, rx);
+    }
+
+    /// Lets the new program copy itself into the program folder (in the
+    /// background; Windows may ask for administrator rights).
+    fn start_install(&mut self, ctx: &Context, folder: PathBuf) {
+        let Some(target) = program_dir() else {
+            self.update = UpdateState::Failed("program folder unknown".into());
+            return;
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        let repaint = ctx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(update::run_installer(&folder.join("VersoloPDF.exe"), &target));
+            repaint.request_repaint();
+        });
+        self.update = UpdateState::Installing(rx);
     }
 
     /// The page "Neue Version" of the settings.
@@ -194,7 +248,10 @@ impl VersoloPdfApp {
             );
         });
         section(ui, tr(de, "Neue Version", "New version"), |ui| {
-            let busy = matches!(self.update, UpdateState::Checking { .. } | UpdateState::Downloading(..));
+            let busy = matches!(
+                self.update,
+                UpdateState::Checking { .. } | UpdateState::Downloading(..) | UpdateState::Installing(_)
+            );
             if ui
                 .add_enabled(
                     !busy,
@@ -289,52 +346,47 @@ impl VersoloPdfApp {
                         ui.label(tr(de, "Wird heruntergeladen und geprüft …", "Downloading and checking …"));
                     });
                 }
-                UpdateState::Ready(script, version) => {
+                UpdateState::Ready(folder, version) => {
                     ui.label(if de {
                         format!("VersoloPDF {version} ist heruntergeladen und geprüft.")
                     } else {
                         format!("VersoloPDF {version} has been downloaded and checked.")
                     });
-                    ui.label(
-                        RichText::new(tr(
-                            de,
-                            "Zum Installieren wird VersoloPDF beendet (ungespeicherte Änderungen werden vorher abgefragt) und danach in der neuen Version wieder gestartet.",
-                            "To install, VersoloPDF closes (asking about unsaved changes first) and starts again in the new version.",
-                        ))
-                        .small()
-                        .weak(),
-                    );
+                    let protected = !program_dir().as_deref().is_some_and(update::folder_writable);
+                    let hint = match (protected, de) {
+                        (true, true) => {
+                            "Der Programmordner ist geschützt: Windows fragt gleich nach Administratorrechten. Danach startet VersoloPDF in der neuen Version neu (ungespeicherte Änderungen werden vorher abgefragt)."
+                        }
+                        (true, false) => {
+                            "The program folder is protected: Windows will ask for administrator rights. Then VersoloPDF starts again in the new version (asking about unsaved changes first)."
+                        }
+                        (false, true) => {
+                            "VersoloPDF startet danach in der neuen Version neu (ungespeicherte Änderungen werden vorher abgefragt)."
+                        }
+                        (false, false) => {
+                            "VersoloPDF then starts again in the new version (asking about unsaved changes first)."
+                        }
+                    };
+                    ui.label(RichText::new(hint).small().weak());
                     if ui
                         .button(tr(de, "Jetzt installieren und neu starten", "Install and restart now"))
                         .clicked()
                     {
-                        install = Some(script.clone());
+                        install = Some(folder.clone());
                     }
+                }
+                UpdateState::Installing(_) => {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(tr(de, "Wird installiert …", "Installing …"));
+                    });
                 }
             }
             if let Some(release) = download {
-                let folder = std::env::current_exe().ok().and_then(|e| e.parent().map(PathBuf::from));
-                if folder.as_deref().is_some_and(update::folder_writable) {
-                    self.start_update_download(&ctx, release);
-                } else {
-                    self.update = UpdateState::Failed(
-                        tr(
-                            de,
-                            "Der Programmordner ist schreibgeschützt. Bitte das Paket über „Seite auf GitHub öffnen“ laden und von Hand entpacken.",
-                            "The program folder is write-protected. Please download the package from the GitHub page and unpack it yourself.",
-                        )
-                        .into(),
-                    );
-                }
+                self.start_update_download(&ctx, release);
             }
-            if let Some(script) = install {
-                match update::run_install(&script) {
-                    Ok(()) => {
-                        // The settings dialog closes with the program.
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                    }
-                    Err(err) => self.update = UpdateState::Failed(err.to_string()),
-                }
+            if let Some(folder) = install {
+                self.start_install(&ctx, folder);
             }
         });
     }

@@ -1488,7 +1488,11 @@ impl VersoloPdfApp {
             Homepage | Support => ctx.open_url(egui::OpenUrl::new_tab(HOMEPAGE)),
             ReportProblem => ctx.open_url(egui::OpenUrl::new_tab(format!("{HOMEPAGE}/issues"))),
             OpenLog => self.open_log(),
-            CheckUpdate => ctx.open_url(egui::OpenUrl::new_tab(format!("{HOMEPAGE}/releases"))),
+            // The update page of the settings, with a search started at once.
+            CheckUpdate => {
+                self.open_settings_at(super::settings_dialog::Cat::Update);
+                self.start_update_check(ctx, true);
+            }
             other => self.run_feature(ctx, other),
         }
     }
