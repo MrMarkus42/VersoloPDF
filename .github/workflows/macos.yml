@@ -54,7 +54,7 @@ jobs:
           kill -0 "$pid"
           kill "$pid"
           grep -h "gestartet\|PDFium" ~/Library/Application\ Support/VersoloPDF/logs/*.log | tail -4
-          grep -q "loaded PDFium from .*VersoloPDF.app/Contents/Frameworks" ~/Library/Application\ Support/VersoloPDF/logs/*.log
+          grep -q "loaded PDFium from .*VersoloPDF.app/Contents/.*Frameworks/libpdfium.dylib" ~/Library/Application\ Support/VersoloPDF/logs/*.log
 
       - uses: actions/upload-artifact@v4
         with:
