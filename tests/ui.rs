@@ -2066,6 +2066,8 @@ fn file_operations_and_recovery() {
     h.run_steps(4);
     let renamed = dir.path().join("Umbenannt.pdf");
     assert!(renamed.exists() && !file.exists());
+    // (resolved: on macOS the temp folder /var is a link to /private/var)
+    let renamed = versolopdf::files::canonical_path(&renamed);
     assert_eq!(h.state().active_tab().unwrap().doc.path(), Some(renamed.as_path()));
     assert_eq!(h.state().active_tab().unwrap().doc.display_name(), "Umbenannt.pdf");
     // Zurücksetzen discards a change after a confirmation.
@@ -2584,7 +2586,7 @@ fn transitions_tab_windows_and_portfolio() {
     h.run_steps(2);
     run(&mut h, Cmd::View(V::MoveTabNewWindow));
     assert_eq!(h.state().tab_count(), 1);
-    assert_eq!(h.state().spawned_windows(), &[vec![other.clone()]]);
+    assert_eq!(h.state().spawned_windows(), &[vec![versolopdf::files::canonical_path(&other)]]);
     let ctx = h.ctx.clone();
     h.state_mut().open_path(&ctx, other.clone(), None);
     h.run_steps(6);
@@ -2694,7 +2696,8 @@ fn sign_and_check_document() {
     assert!(sigs[0].valid() && sigs[0].whole_file, "{sigs:?}");
     assert_eq!(sigs[0].signer, "Erika Test");
     assert_eq!(h.state().tab_count(), 2);
-    assert_eq!(h.state().active_tab().unwrap().doc.path(), Some(out.as_path()));
+    let out_resolved = versolopdf::files::canonical_path(&out);
+    assert_eq!(h.state().active_tab().unwrap().doc.path(), Some(out_resolved.as_path()));
     assert_eq!(h.state().status_text(), Some("Dokument signiert und gespeichert"));
     save(&mut h, "96-signed");
     // "Signaturen überprüfen".
