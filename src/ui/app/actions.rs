@@ -108,7 +108,7 @@ impl MrPdfApp {
         for (i, (german, english, exts)) in types.iter().enumerate() {
             dialog = dialog.add_filter(if de { *german } else { *english }, exts);
             if i == 0 {
-                // As: "PDF-Dokument" first, then all types.
+                // "PDF-Dokument" first, then all types.
                 let label = if de { "Alle unterstützten Dateitypen" } else { "All supported file types" };
                 dialog = dialog.add_filter(label, &all);
             }

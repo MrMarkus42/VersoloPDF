@@ -2,3 +2,14 @@
 /vendor/
 /dist/
 *.mrpdf-tmp
+# Private working notes, not part of the repository.
+/docs/ANMERKUNGEN.md
+/docs/ANSICHT.md
+/docs/DATEI.md
+/docs/DOKUMENTAUFBAU.md
+/docs/FORMULAR.md
+/docs/INHALT_BEARBEITEN.md
+/docs/LESEZEICHEN.md
+/docs/RIBBON.md
+/docs/UEBERPRUEFEN.md
+/docs/UMWANDELN.md
