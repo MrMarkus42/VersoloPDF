@@ -1,6 +1,6 @@
 # Third-party software
 
-MrPDF uses the following components. Their licence texts are
+VersoloPDF uses the following components. Their licence texts are
 included in their source distributions (crates.io) and, for
 PDFium, in the `licenses/` folder shipped next to the program.
 
