@@ -12,7 +12,7 @@ mod common;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use versolopdf::sign::cert::{self, NewId};
+use versolopdf::sign::cert;
 use versolopdf::sign::id::DigitalId;
 use versolopdf::sign::pdf::{self, Place, SignOptions};
 
@@ -79,24 +79,36 @@ fn add_keychain(path: &Path) -> SearchList {
 #[ignore = "changes the keychain search list for a moment; run with --ignored (CI)"]
 fn keychain_id_signs_a_pdf() {
     let dir = tempfile::tempdir().unwrap();
-    let id = DigitalId::create(&NewId { name: "Schlüsselbund Test", email: "", organisation: "", years: 1 })
-        .unwrap();
-    let pfx = dir.path().join("id.p12");
-    std::fs::write(&pfx, id.to_pfx("p12-test").unwrap()).unwrap();
+    // An RSA ID made by the openssl of macOS (LibreSSL): its .p12 uses the
+    // old algorithms the keychain import understands.
+    let path = |name: &str| dir.path().join(name).to_str().unwrap().to_string();
+    let (key, pem, der_path, pfx) = (path("key.pem"), path("cert.pem"), path("cert.der"), path("id.p12"));
+    let openssl = "/usr/bin/openssl";
+    let subject = ["-subj", "/CN=Schluesselbund Test", "-days", "30"];
+    let mut req = vec!["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", &key, "-out", &pem];
+    req.extend(subject);
+    run(openssl, &req);
+    run(
+        openssl,
+        &["pkcs12", "-export", "-inkey", &key, "-in", &pem, "-out", &pfx, "-passout", "pass:p12-test"],
+    );
+    run(openssl, &["x509", "-in", &pem, "-outform", "DER", "-out", &der_path]);
+    let cert_der = std::fs::read(&der_path).unwrap();
     let keychain = dir.path().join("versolo-test.keychain-db");
     let _list = add_keychain(&keychain);
     let kc = keychain.to_str().unwrap();
     // -A: every program may use the key without asking (only in this test keychain).
-    run("security", &["import", pfx.to_str().unwrap(), "-k", kc, "-P", "p12-test", "-A"]);
+    run("security", &["import", &pfx, "-k", kc, "-P", "p12-test", "-A"]);
     run(
         "security",
         &["set-key-partition-list", "-S", "apple-tool:,apple:,unsigned:", "-s", "-k", "versolo-test", kc],
     );
 
     let ids = versolopdf::sign::id::system_ids();
-    let (name, der) = ids.iter().find(|(_, der)| *der == id.cert.der).expect("the ID is listed");
-    assert!(name.contains("Schlüsselbund Test"), "{name}");
+    let (name, der) = ids.iter().find(|(_, der)| *der == cert_der).expect("the ID is listed");
+    assert!(name.contains("Schluesselbund Test"), "{name}");
     let system = DigitalId::from_system(der).unwrap();
+    assert!(matches!(system.key, cert::Key::System { rsa: true, .. }));
 
     // The keychain signs; the signature fits the certificate.
     let digest = cert::digest(cert::SHA256, &[b"VersoloPDF"]).unwrap();
