@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="de" data-lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MrPDF – der freie PDF-Editor</title>
+<meta name="description" content="MrPDF: freier, quelloffener PDF-Editor mit vertrautem Menüband. Ansehen, kommentieren, ausfüllen, signieren, organisieren – ohne Konto, ohne Cloud.">
+<meta property="og:title" content="MrPDF – der freie PDF-Editor">
+<meta property="og:description" content="Ansehen, kommentieren, ausfüllen, signieren und organisieren – quelloffen, ohne Konto, ohne Cloud.">
+<meta property="og:image" content="https://mrmarkus42.github.io/MrPDF/img/hero.png">
+<link rel="icon" type="image/png" href="img/logo.png">
+<style>
+:root {
+  --brand: #d32f2f;
+  --brand-dark: #a31b1b;
+  --teal: #0e7490;
+  --ink: #16202b;
+  --text: #33404d;
+  --muted: #64717e;
+  --line: #e3e8ee;
+  --bg: #ffffff;
+  --soft: #f5f8fa;
+  --card: #ffffff;
+  --hero-a: #10202e;
+  --hero-b: #173247;
+  --shadow: 0 18px 50px rgba(16, 32, 46, .18);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #eef3f7;
+    --text: #c9d3dc;
+    --muted: #93a1ae;
+    --line: #26323d;
+    --bg: #0f171e;
+    --soft: #141f28;
+    --card: #17232d;
+    --shadow: 0 18px 50px rgba(0, 0, 0, .45);
+  }
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 17px/1.6 "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+html[data-lang="de"] [lang="en"], html[data-lang="en"] [lang="de"] { display: none !important; }
+a { color: var(--teal); }
+img { max-width: 100%; display: block; }
+.wrap { max-width: 1160px; margin: 0 auto; padding: 0 24px; }
+
+/* Navigation */
+nav { position: sticky; top: 0; z-index: 10; background: rgba(16, 32, 46, .92); backdrop-filter: blur(8px); }
+nav .wrap { display: flex; align-items: center; gap: 22px; height: 60px; }
+nav .logo { display: flex; align-items: center; gap: 10px; color: #fff; font-weight: 700; font-size: 19px; text-decoration: none; }
+nav .logo img { width: 30px; height: 30px; }
+nav .links { display: flex; gap: 20px; margin-left: auto; align-items: center; }
+nav .links a { color: #d6e2ec; text-decoration: none; font-size: 15px; }
+nav .links a:hover { color: #fff; }
+.lang { background: none; border: 1px solid #4b6478; color: #d6e2ec; border-radius: 6px; padding: 3px 10px; font: inherit; font-size: 14px; cursor: pointer; }
+.lang:hover { border-color: #fff; color: #fff; }
+@media (max-width: 760px) { nav .links a.opt { display: none; } }
+
+/* Hero */
+.hero { background: radial-gradient(1200px 500px at 70% -10%, #23506d 0%, transparent 60%), linear-gradient(160deg, var(--hero-a), var(--hero-b)); color: #fff; padding: 72px 0 0; overflow: hidden; }
+.hero h1 { font-size: clamp(38px, 6vw, 64px); line-height: 1.05; margin: 0 0 18px; letter-spacing: -.02em; color: #fff; }
+.hero h1 em { color: #ff8a80; font-style: normal; }
+.hero p.lead { font-size: clamp(18px, 2.2vw, 22px); color: #c8d7e3; max-width: 720px; margin: 0 0 30px; }
+.buttons { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.btn { display: inline-flex; align-items: center; gap: 10px; padding: 14px 24px; border-radius: 10px; font-weight: 650; text-decoration: none; font-size: 17px; transition: transform .15s, background .15s; }
+.btn:hover { transform: translateY(-1px); }
+.btn.primary { background: var(--brand); color: #fff; box-shadow: 0 8px 24px rgba(211, 47, 47, .35); }
+.btn.primary:hover { background: var(--brand-dark); }
+.btn.ghost { color: #fff; border: 1px solid #50687c; }
+.btn.ghost:hover { border-color: #fff; }
+.btn svg { width: 20px; height: 20px; }
+.hero .note { color: #9fb3c3; font-size: 14px; margin-top: 14px; }
+.shot { margin: 56px auto 0; max-width: 1080px; border-radius: 12px 12px 0 0; overflow: hidden; box-shadow: var(--shadow); border: 1px solid rgba(255,255,255,.12); border-bottom: 0; }
+.shot .bar { height: 30px; background: #e9eef2; display: flex; gap: 7px; align-items: center; padding: 0 12px; }
+.shot .bar i { width: 11px; height: 11px; border-radius: 50%; background: #c7d0d8; display: block; }
+
+/* Sections */
+section { padding: 88px 0; }
+section.soft { background: var(--soft); }
+h2 { font-size: clamp(28px, 4vw, 40px); line-height: 1.15; margin: 0 0 14px; color: var(--ink); letter-spacing: -.01em; }
+.sub { color: var(--muted); font-size: 19px; max-width: 760px; margin: 0 0 44px; }
+.center { text-align: center; }
+.center .sub { margin-left: auto; margin-right: auto; }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 20px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 24px; }
+.card h3 { margin: 12px 0 6px; font-size: 19px; color: var(--ink); }
+.card p { margin: 0; font-size: 15.5px; color: var(--muted); }
+.icon { width: 44px; height: 44px; border-radius: 11px; display: grid; place-items: center; background: rgba(14, 116, 144, .12); color: var(--teal); }
+.icon.red { background: rgba(211, 47, 47, .12); color: var(--brand); }
+.icon svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+.feature { display: grid; grid-template-columns: 1fr 1.35fr; gap: 56px; align-items: center; margin-bottom: 96px; }
+.feature:last-child { margin-bottom: 0; }
+.feature.flip { grid-template-columns: 1.35fr 1fr; }
+.feature.flip .txt { order: 2; }
+.feature .pic { border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); border: 1px solid var(--line); }
+.feature h3 { font-size: 28px; line-height: 1.2; margin: 0 0 12px; color: var(--ink); }
+.feature .kicker { color: var(--brand); font-weight: 700; font-size: 14px; letter-spacing: .08em; text-transform: uppercase; }
+.feature ul { padding: 0; margin: 18px 0 0; list-style: none; }
+.feature li { padding-left: 28px; position: relative; margin: 8px 0; }
+.feature li::before { content: ""; position: absolute; left: 4px; top: 9px; width: 12px; height: 7px; border-left: 2.5px solid var(--teal); border-bottom: 2.5px solid var(--teal); transform: rotate(-45deg); }
+@media (max-width: 860px) {
+  .feature, .feature.flip { grid-template-columns: 1fr; gap: 26px; }
+  .feature.flip .txt { order: 0; }
+}
+
+.values { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 28px; }
+.values div h3 { color: var(--ink); margin: 14px 0 6px; font-size: 19px; }
+.values div p { margin: 0; color: var(--muted); font-size: 15.5px; }
+
+.steps { counter-reset: s; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px; margin: 0 0 36px; padding: 0; list-style: none; }
+.steps li { counter-increment: s; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 24px 24px 22px 68px; position: relative; }
+.steps li::before { content: counter(s); position: absolute; left: 22px; top: 22px; width: 32px; height: 32px; border-radius: 50%; background: var(--brand); color: #fff; font-weight: 700; display: grid; place-items: center; }
+.steps b { color: var(--ink); }
+.req { color: var(--muted); font-size: 15px; }
+code { background: var(--soft); border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; font-size: .9em; }
+
+details { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 22px; margin: 0 0 12px; }
+details summary { cursor: pointer; font-weight: 650; color: var(--ink); }
+details p { margin: 10px 0 2px; color: var(--muted); }
+
+.cta { background: linear-gradient(160deg, var(--hero-a), var(--hero-b)); color: #fff; border-radius: 20px; padding: 56px 32px; text-align: center; }
+.cta h2 { color: #fff; }
+.cta p { color: #c8d7e3; margin: 0 0 28px; }
+.cta .buttons { justify-content: center; }
+
+footer { padding: 40px 0; color: var(--muted); font-size: 14px; border-top: 1px solid var(--line); }
+footer .wrap { display: flex; flex-wrap: wrap; gap: 14px 28px; justify-content: space-between; }
+footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="logo" href="#top"><img src="img/logo.png" alt="">MrPDF</a>
+    <div class="links">
+      <a class="opt" href="#funktionen"><span lang="de">Funktionen</span><span lang="en">Features</span></a>
+      <a class="opt" href="#download">Download</a>
+      <a class="opt" href="#fragen"><span lang="de">Fragen</span><span lang="en">FAQ</span></a>
+      <a href="https://github.com/MrMarkus42/MrPDF">GitHub</a>
+      <button class="lang" id="lang" type="button" aria-label="Sprache wechseln / switch language">EN</button>
+    </div>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="wrap">
+    <h1><span lang="de">PDFs bearbeiten.<br><em>Frei.</em> Lokal. Vertraut.</span><span lang="en">Edit PDFs.<br><em>Free.</em> Local. Familiar.</span></h1>
+    <p class="lead">
+      <span lang="de">MrPDF ist ein quelloffener PDF-Editor mit dem Menüband, das Sie aus Office-Programmen kennen. Ansehen, kommentieren, ausfüllen, signieren und Seiten organisieren – ohne Konto, ohne Abo, ohne Cloud.</span>
+      <span lang="en">MrPDF is an open-source PDF editor with the ribbon you know from office programs. View, comment, fill in, sign and organise pages – no account, no subscription, no cloud.</span>
+    </p>
+    <div class="buttons">
+      <a class="btn primary" href="https://github.com/MrMarkus42/MrPDF/releases/latest">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 19h16"/></svg>
+        <span lang="de">Für Windows herunterladen</span><span lang="en">Download for Windows</span>
+      </a>
+      <a class="btn ghost" href="https://github.com/MrMarkus42/MrPDF">
+        <span lang="de">Quellcode ansehen</span><span lang="en">View the source</span>
+      </a>
+    </div>
+    <p class="note">
+      <span lang="de">Version 1.0 · Windows 10 und 11 (64 Bit) · keine Installation nötig · MIT/Apache-2.0</span>
+      <span lang="en">Version 1.0 · Windows 10 and 11 (64-bit) · no installation needed · MIT/Apache-2.0</span>
+    </p>
+    <div class="shot">
+      <div class="bar"><i></i><i></i><i></i></div>
+      <img src="img/hero.png" width="1360" height="860" alt="MrPDF mit einem Jahresbericht, Kommentaren und dem Menüband">
+    </div>
+  </div>
+</header>
+
+<section id="funktionen">
+  <div class="wrap">
+    <div class="center">
+      <h2><span lang="de">Alles, was Sie mit PDFs tun</span><span lang="en">Everything you do with PDFs</span></h2>
+      <p class="sub"><span lang="de">Hunderte Befehle, übersichtlich im Menüband angeordnet und über die Schnellsuche (Strg+.) sofort erreichbar.</span><span lang="en">Hundreds of commands, neatly arranged in the ribbon and instantly reachable with the quick search (Ctrl+.).</span></p>
+    </div>
+    <div class="grid">
+      <div class="card"><div class="icon"><svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></div>
+        <h3><span lang="de">Ansehen</span><span lang="en">View</span></h3>
+        <p><span lang="de">Schnelle Darstellung, Tabs und eigene Fenster, Seitenlayouts, Lineale, Dunkelmodus, Vollbild und Vorlesen.</span><span lang="en">Fast rendering, tabs and separate windows, page layouts, rulers, dark mode, full screen and read aloud.</span></p></div>
+      <div class="card"><div class="icon red"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
+        <h3><span lang="de">Kommentieren</span><span lang="en">Comment</span></h3>
+        <p><span lang="de">Markieren, Notizen, Textfelder, Formen, Wolken, Freihand, Messen, Stempel – sichtbar in jedem PDF-Programm.</span><span lang="en">Highlights, notes, text boxes, shapes, clouds, freehand, measuring, stamps – visible in every PDF viewer.</span></p></div>
+      <div class="card"><div class="icon"><svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h4"/></svg></div>
+        <h3><span lang="de">Formulare</span><span lang="en">Forms</span></h3>
+        <p><span lang="de">Ausfüllen und selbst gestalten: Text, Auswahl, Liste, Datum, Bild, Schaltfläche, Signatur – auch automatisch erkannt.</span><span lang="en">Fill in and design: text, choice, list, date, image, button and signature fields – even detected automatically.</span></p></div>
+      <div class="card"><div class="icon red"><svg viewBox="0 0 24 24"><path d="M3 17c3-1 4-6 6-6s1 5 3 5 3-4 5-4 2 2 4 2"/><path d="M3 21h18"/></svg></div>
+        <h3><span lang="de">Signieren</span><span lang="en">Sign</span></h3>
+        <p><span lang="de">Digitale Signaturen mit eigener digitaler ID, sichtbar oder unsichtbar – und Signaturen anderer prüfen.</span><span lang="en">Digital signatures with your own digital ID, visible or invisible – and check the signatures of others.</span></p></div>
+      <div class="card"><div class="icon"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="10" rx="1"/><rect x="13" y="3" width="8" height="10" rx="1"/><path d="M7 17v4M17 17v4M4 21h16"/></svg></div>
+        <h3><span lang="de">Seiten organisieren</span><span lang="en">Organise pages</span></h3>
+        <p><span lang="de">Einfügen, löschen, drehen, zuschneiden, zusammenfügen, aufteilen, Wasserzeichen, Kopf- und Fußzeilen, Bates-Nummern.</span><span lang="en">Insert, delete, rotate, crop, merge, split, watermarks, headers and footers, Bates numbering.</span></p></div>
+      <div class="card"><div class="icon red"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13 7l4 4"/></svg></div>
+        <h3><span lang="de">Inhalte bearbeiten</span><span lang="en">Edit content</span></h3>
+        <p><span lang="de">Texte und Objekte direkt auf der Seite ändern, ausrichten und anordnen; Lesezeichen und Inhaltsverzeichnis erstellen.</span><span lang="en">Change, align and arrange text and objects right on the page; create bookmarks and a table of contents.</span></p></div>
+      <div class="card"><div class="icon"><svg viewBox="0 0 24 24"><path d="M4 7h11M4 12h7M4 17h9"/><path d="M17 14l3 3-3 3"/><path d="M14 17h6"/></svg></div>
+        <h3><span lang="de">Prüfen und umwandeln</span><span lang="en">Review and convert</span></h3>
+        <p><span lang="de">Dokumente vergleichen, Rechtschreibung, Barrierefreiheit; Export als Bild, Text oder Word; PDFs aus Bildern und Office-Dateien.</span><span lang="en">Compare documents, spelling, accessibility; export as image, text or Word; PDFs from images and office files.</span></p></div>
+      <div class="card"><div class="icon red"><svg viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div>
+        <h3><span lang="de">Schützen</span><span lang="en">Protect</span></h3>
+        <p><span lang="de">Kennwortschutz mit AES-256, Berechtigungen, sicheres Schwärzen und Dateianhänge.</span><span lang="en">Password protection with AES-256, permissions, secure redaction and attachments.</span></p></div>
+    </div>
+  </div>
+</section>
+
+<section class="soft">
+  <div class="wrap">
+    <div class="feature">
+      <div class="txt">
+        <div class="kicker"><span lang="de">Kommentieren</span><span lang="en">Commenting</span></div>
+        <h3><span lang="de">Anmerkungen, die überall gleich aussehen</span><span lang="en">Comments that look the same everywhere</span></h3>
+        <p><span lang="de">Markieren Sie Text, setzen Sie Notizen, Pfeile und Stempel. MrPDF schreibt zu jeder Anmerkung ihr eigenes Aussehen in die Datei – Ihre Kollegen sehen in jedem PDF-Programm genau das, was Sie sehen.</span><span lang="en">Highlight text, add notes, arrows and stamps. MrPDF writes each comment's own appearance into the file – your colleagues see exactly what you see, in any PDF viewer.</span></p>
+        <ul>
+          <li><span lang="de">Stilvorlagen und eigene Stempel</span><span lang="en">Style presets and your own stamps</span></li>
+          <li><span lang="de">Kommentarliste, Zusammenfassung als PDF</span><span lang="en">Comment list, summary as PDF</span></li>
+          <li><span lang="de">Austausch per XFDF</span><span lang="en">Exchange via XFDF</span></li>
+        </ul>
+      </div>
+      <div class="pic"><img src="img/comments.png" width="1360" height="860" loading="lazy" alt="Kommentare in MrPDF"></div>
+    </div>
+
+    <div class="feature flip">
+      <div class="txt">
+        <div class="kicker"><span lang="de">Formulare</span><span lang="en">Forms</span></div>
+        <h3><span lang="de">Ausfüllen – oder selbst gestalten</span><span lang="en">Fill in – or design your own</span></h3>
+        <p><span lang="de">Füllen Sie Formulare direkt auf der Seite aus. Oder ziehen Sie eigene Felder auf: Text, Auswahl, Liste, Datum, Bild, Schaltfläche und Signatur. „Formulare erkennen“ legt Felder in leeren Vordrucken automatisch an.</span><span lang="en">Fill in forms right on the page. Or draw your own fields: text, choice, list, date, image, button and signature. "Detect form fields" adds fields to blank forms automatically.</span></p>
+        <ul>
+          <li><span lang="de">Datumsprüfung und Pflichtfelder</span><span lang="en">Date checking and required fields</span></li>
+          <li><span lang="de">Ein ausgefülltes Formular je Zeile einer CSV-Datei</span><span lang="en">One filled form per row of a CSV file</span></li>
+          <li><span lang="de">Formulardaten importieren und exportieren</span><span lang="en">Import and export form data</span></li>
+        </ul>
+      </div>
+      <div class="pic"><img src="img/forms.png" width="1360" height="860" loading="lazy" alt="Formular ausfüllen in MrPDF"></div>
+    </div>
+
+    <div class="feature">
+      <div class="txt">
+        <div class="kicker"><span lang="de">Dokumentaufbau</span><span lang="en">Organise</span></div>
+        <h3><span lang="de">Mit Vorschau, bevor etwas passiert</span><span lang="en">With a preview before anything happens</span></h3>
+        <p><span lang="de">Wasserzeichen, Hintergründe, Kopf- und Fußzeilen, Zuschneiden oder mehrere Seiten pro Blatt: Jeder Dialog zeigt sofort, wie das Ergebnis aussieht. Häufige Einstellungen speichern Sie unter eigenem Namen.</span><span lang="en">Watermarks, backgrounds, headers and footers, cropping or several pages per sheet: every dialog shows the result right away. Save frequent settings under your own name.</span></p>
+      </div>
+      <div class="pic"><img src="img/organize.png" width="1360" height="860" loading="lazy" alt="Wasserzeichen mit Vorschau"></div>
+    </div>
+
+    <div class="feature flip">
+      <div class="txt">
+        <div class="kicker"><span lang="de">Digitale Signatur</span><span lang="en">Digital signature</span></div>
+        <h3><span lang="de">Unterschreiben ohne Ausdrucken</span><span lang="en">Sign without printing</span></h3>
+        <p><span lang="de">Signieren Sie mit Ihrer digitalen ID oder legen Sie in MrPDF eine neue an. Die Signatur nach PAdES-Standard schützt das Dokument vor unbemerkten Änderungen – und MrPDF zeigt beim Öffnen, ob eine Signatur noch gültig ist.</span><span lang="en">Sign with your digital ID or create a new one in MrPDF. The PAdES signature protects the document against unnoticed changes – and MrPDF shows on opening whether a signature is still valid.</span></p>
+      </div>
+      <div class="pic"><img src="img/sign.png" width="1360" height="860" loading="lazy" alt="Dokument signieren"></div>
+    </div>
+
+    <div class="feature">
+      <div class="txt">
+        <div class="kicker"><span lang="de">Ihr Stil</span><span lang="en">Your style</span></div>
+        <h3><span lang="de">Hell oder dunkel, Deutsch oder Englisch</span><span lang="en">Light or dark, German or English</span></h3>
+        <p><span lang="de">Ein ruhiges, modernes Menüband mit fester Höhe, das sich auf Wunsch einklappen lässt. Dazu Dunkelmodus, Tastaturbedienung mit Alt-Tasten und eine Schnellsuche für jeden Befehl.</span><span lang="en">A calm, modern ribbon with a fixed height that can be collapsed. Plus dark mode, keyboard operation with Alt key tips and a quick search for every command.</span></p>
+      </div>
+      <div class="pic"><img src="img/dark-english.png" width="1360" height="860" loading="lazy" alt="MrPDF im Dunkelmodus"></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="center">
+      <h2><span lang="de">Warum MrPDF?</span><span lang="en">Why MrPDF?</span></h2>
+      <p class="sub"><span lang="de">Ein PDF-Editor, der Ihnen gehört – nicht umgekehrt.</span><span lang="en">A PDF editor that works for you – not the other way round.</span></p>
+    </div>
+    <div class="values">
+      <div><div class="icon red"><svg viewBox="0 0 24 24"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8z"/></svg></div>
+        <h3><span lang="de">Kostenlos und quelloffen</span><span lang="en">Free and open source</span></h3>
+        <p><span lang="de">Keine Testphase, kein Abo, keine Wasserzeichen. Der Quellcode steht unter MIT- oder Apache-Lizenz.</span><span lang="en">No trial, no subscription, no watermarks. The source code is MIT or Apache licensed.</span></p></div>
+      <div><div class="icon"><svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
+        <h3><span lang="de">Ihre Dateien bleiben bei Ihnen</span><span lang="en">Your files stay with you</span></h3>
+        <p><span lang="de">Kein Konto, keine Cloud, keine Nutzungsdaten. Einzige Verbindung: die abschaltbare Suche nach neuen Versionen auf GitHub.</span><span lang="en">No account, no cloud, no usage data. The only connection: the optional check for new versions on GitHub.</span></p></div>
+      <div><div class="icon red"><svg viewBox="0 0 24 24"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg></div>
+        <h3><span lang="de">Sicher gebaut</span><span lang="en">Built to be safe</span></h3>
+        <p><span lang="de">Geschrieben in Rust, PDF-Darstellung mit PDFium aus Google Chrome. Skripte und eingebettete Programme werden nie ausgeführt.</span><span lang="en">Written in Rust, PDF rendering with PDFium from Google Chrome. Scripts and embedded programs are never run.</span></p></div>
+      <div><div class="icon"><svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg></div>
+        <h3><span lang="de">Schnell und schlank</span><span lang="en">Fast and lean</span></h3>
+        <p><span lang="de">Startet in Sekunden, öffnet auch große Dateien zügig und braucht keine Installation.</span><span lang="en">Starts in seconds, opens large files quickly and needs no installation.</span></p></div>
+    </div>
+  </div>
+</section>
+
+<section class="soft" id="download">
+  <div class="wrap">
+    <h2><span lang="de">In drei Schritten loslegen</span><span lang="en">Get started in three steps</span></h2>
+    <p class="sub"><span lang="de">MrPDF braucht keine Installation und keine Administratorrechte.</span><span lang="en">MrPDF needs no installation and no administrator rights.</span></p>
+    <ol class="steps">
+      <li><b><span lang="de">Herunterladen</span><span lang="en">Download</span></b><br>
+        <span lang="de">Die Zip-Datei <code>MrPDF-…-windows-x64.zip</code> aus dem <a href="https://github.com/MrMarkus42/MrPDF/releases/latest">neuesten Release</a> laden.</span>
+        <span lang="en">Get <code>MrPDF-…-windows-x64.zip</code> from the <a href="https://github.com/MrMarkus42/MrPDF/releases/latest">latest release</a>.</span></li>
+      <li><b><span lang="de">Entpacken</span><span lang="en">Unpack</span></b><br>
+        <span lang="de">In einen Ordner Ihrer Wahl, zum Beispiel <code>Dokumente\MrPDF</code>.</span>
+        <span lang="en">Into a folder of your choice, e.g. <code>Documents\MrPDF</code>.</span></li>
+      <li><b><span lang="de">Starten</span><span lang="en">Start</span></b><br>
+        <span lang="de"><code>MrPDF.exe</code> öffnen – fertig. Neue Versionen installiert MrPDF später selbst.</span>
+        <span lang="en">Open <code>MrPDF.exe</code> – done. MrPDF installs new versions by itself later.</span></li>
+    </ol>
+    <p class="req">
+      <span lang="de"><b>Voraussetzungen:</b> Windows 10 oder 11, 64 Bit. Bleibt das Fenster auf alten Grafikkarten schwarz, hilft der Start mit <code>MrPDF.exe --opengl</code>. Linux und macOS: aus dem Quellcode bauen (siehe <a href="https://github.com/MrMarkus42/MrPDF#building-from-source">Anleitung</a>).</span>
+      <span lang="en"><b>Requirements:</b> Windows 10 or 11, 64-bit. If the window stays black on old graphics cards, start <code>MrPDF.exe --opengl</code>. Linux and macOS: build from source (see the <a href="https://github.com/MrMarkus42/MrPDF#building-from-source">instructions</a>).</span>
+    </p>
+  </div>
+</section>
+
+<section id="fragen">
+  <div class="wrap">
+    <h2><span lang="de">Häufige Fragen</span><span lang="en">Frequently asked questions</span></h2>
+    <p class="sub"></p>
+    <details><summary><span lang="de">Ist MrPDF wirklich kostenlos?</span><span lang="en">Is MrPDF really free?</span></summary>
+      <p><span lang="de">Ja – für private und berufliche Zwecke, ohne Einschränkungen. MrPDF ist freie Software unter MIT- oder Apache-2.0-Lizenz.</span><span lang="en">Yes – for private and business use, without restrictions. MrPDF is free software under the MIT or Apache 2.0 licence.</span></p></details>
+    <details><summary><span lang="de">Werden meine Dokumente irgendwohin hochgeladen?</span><span lang="en">Are my documents uploaded anywhere?</span></summary>
+      <p><span lang="de">Nein. MrPDF arbeitet nur mit Dateien auf Ihrem Computer. Ins Internet geht es nur, wenn Sie selbst eine Adresse öffnen oder nach neuen Versionen gesucht wird – und das lässt sich unter Datei › Einstellungen › Neue Version abschalten.</span><span lang="en">No. MrPDF only works with files on your computer. It only goes online when you open an address yourself or when it looks for new versions – which you can switch off in File › Settings › Updates.</span></p></details>
+    <details><summary><span lang="de">Sehen meine Kommentare auch in anderen Programmen richtig aus?</span><span lang="en">Do my comments look right in other programs?</span></summary>
+      <p><span lang="de">Ja. Jede Anmerkung und jedes Formularfeld wird mit eigenem Aussehen gespeichert. Änderungen werden als Ergänzung an die Datei angehängt, die ursprüngliche Struktur bleibt erhalten.</span><span lang="en">Yes. Every comment and form field is saved with its own appearance. Changes are appended to the file, the original structure is kept.</span></p></details>
+    <details><summary><span lang="de">Wie bekomme ich neue Versionen?</span><span lang="en">How do I get new versions?</span></summary>
+      <p><span lang="de">Unter Datei › Einstellungen › Neue Version. MrPDF lädt das Paket von GitHub, prüft seine SHA-256-Prüfsumme, installiert es und startet neu.</span><span lang="en">In File › Settings › Updates. MrPDF downloads the package from GitHub, checks its SHA-256 checksum, installs it and restarts.</span></p></details>
+    <details><summary><span lang="de">Ich habe einen Fehler gefunden – was tun?</span><span lang="en">I found a bug – what now?</span></summary>
+      <p><span lang="de">Melden Sie ihn gern als <a href="https://github.com/MrMarkus42/MrPDF/issues">Issue auf GitHub</a>. Hilfe › Fehlerprotokoll öffnen zeigt ein Protokoll, das bei der Suche hilft; es enthält keine Inhalte Ihrer Dokumente.</span><span lang="en">Please report it as an <a href="https://github.com/MrMarkus42/MrPDF/issues">issue on GitHub</a>. Help › Open error log shows a log that helps finding it; it contains nothing of your documents.</span></p></details>
+  </div>
+</section>
+
+<section style="padding-top:0">
+  <div class="wrap">
+    <div class="cta">
+      <h2><span lang="de">Bereit für Ihren neuen PDF-Editor?</span><span lang="en">Ready for your new PDF editor?</span></h2>
+      <p><span lang="de">Kostenlos, quelloffen und in einer Minute startklar.</span><span lang="en">Free, open source and ready in a minute.</span></p>
+      <div class="buttons">
+        <a class="btn primary" href="https://github.com/MrMarkus42/MrPDF/releases/latest">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 19h16"/></svg>
+          <span lang="de">MrPDF 1.0 herunterladen</span><span lang="en">Download MrPDF 1.0</span>
+        </a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>© 2026 Mr. M <span lang="de">und Mitwirkende</span><span lang="en">and contributors</span> · <a href="https://github.com/MrMarkus42/MrPDF/blob/master/LICENSE-MIT">MIT</a> / <a href="https://github.com/MrMarkus42/MrPDF/blob/master/LICENSE-APACHE">Apache-2.0</a></span>
+    <span><a href="https://github.com/MrMarkus42/MrPDF/blob/master/CHANGELOG.md"><span lang="de">Neuerungen</span><span lang="en">Changelog</span></a> · <a href="https://github.com/MrMarkus42/MrPDF/blob/master/SECURITY.md"><span lang="de">Sicherheit</span><span lang="en">Security</span></a></span>
+    <span><span lang="de">MrPDF ist ein unabhängiges Projekt und nicht mit Herstellern kommerzieller PDF-Software verbunden.</span><span lang="en">MrPDF is an independent project, not affiliated with any commercial PDF software vendor.</span></span>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var root = document.documentElement, button = document.getElementById('lang');
+  function set(lang) {
+    root.setAttribute('data-lang', lang);
+    root.setAttribute('lang', lang);
+    button.textContent = lang === 'de' ? 'EN' : 'DE';
+    document.title = lang === 'de' ? 'MrPDF – der freie PDF-Editor' : 'MrPDF – the free PDF editor';
+    try { localStorage.setItem('mrpdf-lang', lang); } catch (e) {}
+  }
+  var saved = null;
+  try { saved = localStorage.getItem('mrpdf-lang'); } catch (e) {}
+  var nav = (navigator.language || 'de').toLowerCase();
+  set(saved || (nav.indexOf('de') === 0 ? 'de' : 'en'));
+  button.addEventListener('click', function () { set(root.getAttribute('data-lang') === 'de' ? 'en' : 'de'); });
+})();
+</script>
+</body>
+</html>
