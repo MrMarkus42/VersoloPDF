@@ -8,13 +8,18 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Add the package to this release (e.g. v1.2.0); empty: build only"
+        required: false
+        default: ""
 
 permissions:
   contents: read
 
 jobs:
   macos:
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 90
     permissions:
       contents: write # only used to add the package to a release
@@ -62,7 +67,8 @@ jobs:
           path: dist/*-macos.zip*
 
       - name: Add to the release
-        if: github.event_name == 'release'
+        if: github.event_name == 'release' || inputs.release_tag != ''
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ github.event.release.tag_name }}" dist/*-macos.zip dist/*-macos.zip.sha256 --clobber
+          TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+        run: gh release upload "$TAG" dist/*-macos.zip dist/*-macos.zip.sha256 --clobber
