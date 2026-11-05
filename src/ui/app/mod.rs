@@ -418,7 +418,17 @@ impl VersoloPdfApp {
     /// Opens files handed over by a later start and brings the window to
     /// the front.
     fn check_inbox(&mut self, ctx: &Context) {
-        let Some(files) = self.inbox.as_ref().and_then(|i| i.take()) else { return };
+        #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
+        let mut files = self.inbox.as_ref().and_then(|i| i.take());
+        // Opened in the Finder (Apple Event).
+        #[cfg(target_os = "macos")]
+        {
+            let opened = crate::macos::take_opened_files();
+            if !opened.is_empty() {
+                files.get_or_insert_with(Vec::new).extend(opened);
+            }
+        }
+        let Some(files) = files else { return };
         self.pending_open.extend(files);
         ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
         ctx.send_viewport_cmd(ViewportCommand::Focus);

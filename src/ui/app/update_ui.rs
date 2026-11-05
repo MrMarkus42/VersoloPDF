@@ -1,5 +1,5 @@
 //! Einstellungen › "Neue Version": looks for the newest release on GitHub
-//! (by hand or once a day at start) and installs it on Windows.
+//! (by hand or once a day at start) and installs it on Windows and macOS.
 
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, TryRecvError};
@@ -36,9 +36,10 @@ pub enum UpdateState {
     Installing(Receiver<crate::Result<()>>),
 }
 
-/// The folder of the running program.
+/// Where the running program is installed (folder on Windows, bundle on
+/// macOS).
 fn program_dir() -> Option<PathBuf> {
-    std::env::current_exe().ok().and_then(|e| e.parent().map(PathBuf::from))
+    update::install_target()
 }
 
 /// Seconds since 1970.
@@ -132,7 +133,7 @@ impl VersoloPdfApp {
                 Ok(Ok(())) => {
                     // The new version starts as its own window, this one closes
                     // (asking about unsaved changes first).
-                    let exe = program_dir().map(|d| d.join("VersoloPDF.exe"));
+                    let exe = program_dir().map(|d| update::program_exe(&d));
                     let started = exe.as_ref().is_some_and(|exe| {
                         std::process::Command::new(exe)
                             .arg(update::WAIT_ARG)
@@ -207,7 +208,7 @@ impl VersoloPdfApp {
         let (tx, rx) = std::sync::mpsc::channel();
         let repaint = ctx.clone();
         std::thread::spawn(move || {
-            let _ = tx.send(update::run_installer(&folder.join("VersoloPDF.exe"), &target));
+            let _ = tx.send(update::run_installer(&update::program_exe(&folder), &target));
             repaint.request_repaint();
         });
         self.update = UpdateState::Installing(rx);
@@ -314,9 +315,9 @@ impl VersoloPdfApp {
                         );
                     }
                     ui.horizontal(|ui| {
-                        let windows = cfg!(windows) && release.windows.is_some();
-                        if windows {
-                            let size = release.windows.as_ref().map_or(0, |a| a.size);
+                        let package = update::package_of(release).filter(|_| program_dir().is_some());
+                        if let Some((asset, _)) = package {
+                            let size = asset.size;
                             let text = if de {
                                 format!(
                                     "Herunterladen und installieren ({:.0} MB)",
@@ -352,8 +353,15 @@ impl VersoloPdfApp {
                     } else {
                         format!("VersoloPDF {version} has been downloaded and checked.")
                     });
-                    let protected = !program_dir().as_deref().is_some_and(update::folder_writable);
+                    let protected =
+                        !program_dir().is_some_and(|d| update::folder_writable(&update::install_folder(&d)));
                     let hint = match (protected, de) {
+                        (true, true) if cfg!(target_os = "macos") => {
+                            "Der Programme-Ordner ist geschützt: macOS fragt gleich nach dem Kennwort eines Administrators. Danach startet VersoloPDF in der neuen Version neu (ungespeicherte Änderungen werden vorher abgefragt)."
+                        }
+                        (true, false) if cfg!(target_os = "macos") => {
+                            "The Applications folder is protected: macOS will ask for an administrator's password. Then VersoloPDF starts again in the new version (asking about unsaved changes first)."
+                        }
                         (true, true) => {
                             "Der Programmordner ist geschützt: Windows fragt gleich nach Administratorrechten. Danach startet VersoloPDF in der neuen Version neu (ungespeicherte Änderungen werden vorher abgefragt)."
                         }

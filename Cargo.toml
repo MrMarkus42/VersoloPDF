@@ -1,6 +1,6 @@
 [package]
 name = "versolopdf"
-version = "1.1.2"
+version = "1.2.0"
 edition = "2024"
 rust-version = "1.88"
 description = "VersoloPDF - a free, open-source PDF viewer and editor"
@@ -74,6 +74,20 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+# macOS system functions (open from Finder, mail, printing, text
+# recognition, keychain): the Objective-C bindings winit already uses.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = "0.3"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSSharingService", "NSWorkspace", "NSPrintInfo", "NSPrintOperation", "NSPrinter"] }
+objc2-pdf-kit = { version = "0.3", default-features = false, features = ["std", "PDFDocument", "objc2-app-kit"] }
+objc2-vision = { version = "0.3", default-features = false, features = ["std", "VNRequest", "VNRequestHandler", "VNRecognizeTextRequest", "VNObservation", "VNTypes", "objc2-core-foundation"] }
+objc2-security = { version = "0.3", default-features = false, features = ["std", "SecBase", "SecItem", "SecIdentity", "SecCertificate", "SecKey"] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFArray", "CFData", "CFDictionary", "CFString", "CFNumber", "CFError"] }
 
 [dev-dependencies]
 egui_kittest = { version = "=0.36.2", features = ["eframe", "wgpu"] }

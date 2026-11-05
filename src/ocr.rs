@@ -2,6 +2,8 @@
 //! (Apache-2.0) if it is installed: each page is rendered, Tesseract finds
 //! the words and their places, and VersoloPDF adds them as an invisible text
 //! layer over the page, so scanned pages can be searched and copied.
+//! On macOS the text recognition built into the system (Apple's Vision
+//! framework) is used instead, unless a Tesseract program was chosen.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -42,11 +44,40 @@ const CANDIDATES: [&str; 6] = [
     "/opt/local/bin/tesseract",
 ];
 
-/// Finds the Tesseract program: the configured path, the search path or
-/// the usual install folders.
+/// Stands for the text recognition built into macOS (Apple's Vision
+/// framework) where otherwise the Tesseract program's path is used.
+pub const VISION: &str = "macOS (Vision)";
+
+/// True for the built-in macOS text recognition.
+pub fn is_vision(exe: &Path) -> bool {
+    exe == Path::new(VISION)
+}
+
+/// Tesseract's language codes and the matching ones of Vision.
+const VISION_LANGUAGES: [(&str, &str); 12] = [
+    ("deu", "de-DE"),
+    ("eng", "en-US"),
+    ("fra", "fr-FR"),
+    ("ita", "it-IT"),
+    ("spa", "es-ES"),
+    ("por", "pt-BR"),
+    ("rus", "ru-RU"),
+    ("ukr", "uk-UA"),
+    ("jpn", "ja-JP"),
+    ("kor", "ko-KR"),
+    ("chi_sim", "zh-Hans"),
+    ("chi_tra", "zh-Hant"),
+];
+
+/// Finds the text recognition: the configured Tesseract program, on macOS
+/// the built-in recognition ([`VISION`]), else Tesseract in the search path
+/// or the usual install folders.
 pub fn find_tesseract(configured: Option<&Path>) -> Option<PathBuf> {
     if let Some(p) = configured.filter(|p| p.is_file()) {
         return Some(p.to_path_buf());
+    }
+    if cfg!(target_os = "macos") {
+        return Some(PathBuf::from(VISION));
     }
     let exe = if cfg!(windows) { "tesseract.exe" } else { "tesseract" };
     if let Some(paths) = std::env::var_os("PATH") {
@@ -74,6 +105,19 @@ fn command(exe: &Path) -> Command {
 
 /// Installed recognition languages ("deu", "eng", …).
 pub fn languages(exe: &Path) -> Vec<String> {
+    if is_vision(exe) {
+        #[cfg(target_os = "macos")]
+        {
+            let supported = crate::macos::vision_languages();
+            return VISION_LANGUAGES
+                .iter()
+                .filter(|(_, apple)| supported.iter().any(|s| s == apple))
+                .map(|(code, _)| code.to_string())
+                .collect();
+        }
+        #[cfg(not(target_os = "macos"))]
+        return Vec::new();
+    }
     let Ok(out) = command(exe).arg("--list-langs").output() else { return Vec::new() };
     let text = String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
     text.lines()
@@ -115,6 +159,9 @@ pub fn parse_tsv(tsv: &str) -> Vec<Word> {
 
 /// Runs Tesseract on a PNG file.
 pub fn recognize(exe: &Path, png: &Path, langs: &str) -> Result<Vec<Word>> {
+    if is_vision(exe) {
+        return recognize_vision(png, langs);
+    }
     let out = command(exe)
         .arg(png)
         .arg("stdout")
@@ -128,6 +175,41 @@ pub fn recognize(exe: &Path, png: &Path, langs: &str) -> Result<Vec<Word>> {
         return Err(Error::Invalid(msg));
     }
     Ok(parse_tsv(&String::from_utf8_lossy(&out.stdout)))
+}
+
+/// Vision's language codes for Tesseract's codes ("deu+eng").
+pub fn vision_codes(langs: &str) -> Vec<String> {
+    clean_languages(langs)
+        .split('+')
+        .filter_map(|l| VISION_LANGUAGES.iter().find(|(code, _)| *code == l))
+        .map(|(_, apple)| apple.to_string())
+        .collect()
+}
+
+/// Turns a box normalised to 0..1 with the origin at the lower left into
+/// image pixels (left, top, width, height).
+pub fn vision_box(rect: [f64; 4], width: u32, height: u32) -> (f32, f32, f32, f32) {
+    let (w, h) = (f64::from(width), f64::from(height));
+    let [x, y, bw, bh] = rect;
+    ((x * w) as f32, ((1.0 - y - bh) * h) as f32, (bw * w) as f32, (bh * h) as f32)
+}
+
+#[cfg(target_os = "macos")]
+fn recognize_vision(png: &Path, langs: &str) -> Result<Vec<Word>> {
+    let (width, height) = image::image_dimensions(png).map_err(|e| Error::Invalid(e.to_string()))?;
+    let words = crate::macos::recognize_text(png, &vision_codes(langs)).map_err(Error::Invalid)?;
+    Ok(words
+        .into_iter()
+        .map(|w| {
+            let (left, top, width, height) = vision_box(w.rect, width, height);
+            Word { text: w.text, left, top, width, height, confidence: w.confidence * 100.0 }
+        })
+        .collect())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn recognize_vision(_png: &Path, _langs: &str) -> Result<Vec<Word>> {
+    Err(Error::Invalid("the macOS text recognition is only available on macOS".into()))
 }
 
 /// Adds `words` (PDF space boxes) as invisible text to `page`.
@@ -206,5 +288,13 @@ mod tests {
         );
         assert_eq!(clean_languages("deu+eng; rm -rf"), "deu+engrmrf");
         assert_eq!(clean_languages(""), "eng");
+    }
+
+    #[test]
+    fn vision_languages_and_boxes() {
+        assert_eq!(vision_codes("deu+eng+xyz"), vec!["de-DE", "en-US"]);
+        assert!(is_vision(Path::new(VISION)) && !is_vision(Path::new("/usr/bin/tesseract")));
+        // Lower left origin, normalised → pixels from the top left.
+        assert_eq!(vision_box([0.25, 0.5, 0.5, 0.25], 400, 800), (100.0, 200.0, 200.0, 200.0));
     }
 }

@@ -32,8 +32,16 @@ fn main() -> eframe::Result {
     if raw.next().is_some_and(|a| a == versolopdf::update::INSTALL_ARG) {
         let code = match (raw.next(), std::env::current_exe()) {
             (Some(target), Ok(exe)) => {
-                let source = exe.parent().map(PathBuf::from).unwrap_or_default();
-                match versolopdf::update::install_files(&source, &PathBuf::from(target)) {
+                let target = PathBuf::from(target);
+                let result = if cfg!(target_os = "macos") {
+                    // The new bundle: …/VersoloPDF.app/Contents/MacOS/VersoloPDF.
+                    let bundle = exe.ancestors().nth(3).map(PathBuf::from).unwrap_or_default();
+                    versolopdf::update::install_bundle(&bundle, &target)
+                } else {
+                    let source = exe.parent().map(PathBuf::from).unwrap_or_default();
+                    versolopdf::update::install_files(&source, &target)
+                };
+                match result {
                     Ok(_) => 0,
                     Err(err) => {
                         versolopdf::crashlog::init();
@@ -89,6 +97,9 @@ fn main() -> eframe::Result {
     };
     versolopdf::document::clean_old_undo_files();
     let inbox = std::sync::Arc::new(std::sync::Mutex::new(inbox));
+    // PDFs opened in the Finder arrive as Apple Events, also at start.
+    #[cfg(target_os = "macos")]
+    versolopdf::macos::install_open_handler();
 
     let start = |renderer: eframe::Renderer, files: Vec<PathBuf>| {
         log::info!(
@@ -104,6 +115,8 @@ fn main() -> eframe::Result {
             "VersoloPDF",
             options(renderer),
             Box::new(move |cc| {
+                #[cfg(target_os = "macos")]
+                versolopdf::macos::set_waker(&cc.egui_ctx);
                 let mut app = VersoloPdfApp::new(cc, files);
                 if let Some(inbox) = inbox.lock().ok().and_then(|mut i| i.take()) {
                     app.set_inbox(&cc.egui_ctx, inbox);

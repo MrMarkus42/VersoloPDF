@@ -61,9 +61,29 @@ impl DigitalId {
         })
     }
 
+    /// An ID of the system's certificate store (macOS keychain): the
+    /// certificate `cert_der`, its key stays in the store.
+    pub fn from_system(cert_der: &[u8]) -> Result<DigitalId> {
+        let cert = cert::parse(cert_der)?;
+        let rsa = match cert.key_alg.as_str() {
+            cert::RSA => true,
+            cert::EC_PUBLIC_KEY => false,
+            _ => return Err(Error::Invalid("Schlüsselart wird nicht unterstützt (RSA oder ECDSA)".into())),
+        };
+        Ok(DigitalId {
+            cert,
+            chain: Vec::new(),
+            key: Key::System { cert_der: cert_der.to_vec(), rsa },
+            pkcs8: Vec::new(),
+        })
+    }
+
     /// As .pfx file protected by `password`.
     pub fn to_pfx(&self, password: &str) -> Result<Vec<u8>> {
         use p12_keystore::{Certificate, KeyStore, KeyStoreEntry, PrivateKey, PrivateKeyChain};
+        if self.pkcs8.is_empty() {
+            return Err(Error::Invalid("Der Schlüssel dieser digitalen ID bleibt im System.".into()));
+        }
         let bad = |e: p12_keystore::error::Error| Error::Invalid(format!("Digitale ID speichern: {e}"));
         let mut certs = vec![Certificate::from_der(&self.cert.der).map_err(bad)?];
         for c in &self.chain {
@@ -87,6 +107,24 @@ pub fn ids_dir() -> Option<PathBuf> {
         return Some(PathBuf::from(dir));
     }
     crate::files::data_dir().map(|d| d.join("digitale-ids"))
+}
+
+/// Digital IDs of the system's certificate store: (name, certificate DER).
+/// Only the macOS keychain so far; empty elsewhere.
+pub fn system_ids() -> Vec<(String, Vec<u8>)> {
+    #[cfg(target_os = "macos")]
+    {
+        crate::macos::keychain_identities()
+            .into_iter()
+            .filter(|(_, der)| {
+                cert::parse(der).is_ok_and(|c| c.key_alg == cert::RSA || c.key_alg == cert::EC_PUBLIC_KEY)
+            })
+            .collect()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Vec::new()
+    }
 }
 
 /// The .pfx / .p12 files in `dir`, sorted by name.
@@ -120,5 +158,16 @@ mod tests {
         assert_eq!(back.cert.name, "Erika Test");
         let err = DigitalId::from_pfx(&pfx, "falsch").err().unwrap();
         assert!(err.to_string().contains("Kennwort"), "{err}");
+    }
+
+    #[test]
+    fn system_ids_keep_their_key_in_the_system() {
+        let id =
+            DigitalId::create(&NewId { name: "Erika Test", email: "", organisation: "", years: 2 }).unwrap();
+        let sys = DigitalId::from_system(&id.cert.der).unwrap();
+        assert_eq!(sys.cert.name, "Erika Test");
+        assert!(matches!(sys.key, Key::System { rsa: false, .. }));
+        assert!(sys.to_pfx("geheim 123").is_err(), "the key cannot be exported");
+        assert!(DigitalId::from_system(b"kein Zertifikat").is_err());
     }
 }

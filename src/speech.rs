@@ -42,7 +42,9 @@ fn commands(volume: u32, rate: i32) -> Vec<Command> {
         }
         list.push(c);
     } else if cfg!(target_os = "macos") {
-        let mut c = Command::new("say");
+        // The voice is the one chosen in the system settings (Bedienungshilfen
+        // › Gesprochene Inhalte).
+        let mut c = Command::new("/usr/bin/say");
         c.arg("-r").arg((175 + rate * 15).to_string());
         list.push(c);
     } else {
@@ -72,7 +74,12 @@ pub fn clean_text(text: &str) -> String {
 impl Reader {
     /// Starts reading `text` aloud.
     pub fn start(text: &str, volume: u32, rate: i32) -> Result<Reader> {
-        let text = clean_text(text);
+        let mut text = clean_text(text);
+        if cfg!(target_os = "macos") {
+            // `say` takes the volume as a command inside the text; commands
+            // in the document's own text are disarmed.
+            text = format!("[[volm {:.2}]] {}", volume.min(100) as f32 / 100.0, text.replace("[[", "[ ["));
+        }
         let mut last_err = None;
         for mut cmd in commands(volume, rate) {
             cmd.stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null());

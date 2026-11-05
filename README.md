@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/MrMarkus42/VersoloPDF/releases/latest"><b>Download for Windows</b></a> ·
+  <a href="https://github.com/MrMarkus42/VersoloPDF/releases/latest"><b>Download for Windows and macOS</b></a> ·
   <a href="https://mrmarkus42.github.io/VersoloPDF/">Website</a> ·
   <a href="CHANGELOG.md">What's new</a> ·
   <a href="#deutsch">Deutsch</a>
@@ -36,8 +36,9 @@
   fields;
   detect fields automatically; reset, import and export form data; fill one
   form per row of a CSV file
-* **Digital signatures** – sign with your own digital ID (.pfx/.p12, or a new
-  one created in VersoloPDF), visible or invisible, PAdES; certify documents;
+* **Digital signatures** – sign with your own digital ID (.pfx/.p12, a new
+  one created in VersoloPDF, or on the Mac from the keychain), visible or
+  invisible, PAdES; certify documents;
   time stamps from a time stamp authority (RFC 3161); check signatures
 * **Pages** – insert, delete, extract, rotate, move, duplicate, replace, crop,
   resize, merge and split documents, several pages per sheet, watermarks,
@@ -72,6 +73,24 @@ If the window stays black on older graphics cards, start VersoloPDF with
 `VersoloPDF.exe --opengl`. New versions can be installed from
 *File › Settings › Updates*.
 
+## Installation (macOS)
+
+1. Download `VersoloPDF-<version>-macos.zip` from the
+   [latest release](https://github.com/MrMarkus42/VersoloPDF/releases/latest)
+   (one app for Apple chips and Intel, macOS 11 or newer).
+2. Open the zip file and drag `VersoloPDF.app` into *Programme* /
+   *Applications*.
+3. The first start: VersoloPDF is not notarised by Apple (that needs a paid
+   Apple developer account), so macOS refuses to open it at first. Open
+   *System Settings › Privacy & Security*, scroll down and click
+   *Open Anyway* next to VersoloPDF. This is needed only once.
+
+On the Mac, VersoloPDF prints through the macOS print dialog, recognises text
+with the text recognition built into macOS, signs with digital IDs from the
+keychain, attaches files to a new message in Apple Mail or Outlook and opens
+PDFs from the Finder. New versions install themselves from
+*File › Settings › Updates*.
+
 ## Building from source
 
 Requirements: Rust 1.88 or newer.
@@ -89,6 +108,13 @@ Cross-compiling and packaging for Windows on Linux (MinGW):
 ```bash
 rustup target add x86_64-pc-windows-gnu
 scripts/package-windows.sh      # creates dist/VersoloPDF-<version>-windows-x64.zip
+```
+
+The macOS app is built on a Mac (GitHub Actions: `.github/workflows/macos.yml`):
+
+```bash
+rustup target add aarch64-apple-darwin x86_64-apple-darwin
+scripts/package-macos.sh        # creates dist/VersoloPDF-<version>-macos.zip
 ```
 
 ### Tests
@@ -141,10 +167,20 @@ Word; Kennwortschutz mit AES-256 und sicheres Schwärzen; Schnellsuche nach
 Befehlen (Strg+.), Tastaturbedienung des Menübands, Wiederherstellung nach
 Abstürzen, Updates direkt aus GitHub.
 
-**Installation:** Zip-Datei aus dem
+**Installation unter Windows:** Zip-Datei `…-windows-x64.zip` aus dem
 [neuesten Release](https://github.com/MrMarkus42/VersoloPDF/releases/latest)
 herunterladen, in einen beliebigen Ordner entpacken und `VersoloPDF.exe` starten –
 keine Installation und keine Administratorrechte nötig.
+
+**Installation auf dem Mac:** `…-macos.zip` herunterladen, öffnen und
+`VersoloPDF.app` in den Ordner *Programme* ziehen (macOS 11 oder neuer, Apple-
+und Intel-Chips). Beim ersten Start lehnt macOS das Öffnen ab, weil VersoloPDF
+nicht von Apple beglaubigt ist: dann unter *Systemeinstellungen › Datenschutz &
+Sicherheit* ganz unten bei VersoloPDF auf *Dennoch öffnen* klicken – das ist nur
+einmal nötig. Auf dem Mac druckt VersoloPDF über den Druckdialog von macOS,
+erkennt Text mit der Texterkennung von macOS, signiert mit digitalen IDs aus
+dem Schlüsselbund und hängt Dateien an eine neue Nachricht in Apple Mail oder
+Outlook an.
 
 **Webseite:** <https://mrmarkus42.github.io/VersoloPDF/>
 

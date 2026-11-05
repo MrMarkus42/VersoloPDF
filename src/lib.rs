@@ -4,8 +4,8 @@
 //! ([`document`], [`pdf_edit`], [`appearance`], [`text`], [`search`]) and the
 //! egui based user interface in [`ui`].
 //!
-//! `unsafe` code is denied everywhere except in the small, reviewed Windows
-//! printing module (`print::windows_print`), which has to call Win32 APIs.
+//! `unsafe` code is denied everywhere except in the small, reviewed modules
+//! that call operating system functions (Win32 APIs, `macos`).
 
 #![deny(unsafe_code)]
 
@@ -31,6 +31,8 @@ pub mod geometry;
 pub mod import;
 pub mod instance;
 pub mod layers;
+#[cfg(target_os = "macos")]
+pub mod macos;
 pub mod mail;
 pub mod marks;
 pub mod media;

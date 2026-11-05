@@ -173,6 +173,12 @@ pub enum Key {
     Rsa(Box<rsa::RsaPrivateKey>),
     P256(p256::ecdsa::SigningKey),
     P384(p384::ecdsa::SigningKey),
+    /// A key kept by the operating system (macOS keychain), found by its
+    /// certificate; the system signs, the key never leaves it.
+    System {
+        cert_der: Vec<u8>,
+        rsa: bool,
+    },
 }
 
 impl Key {
@@ -211,8 +217,22 @@ impl Key {
                     k.sign_prehash(digest).map_err(|_| bad("Signieren fehlgeschlagen"))?;
                 (sig.to_der().as_bytes().to_vec(), der::alg(ECDSA_SHA256, false))
             }
+            Key::System { cert_der, rsa } => {
+                let sig = system_sign(cert_der, digest, *rsa)?;
+                (sig, if *rsa { der::alg(RSA, true) } else { der::alg(ECDSA_SHA256, false) })
+            }
         })
     }
+}
+
+#[cfg(target_os = "macos")]
+fn system_sign(cert_der: &[u8], digest: &[u8], rsa: bool) -> Result<Vec<u8>> {
+    crate::macos::keychain_sign(cert_der, digest, rsa).map_err(Error::Invalid)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn system_sign(_cert_der: &[u8], _digest: &[u8], _rsa: bool) -> Result<Vec<u8>> {
+    Err(bad("Schlüssel des Systems werden hier nicht unterstützt"))
 }
 
 /// Checks `signature` over `digest` (made with `hash`) with the

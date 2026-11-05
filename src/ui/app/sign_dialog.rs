@@ -23,6 +23,8 @@ pub enum IdChoice {
     Stored(PathBuf),
     /// Another .pfx / .p12 file.
     File(Option<PathBuf>),
+    /// An ID of the system's store (macOS keychain): index into `system`.
+    System(usize),
     /// A new self-signed ID.
     New,
 }
@@ -67,6 +69,8 @@ pub struct SignState {
     /// Add a time stamp from the time stamp authority.
     time_stamp: bool,
     stored: Vec<PathBuf>,
+    /// IDs of the system's store: (name, certificate DER).
+    system: Vec<(String, Vec<u8>)>,
     choice: IdChoice,
     password: String,
     new_name: String,
@@ -188,8 +192,10 @@ impl VersoloPdfApp {
             Err(_) => (Vec::new(), false),
         };
         let stored = id::ids_dir().map(|d| id::list(&d)).unwrap_or_default();
+        let system = if crate::mail::no_external() { Vec::new() } else { id::system_ids() };
         let choice = match stored.first() {
             Some(p) => IdChoice::Stored(p.clone()),
+            None if !system.is_empty() => IdChoice::System(0),
             None => IdChoice::New,
         };
         let placement = if invisible {
@@ -203,6 +209,7 @@ impl VersoloPdfApp {
             certify,
             time_stamp,
             stored,
+            system,
             choice,
             password: String::new(),
             new_name: String::new(),
@@ -238,6 +245,10 @@ impl VersoloPdfApp {
         match &s.choice {
             IdChoice::Stored(p) => read(p),
             IdChoice::File(Some(p)) => read(p),
+            IdChoice::System(i) => match s.system.get(*i) {
+                Some((_, der)) => DigitalId::from_system(der).map_err(|e| e.to_string()),
+                None => Err(tr(de, "Bitte eine digitale ID wählen.", "Please choose a digital ID.").into()),
+            },
             IdChoice::File(None) => Err(tr(
                 de,
                 "Bitte eine Datei mit der digitalen ID wählen.",
@@ -292,8 +303,12 @@ impl VersoloPdfApp {
         };
 
         strong(ui, tr(de, "Digitale ID", "Digital ID"));
+        let keychain = tr(de, "Schlüsselbund", "Keychain");
         let shown = match &s.choice {
             IdChoice::Stored(p) => file_label(p),
+            IdChoice::System(i) => {
+                s.system.get(*i).map(|(name, _)| format!("{name} ({keychain})")).unwrap_or_default()
+            }
             IdChoice::File(_) => tr(de, "Andere Datei (.pfx, .p12) …", "Other file (.pfx, .p12) …").into(),
             IdChoice::New => tr(de, "Neue digitale ID erstellen …", "Create a new digital ID …").into(),
         };
@@ -303,6 +318,12 @@ impl VersoloPdfApp {
                 for p in &s.stored {
                     let c = IdChoice::Stored(p.clone());
                     if ui.selectable_label(s.choice == c, file_label(p)).clicked() {
+                        s.choice = c;
+                    }
+                }
+                for (i, (name, _)) in s.system.iter().enumerate() {
+                    let c = IdChoice::System(i);
+                    if ui.selectable_label(s.choice == c, format!("{name} ({keychain})")).clicked() {
                         s.choice = c;
                     }
                 }
@@ -354,22 +375,37 @@ impl VersoloPdfApp {
                 ui.text_edit_singleline(&mut s.new_org);
                 ui.end_row();
             }
-            let label = ui.label(tr(de, "Kennwort:", "Password:"));
-            let pw = ui.add(egui::TextEdit::singleline(&mut s.password).password(true)).labelled_by(label.id);
-            // The password is what is needed first for a stored ID.
-            if !s.focused {
-                s.focused = true;
-                if s.choice != IdChoice::New {
-                    pw.request_focus();
+            // The keychain asks for permission itself.
+            if !matches!(s.choice, IdChoice::System(_)) {
+                let label = ui.label(tr(de, "Kennwort:", "Password:"));
+                let pw =
+                    ui.add(egui::TextEdit::singleline(&mut s.password).password(true)).labelled_by(label.id);
+                // The password is what is needed first for a stored ID.
+                if !s.focused {
+                    s.focused = true;
+                    if s.choice != IdChoice::New {
+                        pw.request_focus();
+                    }
                 }
+                ui.end_row();
             }
-            ui.end_row();
             if s.choice == IdChoice::New {
                 ui.label(tr(de, "Kennwort wiederholen:", "Repeat password:"));
                 ui.add(egui::TextEdit::singleline(&mut s.new_repeat).password(true));
                 ui.end_row();
             }
         });
+        if matches!(s.choice, IdChoice::System(_)) {
+            ui.label(
+                RichText::new(tr(
+                    de,
+                    "Der private Schlüssel bleibt im Schlüsselbund von macOS; macOS fragt beim Signieren eventuell nach Ihrer Erlaubnis.",
+                    "The private key stays in the macOS keychain; macOS may ask for your permission when signing.",
+                ))
+                .small()
+                .weak(),
+            );
+        }
         if s.choice == IdChoice::New {
             ui.label(
                 RichText::new(tr(

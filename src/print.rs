@@ -6,14 +6,20 @@
 //! * Windows: rendered by PDFium and drawn through GDI on a printer device
 //!   context; the printer driver's own settings dialog ("Einstellungen…")
 //!   is available.
-//! * Linux / macOS: handed to the CUPS `lp` command.
+//! * macOS: shown in the macOS print dialog (PDFKit), which sends them to
+//!   the printer with its own options.
+//! * Linux: handed to the CUPS `lp` command.
+//!
+//! The printer list comes from CUPS on Linux and macOS.
 
 use crate::document::Document;
 #[cfg(unix)]
 use crate::error::Error;
 use crate::error::Result;
+#[cfg(all(unix, not(target_os = "macos")))]
+use crate::print_layout::Duplex;
 #[cfg(unix)]
-use crate::print_layout::{Duplex, Paper, PrintSettings};
+use crate::print_layout::{Paper, PrintSettings};
 
 /// Formats zero-based page indices as a 1-based range list (`1-3,5`).
 pub fn format_ranges(pages: &[usize]) -> String {
@@ -97,8 +103,42 @@ pub fn printers() -> Vec<PrinterInfo> {
     out
 }
 
+/// What [`print_job`] returns when the user cancelled the system's print
+/// dialog (macOS).
+pub const CANCELLED: &str = "\u{1}cancelled";
+
+/// Prints the given sheets of `job` through the macOS print dialog, with
+/// the printer and copies chosen in VersoloPDF preselected; the dialog also
+/// offers the printer's own options (duplex, paper tray, …).
+#[cfg(target_os = "macos")]
+pub fn print_job(
+    printer: &str,
+    _devmode: Option<&[u8]>,
+    settings: &PrintSettings,
+    job: &Document,
+    sheets: &[usize],
+    title: &str,
+    _paper: &Paper,
+) -> Result<String> {
+    if sheets.is_empty() {
+        return Err(Error::Invalid("no pages selected".into()));
+    }
+    let bytes = sheet_pdf(job, sheets, settings.as_image)?;
+    let dir = std::env::temp_dir().join(format!("versolopdf-print-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).map_err(|e| Error::io(&dir, e))?;
+    let path = dir.join("print.pdf");
+    std::fs::write(&path, &bytes).map_err(|e| Error::io(&path, e))?;
+    let result = crate::macos::print_pdf(&path, printer, settings.copies, &sanitize_title(title));
+    std::fs::remove_file(&path).ok();
+    match result {
+        Ok(true) => Ok(String::new()),
+        Ok(false) => Ok(CANCELLED.into()),
+        Err(e) => Err(Error::Invalid(e)),
+    }
+}
+
 /// Prints the given sheets of `job` with `lp`. Returns the job description.
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "macos")))]
 pub fn print_job(
     printer: &str,
     _devmode: Option<&[u8]>,

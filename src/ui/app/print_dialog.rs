@@ -285,7 +285,15 @@ impl VersoloPdfApp {
                                 state.devmode = Some(dm);
                                 reload_paper = true;
                             }
-                            #[cfg(not(windows))]
+                            #[cfg(target_os = "macos")]
+                            {
+                                let _ = ui.add_enabled(false, egui::Button::new(tr(de, "Einstellungen…", "Settings…"))).on_disabled_hover_text(tr(
+                                    de,
+                                    "Nach „Drucken“ öffnet sich der Druckdialog von macOS mit allen Einstellungen des Druckers (z. B. beidseitig, Papierfach).",
+                                    "After \"Print\" the macOS print dialog opens with all settings of the printer (e.g. two-sided, paper tray).",
+                                ));
+                            }
+                            #[cfg(all(unix, not(target_os = "macos")))]
                             {
                                 let _ = ui.add_enabled(false, egui::Button::new(tr(de, "Einstellungen…", "Settings…"))).on_disabled_hover_text(tr(
                                     de,
@@ -577,6 +585,8 @@ impl VersoloPdfApp {
                     )
                 });
             match result {
+                // Cancelled in the system's print dialog.
+                Ok(d) if d == crate::print::CANCELLED => {}
                 Ok(_) => done.push(title),
                 Err(err) => {
                     self.show_error(&err);
@@ -584,8 +594,10 @@ impl VersoloPdfApp {
                 }
             }
         }
-        let msg = if de { "An den Drucker gesendet: " } else { "Sent to the printer: " };
-        self.set_status(ctx, format!("{msg}{}", done.join(", ")));
+        if !done.is_empty() {
+            let msg = if de { "An den Drucker gesendet: " } else { "Sent to the printer: " };
+            self.set_status(ctx, format!("{msg}{}", done.join(", ")));
+        }
         self.clear_previews();
         self.dialog_doc = None;
     }

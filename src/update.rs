@@ -1,14 +1,16 @@
 //! "Neue Version": looks for the newest VersoloPDF release on GitHub and, on
-//! Windows, installs it.
+//! Windows and macOS, installs it.
 //!
 //! Like "Von URL öffnen", the system's `curl` program does the network work
 //! (VersoloPDF has no own network or TLS library). The release package is only
 //! taken from this project's GitHub releases, must match its SHA-256
-//! checksum and is unpacked with the `tar` program that is part of Windows.
-//! The new program then copies itself into the program folder
+//! checksum and is unpacked with the system's own program (`tar` on
+//! Windows, `ditto` on macOS). The new program then installs itself
 //! (`--install-update`, with administrator rights when the folder is
-//! write-protected); the running files are renamed to "….old" first, which
-//! Windows allows. Afterwards the new version is started.
+//! write-protected): on Windows it copies its files into the program
+//! folder, the running files are renamed to "….old" first, which Windows
+//! allows; on macOS the new bundle takes the place of the old one.
+//! Afterwards the new version is started.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -46,6 +48,20 @@ pub struct Release {
     pub windows: Option<Asset>,
     /// Its checksum file ("….zip.sha256"), used when GitHub gives no digest.
     pub windows_sha: Option<Asset>,
+    /// The macOS package ("…-macos.zip", the app for Intel and Apple chips).
+    pub macos: Option<Asset>,
+    pub macos_sha: Option<Asset>,
+}
+
+/// The package for this system and its checksum file, if the release has one.
+pub fn package_of(release: &Release) -> Option<(&Asset, Option<&Asset>)> {
+    if cfg!(windows) {
+        release.windows.as_ref().map(|a| (a, release.windows_sha.as_ref()))
+    } else if cfg!(target_os = "macos") {
+        release.macos.as_ref().map(|a| (a, release.macos_sha.as_ref()))
+    } else {
+        None
+    }
 }
 
 /// The running version.
@@ -254,6 +270,8 @@ pub fn parse_release(text: &str) -> Result<Release> {
         page: json.str("html_url").unwrap_or_default().to_string(),
         windows: None,
         windows_sha: None,
+        macos: None,
+        macos_sha: None,
     };
     if let Some(Json::Arr(assets)) = json.get("assets") {
         for a in assets {
@@ -276,6 +294,10 @@ pub fn parse_release(text: &str) -> Result<Release> {
                 release.windows = Some(asset);
             } else if lower.ends_with("-windows-x64.zip.sha256") {
                 release.windows_sha = Some(asset);
+            } else if lower.ends_with("-macos.zip") {
+                release.macos = Some(asset);
+            } else if lower.ends_with("-macos.zip.sha256") {
+                release.macos_sha = Some(asset);
             }
         }
     }
@@ -369,12 +391,13 @@ fn download(asset: &Asset, dest: &Path, max: u64) -> Result<()> {
     Ok(())
 }
 
-/// Downloads the Windows package of `release` into `dir` and checks its
-/// SHA-256 checksum (GitHub's digest or the release's ".sha256" file).
+/// Downloads the package of `release` for this system into `dir` and checks
+/// its SHA-256 checksum (GitHub's digest or the release's ".sha256" file).
 pub fn download_package(release: &Release, dir: &Path) -> Result<PathBuf> {
-    let asset = release.windows.as_ref().ok_or_else(|| Error::Invalid("no Windows package".into()))?;
+    let (asset, sha_asset) =
+        package_of(release).ok_or_else(|| Error::Invalid("no package for this system".into()))?;
     std::fs::create_dir_all(dir).map_err(|e| Error::io(dir, e))?;
-    let expected = match (&asset.sha256, &release.windows_sha) {
+    let expected = match (&asset.sha256, sha_asset) {
         (Some(h), _) => h.clone(),
         (None, Some(sha_file)) => {
             let path = dir.join("package.sha256");
@@ -420,12 +443,69 @@ pub fn folder_writable(dir: &Path) -> bool {
     ok
 }
 
-/// Unpacks the package; returns the folder with the new `VersoloPDF.exe`.
-/// Windows only (uses the `tar.exe` of Windows).
+/// Name of the program bundle on macOS.
+pub const MAC_APP: &str = "VersoloPDF.app";
+
+/// Where an update is installed: on Windows the program folder, on macOS
+/// the program bundle ("…/VersoloPDF.app"). None when the program does not
+/// run from such a place (e.g. a development build).
+pub fn install_target() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    if cfg!(target_os = "macos") {
+        // …/VersoloPDF.app/Contents/MacOS/VersoloPDF
+        let bundle = exe.parent()?.parent()?.parent()?;
+        bundle.extension().is_some_and(|e| e == "app").then(|| bundle.to_path_buf())
+    } else if cfg!(windows) {
+        exe.parent().map(PathBuf::from)
+    } else {
+        None
+    }
+}
+
+/// The program file inside an installation (`install_target`) or an
+/// unpacked package.
+pub fn program_exe(dir: &Path) -> PathBuf {
+    if cfg!(target_os = "macos") { dir.join("Contents/MacOS/VersoloPDF") } else { dir.join("VersoloPDF.exe") }
+}
+
+/// The folder that has to be writable to install into `target`.
+pub fn install_folder(target: &Path) -> PathBuf {
+    if cfg!(target_os = "macos") {
+        target.parent().unwrap_or(target).to_path_buf()
+    } else {
+        target.to_path_buf()
+    }
+}
+
+/// The bundle `VersoloPDF.app` in `dir` (or one folder below).
+fn mac_bundle(dir: &Path) -> Option<PathBuf> {
+    let direct = dir.join(MAC_APP);
+    if program_exe(&direct).is_file() {
+        return Some(direct);
+    }
+    std::fs::read_dir(dir).ok()?.flatten().map(|e| e.path().join(MAC_APP)).find(|p| program_exe(p).is_file())
+}
+
+/// Unpacks the package; returns the folder with the new program (Windows)
+/// or the new bundle (macOS).
 pub fn unpack(zip: &Path) -> Result<PathBuf> {
     let work = zip.parent().ok_or_else(|| Error::Invalid("no folder".into()))?.join("files");
     std::fs::remove_dir_all(&work).ok();
     std::fs::create_dir_all(&work).map_err(|e| Error::io(&work, e))?;
+    if cfg!(target_os = "macos") {
+        // ditto keeps the bundle intact (permissions, signature).
+        let output = Command::new("/usr/bin/ditto")
+            .args(["-x", "-k"])
+            .arg(zip)
+            .arg(&work)
+            .output()
+            .map_err(|e| Error::Invalid(format!("ditto: {e}")))?;
+        if !output.status.success() {
+            return Err(curl_error(&output));
+        }
+        return mac_bundle(&work)
+            .ok_or_else(|| Error::Invalid(format!("{MAC_APP} not found in the package")));
+    }
     // tar.exe of Windows (also reads zip files), with its full path.
     let system = std::env::var_os("SystemRoot").map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from);
     let mut tar = Command::new(system.join("System32").join("tar.exe"));
@@ -467,16 +547,80 @@ pub fn wait_for_exit(pid: u32, seconds: u32) -> bool {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(unix)]
+#[allow(unsafe_code)]
 pub fn wait_for_exit(pid: u32, seconds: u32) -> bool {
-    let proc = PathBuf::from(format!("/proc/{pid}"));
+    let Ok(pid) = libc::pid_t::try_from(pid) else { return true };
+    // SAFETY: signal 0 only asks whether the process exists.
+    let alive = || unsafe { libc::kill(pid, 0) } == 0;
     for _ in 0..seconds * 10 {
-        if !proc.exists() {
+        if !alive() {
             return true;
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
-    !proc.exists()
+    !alive()
+}
+
+/// Replaces the bundle `target` by a copy of the bundle `source` (macOS).
+/// The new bundle is copied next to the old one first; the old one is only
+/// removed once the new one is in place (a running program keeps working,
+/// its files stay open). Returns the number of files.
+pub fn install_bundle(source: &Path, target: &Path) -> Result<usize> {
+    if !program_exe(source).is_file() {
+        return Err(Error::Invalid("no program in the new bundle".into()));
+    }
+    let folder = target.parent().ok_or_else(|| Error::Invalid("no folder".into()))?;
+    let name = target.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| MAC_APP.into());
+    let fresh = folder.join(format!(".{name}.new"));
+    let old = folder.join(format!(".{name}.old"));
+    std::fs::remove_dir_all(&fresh).ok();
+    std::fs::remove_dir_all(&old).ok();
+    copy_tree(source, &fresh, 0).map_err(|e| {
+        std::fs::remove_dir_all(&fresh).ok();
+        Error::io(&fresh, e)
+    })?;
+    let mut files = Vec::new();
+    files_below(&fresh, Path::new(""), 8, &mut files).map_err(|e| Error::io(&fresh, e))?;
+    let had_old = target.exists();
+    if had_old && let Err(e) = std::fs::rename(target, &old) {
+        std::fs::remove_dir_all(&fresh).ok();
+        return Err(Error::io(target, e));
+    }
+    if let Err(e) = std::fs::rename(&fresh, target) {
+        // Back to the old version.
+        if had_old {
+            std::fs::rename(&old, target).ok();
+        }
+        std::fs::remove_dir_all(&fresh).ok();
+        return Err(Error::io(target, e));
+    }
+    std::fs::remove_dir_all(&old).ok();
+    Ok(files.len())
+}
+
+/// Copies a folder with its files, links and permissions.
+fn copy_tree(from: &Path, to: &Path, depth: usize) -> std::io::Result<()> {
+    if depth > 12 {
+        return Err(std::io::ErrorKind::InvalidInput.into());
+    }
+    std::fs::create_dir_all(to)?;
+    std::fs::set_permissions(to, std::fs::metadata(from)?.permissions())?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let (src, dest) = (entry.path(), to.join(entry.file_name()));
+        let kind = entry.file_type()?;
+        if kind.is_symlink() {
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(std::fs::read_link(&src)?, &dest)?;
+        } else if kind.is_dir() {
+            copy_tree(&src, &dest, depth + 1)?;
+        } else {
+            // std::fs::copy keeps the permissions (the program stays executable).
+            std::fs::copy(&src, &dest)?;
+        }
+    }
+    Ok(())
 }
 /// Ending of files replaced by an update (removed by the next update).
 const OLD: &str = "old";
@@ -587,7 +731,7 @@ pub fn run_installer(new_exe: &Path, target: &Path) -> Result<()> {
     if crate::mail::no_external() {
         return Err(Error::Invalid("Testbetrieb: keine Installation".into()));
     }
-    let code = if folder_writable(target) {
+    let code = if folder_writable(&install_folder(target)) {
         let mut cmd = Command::new(new_exe);
         cmd.arg(INSTALL_ARG).arg(target);
         #[cfg(windows)]
@@ -650,7 +794,33 @@ fn elevated(new_exe: &Path, target: &Path) -> Result<u32> {
     Ok(code)
 }
 
-#[cfg(not(windows))]
+/// Runs the installer as administrator: macOS asks for an administrator's
+/// password. The paths are passed as arguments, never as script text.
+#[cfg(target_os = "macos")]
+fn elevated(new_exe: &Path, target: &Path) -> Result<u32> {
+    let output = Command::new("/usr/bin/osascript")
+        .args(["-e", "on run argv"])
+        .args([
+            "-e",
+            "do shell script (quoted form of item 1 of argv) & \" --install-update \" & (quoted form of item 2 of argv) with administrator privileges",
+        ])
+        .args(["-e", "end run"])
+        .arg(new_exe)
+        .arg(target)
+        .output()
+        .map_err(|e| Error::Invalid(format!("osascript: {e}")))?;
+    if output.status.success() {
+        return Ok(0);
+    }
+    let text = String::from_utf8_lossy(&output.stderr);
+    // -128: the user cancelled the password question.
+    if text.contains("-128") {
+        return Err(Error::Invalid("Die Installation wurde abgebrochen (keine Administratorrechte).".into()));
+    }
+    Ok(1)
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
 fn elevated(_new_exe: &Path, target: &Path) -> Result<u32> {
     Err(Error::Invalid(format!("{} ist schreibgeschützt.", target.display())))
 }
@@ -699,6 +869,10 @@ mod tests {
         );
         assert!(w.url.starts_with("https://github.com/MrMarkus42/VersoloPDF/releases/download/"));
         assert!(r.windows_sha.is_some());
+        assert!(r.macos.is_none());
+        let mac = json.replace("windows-x64", "macos");
+        let r = parse_release(&mac).unwrap();
+        assert!(r.macos.is_some() && r.macos_sha.is_some() && r.windows.is_none());
         assert!(parse_release("{\"message\": \"Not Found\"}").is_err());
         assert!(parse_release("{\"tag_name\": ").is_err());
         assert!(parse_json(&"[".repeat(500)).is_none(), "deep nesting is refused");
@@ -732,6 +906,46 @@ mod tests {
         assert!(!dst.join(LEFTOVER_LIST).exists());
         // Without a program in the source nothing happens.
         assert!(install_files(&dst.join("licenses"), &dst).is_err());
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bundle_is_replaced_as_a_whole() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = std::env::temp_dir().join(format!("versolopdf-bundle-{}", std::process::id()));
+        let (src, apps) = (base.join("neu").join(MAC_APP), base.join("Programme"));
+        let target = apps.join(MAC_APP);
+        for (dir, text) in [(&src, "neu"), (&target, "alt")] {
+            let exe = program_exe(dir);
+            std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
+            std::fs::write(&exe, text).unwrap();
+            std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        std::fs::write(target.join("alt-nur.txt"), b"weg").unwrap();
+        std::os::unix::fs::symlink("Contents", src.join("Verweis")).unwrap();
+        assert!(install_bundle(&src, &target).unwrap() >= 1);
+        let exe = program_exe(&target);
+        assert_eq!(std::fs::read(&exe).unwrap(), b"neu");
+        assert_eq!(std::fs::metadata(&exe).unwrap().permissions().mode() & 0o111, 0o111, "stays executable");
+        assert!(!target.join("alt-nur.txt").exists(), "the old bundle is gone");
+        assert!(std::fs::symlink_metadata(target.join("Verweis")).unwrap().file_type().is_symlink());
+        let left: Vec<_> = std::fs::read_dir(&apps).unwrap().flatten().map(|e| e.file_name()).collect();
+        assert_eq!(left, vec![std::ffi::OsString::from(MAC_APP)], "no helper folders left");
+        // Without a program in the new bundle nothing happens.
+        assert!(install_bundle(&base.join("leer"), &target).is_err());
+        assert_eq!(std::fs::read(&exe).unwrap(), b"neu");
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn mac_bundle_is_found_in_the_package() {
+        let base = std::env::temp_dir().join(format!("versolopdf-pkg-{}", std::process::id()));
+        let app = base.join("VersoloPDF-9.9.9-macos").join(MAC_APP);
+        std::fs::create_dir_all(program_exe(&app).parent().unwrap()).unwrap();
+        std::fs::write(program_exe(&app), b"x").unwrap();
+        assert_eq!(mac_bundle(&base), Some(app));
+        assert_eq!(mac_bundle(&base.join("nichts")), None);
         std::fs::remove_dir_all(&base).ok();
     }
 }

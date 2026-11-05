@@ -6,8 +6,9 @@
 //! message window opens and nothing is sent without the user. Without a
 //! MAPI mail program (e.g. the new Outlook) the `mailto:` address goes to
 //! the program registered for it (not to the web browser) and Explorer
-//! shows the files to drag in. Elsewhere `xdg-open` / `open` gets the
-//! `mailto:` address and the file manager shows the files.
+//! shows the files to drag in. On macOS Apple Mail or Outlook get the
+//! files attached (see `crate::macos`). Otherwise `xdg-open` / `open` gets
+//! the `mailto:` address and the file manager shows the files.
 
 use std::path::{Path, PathBuf};
 
@@ -32,6 +33,10 @@ pub fn compose(subject: &str, files: Vec<PathBuf>) -> bool {
             }
         });
         true
+    }
+    #[cfg(target_os = "macos")]
+    if crate::macos::compose_mail(&subject, &files) {
+        return true;
     }
     #[cfg(not(windows))]
     {

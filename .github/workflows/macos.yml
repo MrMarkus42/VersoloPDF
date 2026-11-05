@@ -1,0 +1,66 @@
+# Builds and tests the macOS app on a Mac of GitHub. A published release
+# gets the app package (VersoloPDF-<version>-macos.zip + .sha256) added.
+name: macOS
+
+on:
+  push:
+    branches: [master, macos]
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    runs-on: macos-14
+    timeout-minutes: 90
+    permissions:
+      contents: write # only used to add the package to a release
+    env:
+      CARGO_TERM_COLOR: never
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          rustc --version
+
+      - name: PDFium
+        run: bash scripts/fetch-pdfium.sh mac-arm64 mac-x64
+
+      - name: Tests
+        run: cargo test --locked
+
+      - name: Keychain test
+        run: cargo test --locked --test macos -- --ignored --nocapture
+
+      - name: Package
+        run: bash scripts/package-macos.sh
+
+      - name: Start test of the app
+        run: |
+          app="$(ls -d dist/VersoloPDF-*-macos/VersoloPDF.app)"
+          file "$app/Contents/MacOS/VersoloPDF" "$app/Contents/Frameworks/libpdfium.dylib"
+          # The app must start and keep running (window, PDFium loaded).
+          "$app/Contents/MacOS/VersoloPDF" &
+          pid=$!
+          sleep 15
+          kill -0 "$pid"
+          kill "$pid"
+          grep -h "PDFium" ~/Library/Application\ Support/VersoloPDF/*.log | tail -3 || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VersoloPDF-macos
+          path: dist/*-macos.zip*
+
+      - name: Add to the release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" dist/*-macos.zip dist/*-macos.zip.sha256 --clobber

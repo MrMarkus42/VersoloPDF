@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.2.0 – 2026-11-05
+
+* **VersoloPDF for macOS**: one app for Apple chips and Intel (macOS 11 or
+  newer), built and tested on a Mac by GitHub Actions
+  * printing through the macOS print dialog, with the printer and copies
+    chosen in VersoloPDF preselected and all options of the printer
+  * "Per E-Mail senden" opens a new message in Apple Mail or Outlook with the
+    files attached
+  * "Vorlesen" uses the voice of macOS, with the chosen volume
+  * text recognition with the recognition built into macOS (no extra
+    program needed; Tesseract can still be chosen)
+  * PDFs opened in the Finder (double click, "Öffnen mit", Dock) open as
+    tabs, also while VersoloPDF already runs
+  * new versions install themselves (an administrator's password is asked
+    for if the Applications folder is protected)
+  * signing with digital IDs from the keychain; the private key stays there
+* `scripts/fetch-pdfium.sh` also runs with the bash of macOS
+
 ## 1.1.2 – 2026-11-05
 
 * Updates install reliably: the new version copies itself into the program

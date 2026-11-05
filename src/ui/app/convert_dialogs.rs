@@ -131,7 +131,12 @@ impl VersoloPdfApp {
                 }
             }
             Some(exe) => {
-                ui.label(RichText::new(format!("Tesseract: {}", exe.display())).small().weak());
+                let engine = if crate::ocr::is_vision(&exe) {
+                    tr(de, "Texterkennung von macOS", "macOS text recognition").to_string()
+                } else {
+                    format!("Tesseract: {}", exe.display())
+                };
+                ui.label(RichText::new(engine).small().weak());
                 s.range.ui(ui, de, n, cur, &[RangeMode::All, RangeMode::Current, RangeMode::Custom]);
                 section(ui, tr(de, "Sprachen", "Languages"), |ui| {
                     if s.available.is_empty() {
