@@ -63,6 +63,16 @@ fn main() -> eframe::Result {
     // Error log and crash reports ("Fehlerprotokoll").
     versolopdf::crashlog::init();
     let crash = versolopdf::crashlog::take_crash_notice();
+    // macOS may run a downloaded app from a hidden read-only copy.
+    #[cfg(target_os = "macos")]
+    if let Ok(exe) = std::env::current_exe()
+        && versolopdf::macos::is_translocated(&exe)
+    {
+        let original = exe.ancestors().nth(3).and_then(versolopdf::macos::original_bundle_path);
+        log::info!(
+            "macOS startet eine schreibgeschützte Kopie (App Translocation); Programm liegt in {original:?}"
+        );
+    }
     // For testing the crash report only.
     if std::env::var_os("VERSOLOPDF_TEST_CRASH").is_some() {
         panic!("Testabsturz (VERSOLOPDF_TEST_CRASH gesetzt)");

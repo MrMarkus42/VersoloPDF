@@ -502,6 +502,46 @@ fn split_words(text: &str) -> Vec<(&str, bool)> {
 }
 
 // ---------------------------------------------------------------------------
+// App Translocation
+
+/// True for a path inside the hidden read-only copy macOS starts a
+/// downloaded app from until it is moved with the Finder ("App
+/// Translocation").
+pub fn is_translocated(path: &Path) -> bool {
+    path.to_string_lossy().contains("/AppTranslocation/")
+}
+
+/// The place the user put the bundle `bundle`, if macOS runs it from a
+/// hidden copy (asked from the Security framework, which has done this
+/// since macOS 10.12). None if it is not translocated or unknown.
+pub fn original_bundle_path(bundle: &Path) -> Option<PathBuf> {
+    if !is_translocated(bundle) {
+        return None;
+    }
+    type Original = unsafe extern "C" fn(*const NSURL, *mut *mut std::ffi::c_void) -> *mut NSURL;
+    let symbol = translocation_function()?;
+    // SAFETY: the symbol has this C signature (CFURLRef in, CFURLRef out,
+    // CFURLRef is toll-free bridged with NSURL).
+    let original: Original = unsafe { std::mem::transmute::<*mut std::ffi::c_void, Original>(symbol) };
+    let url = file_url(bundle);
+    // SAFETY: valid URL; the result is a new (+1) URL or null.
+    let result = unsafe { original(Retained::as_ptr(&url), std::ptr::null_mut()) };
+    // SAFETY: +1 reference from the "Create" function above.
+    let result = unsafe { Retained::from_raw(result) }?;
+    let path = PathBuf::from(result.path()?.to_string());
+    (!is_translocated(&path)).then_some(path)
+}
+
+/// The Security framework's function that tells where a translocated app
+/// really is (null if this macOS does not have it).
+pub fn translocation_function() -> Option<*mut std::ffi::c_void> {
+    // SAFETY: dlsym with the default handle and a zero-terminated name.
+    let symbol =
+        unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"SecTranslocateCreateOriginalPathForURL".as_ptr()) };
+    (!symbol.is_null()).then_some(symbol)
+}
+
+// ---------------------------------------------------------------------------
 // Keychain
 
 /// Certificates with a private key in the user's keychains: (name for the

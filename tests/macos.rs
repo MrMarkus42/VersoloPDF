@@ -138,6 +138,19 @@ fn mail_goes_to_a_program_that_takes_attachments() {
 }
 
 #[test]
+fn translocated_apps_are_recognised() {
+    // macOS has the function that tells where a translocated app really is.
+    assert!(versolopdf::macos::translocation_function().is_some());
+    let hidden = Path::new("/private/var/folders/x/T/AppTranslocation/ABC/d/VersoloPDF.app");
+    assert!(versolopdf::macos::is_translocated(hidden));
+    assert!(!versolopdf::macos::is_translocated(Path::new("/Applications/VersoloPDF.app")));
+    // A normal place is not translocated; asking for it gives nothing.
+    assert_eq!(versolopdf::macos::original_bundle_path(Path::new("/Applications/VersoloPDF.app")), None);
+    // An unknown hidden copy does not crash and gives no wrong place.
+    assert_eq!(versolopdf::macos::original_bundle_path(hidden), None);
+}
+
+#[test]
 fn open_files_start_empty() {
     assert!(versolopdf::macos::take_opened_files().is_empty());
 }

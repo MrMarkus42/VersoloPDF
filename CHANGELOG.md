@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.1 – 2026-11-06
+
+* macOS: updates install again when macOS runs VersoloPDF from a hidden
+  read-only copy ("App Translocation", for a downloaded app that was not
+  moved with the Finder): the update goes to the place where the app
+  really is. Before, it failed with "Read-only file system" even after the
+  administrator password. If that place cannot be found, VersoloPDF says
+  how to move the app into "Programme".
+
 ## 1.3.0 – 2026-11-06
 
 * macOS: the menu bar of the Mac (VersoloPDF, Ablage, Bearbeiten,

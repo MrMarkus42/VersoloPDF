@@ -454,7 +454,16 @@ pub fn install_target() -> Option<PathBuf> {
     if cfg!(target_os = "macos") {
         // …/VersoloPDF.app/Contents/MacOS/VersoloPDF
         let bundle = exe.parent()?.parent()?.parent()?;
-        bundle.extension().is_some_and(|e| e == "app").then(|| bundle.to_path_buf())
+        if bundle.extension().is_none_or(|e| e != "app") {
+            return None;
+        }
+        // Started from macOS' hidden read-only copy: install where the
+        // user put the app.
+        #[cfg(target_os = "macos")]
+        if let Some(original) = crate::macos::original_bundle_path(bundle) {
+            return Some(original);
+        }
+        Some(bundle.to_path_buf())
     } else if cfg!(windows) {
         exe.parent().map(PathBuf::from)
     } else {
@@ -724,12 +733,19 @@ pub fn remove_leftovers(dir: &Path) {
     }
 }
 
+/// Shown when macOS runs VersoloPDF from a hidden read-only copy and its
+/// real place is unknown.
+pub const TRANSLOCATED: &str = "macOS startet VersoloPDF aus einer schreibgeschützten Kopie, weil das Programm noch nicht mit dem Finder verschoben wurde. Bitte VersoloPDF beenden, VersoloPDF.app im Finder in den Ordner „Programme“ ziehen, von dort starten und das Update erneut versuchen.";
+
 /// Lets the new program (`new_exe`) copy itself into `target` and waits
 /// until it is done. A write-protected folder (e.g. under "Programme")
 /// makes Windows ask for administrator rights first.
 pub fn run_installer(new_exe: &Path, target: &Path) -> Result<()> {
     if crate::mail::no_external() {
         return Err(Error::Invalid("Testbetrieb: keine Installation".into()));
+    }
+    if target.to_string_lossy().contains("/AppTranslocation/") {
+        return Err(Error::Invalid(TRANSLOCATED.into()));
     }
     let code = if folder_writable(&install_folder(target)) {
         let mut cmd = Command::new(new_exe);
@@ -936,6 +952,14 @@ mod tests {
         assert!(install_bundle(&base.join("leer"), &target).is_err());
         assert_eq!(std::fs::read(&exe).unwrap(), b"neu");
         std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn hidden_read_only_copy_is_not_written() {
+        let hidden = Path::new("/private/var/folders/x/T/AppTranslocation/ABC/d/VersoloPDF.app");
+        let err = run_installer(Path::new("/tmp/neu"), hidden).unwrap_err().to_string();
+        // (in tests VERSOLOPDF_NO_EXTERNAL may stop it first)
+        assert!(err.contains("Programme") || err.contains("Testbetrieb"), "{err}");
     }
 
     #[test]
