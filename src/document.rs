@@ -2119,6 +2119,27 @@ impl Document {
         forms::field_extras(&self.bytes, self.password.as_deref(), page, annot_index)
     }
 
+    /// Properties of a form field (form designer).
+    pub fn field_props(&mut self, page: usize, annot_index: usize) -> Result<forms::FieldProps> {
+        self.check_page(page)?;
+        self.sync_bytes()?;
+        forms::field_props(&self.bytes, self.password.as_deref(), page, annot_index)
+    }
+
+    /// Changes the properties of a form field (one undo step).
+    pub fn set_field_props(
+        &mut self,
+        page: usize,
+        annot_index: usize,
+        props: &forms::FieldProps,
+    ) -> Result<()> {
+        self.check_page(page)?;
+        self.require(self.permissions().modify)?;
+        self.edit_bytes("form field properties", |b, pw| {
+            forms::set_field_props(b, pw, page, annot_index, props)
+        })
+    }
+
     /// "Bild" field: shows `image` in the button.
     pub fn set_button_image(
         &mut self,

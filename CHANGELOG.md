@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+* Forms: **properties of form fields** in the right pane – name, tooltip
+  ("QuickInfo"), required, read only; for text fields a text given in
+  advance, multi-line, password, maximum length, font (Helvetica, Helvetica
+  bold, Times, Courier), size (or automatic), colour, alignment, border and
+  background; for lists and combo boxes the items and the preselected one.
+  Changes apply at once and are one undo step each. A new field is selected
+  with its properties shown; a double click in "Felder auswählen" shows them
+  too
+* Forms: **"Ausfüllen"** on the Form tab switches to filling in (hand tool,
+  fields highlighted); **Tab / Shift+Tab** go to the next / previous text
+  field; the text selection tool fills in fields too. "Formulare ausfüllen"
+  (one PDF per CSV row) is now called "Serienformulare aus CSV"
+* Start › **"Auswahl"**: one click gives the selection pointer (the arrow
+  below opens the menu as before); a frame takes the page content and also
+  comments and form fields, which then move and are deleted together.
+  "Objekte bearbeiten" works the same way (upper part: the tool, arrow: the
+  filter)
+* Start › Hinzufügen › **Text hinzufügen**: the text is typed in place and
+  then stays selected – it can be moved, resized and turned at once. The
+  right pane shows font, size, bold/italic, alignment and colour (also for
+  any selected text), position and size, and turning by 90° or any angle
+* The search pane no longer grows wider by itself
+* The "Schreibmaschine" tool shows its font size in the right pane
+
 ## 1.3.1 – 2026-11-06
 
 * macOS: updates install again when macOS runs VersoloPDF from a hidden

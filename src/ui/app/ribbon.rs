@@ -237,8 +237,24 @@ impl VersoloPdfApp {
     }
 
     pub(super) fn popup_menu(&mut self, ctx: &Context, resp: &egui::Response, entries: &[Entry]) {
+        self.popup_menu_ext(ctx, resp, entries, false);
+    }
+
+    /// Drop-down of `resp`; `keep_closed`: this click was meant for the
+    /// button itself (split buttons), not for the menu.
+    pub(super) fn popup_menu_ext(
+        &mut self,
+        ctx: &Context,
+        resp: &egui::Response,
+        entries: &[Entry],
+        keep_closed: bool,
+    ) {
         let mut chosen = None;
-        egui::Popup::menu(resp).show(|ui| {
+        let mut popup = egui::Popup::menu(resp);
+        if keep_closed {
+            popup = popup.open_memory(egui::SetOpenCommand::Bool(false));
+        }
+        popup.show(|ui| {
             ui.set_min_width(260.0);
             for entry in entries {
                 match entry {

@@ -283,6 +283,9 @@ pub enum RangePurpose {
     ToImages,
 }
 
+/// A selection of page objects: (tab, page, objects, document revision).
+type SelectionKey = (u64, usize, Vec<usize>, u64);
+
 pub struct VersoloPdfApp {
     settings: Settings,
     tabs: Vec<DocTab>,
@@ -309,6 +312,13 @@ pub struct VersoloPdfApp {
     applied_dark: Option<bool>,
     props_contents: Option<(AnnotRef, u64, String)>,
     props_style: Option<(AnnotRef, u64, crate::model::AnnotStyle)>,
+    /// Properties of the selected form field being edited in the right pane.
+    props_field: Option<properties::FieldEditor>,
+    /// Rotation angle typed in the right pane for page objects (degrees).
+    props_angle: f32,
+    /// Text look being changed in the right pane for a selected text block:
+    /// (tab, page, objects, revision) and the look.
+    props_text: Option<(SelectionKey, crate::content::TextStyle)>,
     quick_query: String,
     quick_focus: bool,
     /// Last radio group and number of buttons placed in it.
@@ -473,6 +483,9 @@ impl VersoloPdfApp {
             applied_dark: None,
             props_contents: None,
             props_style: None,
+            props_field: None,
+            props_angle: 0.0,
+            props_text: None,
             quick_query: String::new(),
             quick_focus: false,
             last_radio: ("RadioGroup1".into(), 0),

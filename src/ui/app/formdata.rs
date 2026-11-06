@@ -12,6 +12,7 @@ use crate::geometry::RectF;
 use crate::pdf_edit::format_pdf_date;
 use crate::report::Line;
 use crate::ui::i18n::Language;
+use crate::ui::tab::AnnotRef;
 use crate::ui::tools::Tool;
 
 /// Resolution of pages that are turned into images by redaction.
@@ -376,8 +377,20 @@ impl VersoloPdfApp {
         tab.after_edit();
         match result {
             Ok(name) => {
-                let msg = if self.lang_de() { "Feld angelegt: " } else { "Field created: " };
-                self.set_status(ctx, format!("{msg}{name}"));
+                // The new field is selected; its properties show on the right.
+                if let Some(tab) = self.tab() {
+                    let index = tab.annotations(page).len().saturating_sub(1);
+                    tab.select_annots(vec![AnnotRef { page, index }]);
+                }
+                self.settings.show_properties = true;
+                let msg = if self.lang_de() {
+                    format!(
+                        "Feld angelegt: {name}. Eigenschaften rechts; ausfüllen mit Formular › Ausfüllen."
+                    )
+                } else {
+                    format!("Field created: {name}. Properties on the right; fill in with Form › Fill in.")
+                };
+                self.set_status(ctx, msg);
             }
             Err(err) => self.show_error(&err),
         }

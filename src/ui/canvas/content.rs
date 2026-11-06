@@ -6,10 +6,11 @@
 use egui::{Color32, CursorIcon, Pos2, Rect, Shape, Stroke, StrokeKind, Ui, pos2, vec2};
 
 use super::{CanvasCtx, CanvasEvent, PageOnScreen, find_page};
-use crate::content::{Affine, ContentObject, ObjectFilter, TextStyle, ZOrder, fit_rect, text_blocks};
+use crate::content::{Affine, ContentObject, ObjectFilter, ZOrder, fit_rect, text_blocks};
 use crate::geometry::PointF;
+use crate::model::AnnotKind;
 use crate::ui::content_state::{ContentCmd, ContentOp, ObjDrag, TextEditing, union};
-use crate::ui::tab::DocTab;
+use crate::ui::tab::{AnnotRef, DocTab};
 use crate::ui::tools::Tool;
 use crate::ui::widgets::to_color32;
 
@@ -54,6 +55,25 @@ fn object_at(objects: &[ContentObject], pos: &PageOnScreen, p: Pos2, filter: Obj
             if r.width() < 6.0 || r.height() < 6.0 { r.expand(4.0).contains(p) } else { in_polygon(&q, p) };
         hit.then_some(o.index)
     })
+}
+
+/// Screen rectangle of comment or field `index` (empty if it is gone).
+fn annot_rect(tab: &mut DocTab, pos: &PageOnScreen, index: usize) -> Rect {
+    tab.annotations(pos.page).get(index).map_or(Rect::NOTHING, |a| pos.pdf_rect_to_screen(&a.rect))
+}
+
+/// Topmost comment or form field under the screen point `p` that the
+/// selection tool can take.
+fn selectable_annot_at(tab: &mut DocTab, pos: &PageOnScreen, p: Pos2) -> Option<usize> {
+    tab.annotations(pos.page)
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, a)| {
+            (a.kind.is_movable() || a.kind == AnnotKind::Widget)
+                && pos.pdf_rect_to_screen(&a.rect).contains(p)
+        })
+        .map(|(i, _)| i)
 }
 
 /// The 8 handles of a rectangle (clockwise from top left).
@@ -199,11 +219,19 @@ fn objects_tool(
     response: &egui::Response,
     on_screen: &[PageOnScreen],
 ) {
+    // A text opened here (double click, "Text hinzufügen") is edited in
+    // place; a click beside it applies it and leaves it selected.
+    if tab.content.text.is_some() {
+        draw_text_editor(ui, tab, cx, on_screen);
+        return;
+    }
     let painter = ui.painter_at(ui.clip_rect());
     let filter = tab.content.filter;
     let shift = ui.input(|i| i.modifiers.shift);
     let command = ui.input(|i| i.modifiers.command);
     let sel_page = on_screen.iter().find(|p| p.page == tab.content.page).copied();
+    // Comments and form fields taken by the frame (only "Alle").
+    let annots: Vec<AnnotRef> = if filter == ObjectFilter::All { tab.selected_annots() } else { Vec::new() };
     let sel_rect =
         sel_page.and_then(|p| if tab.content.selected.is_empty() { None } else { selection_rect(tab, &p) });
 
@@ -226,8 +254,12 @@ fn objects_tool(
         {
             dashed(&painter, &screen_quad(&pos, o), HOVER);
         }
-        let cursor =
-            on_handle.unwrap_or(if hovered.is_some() { CursorIcon::Move } else { CursorIcon::Default });
+        let over_annot = filter == ObjectFilter::All && selectable_annot_at(tab, &pos, h).is_some();
+        let cursor = on_handle.unwrap_or(if hovered.is_some() || over_annot {
+            CursorIcon::Move
+        } else {
+            CursorIcon::Default
+        });
         ui.ctx().set_cursor_icon(cursor);
     }
 
@@ -255,8 +287,28 @@ fn objects_tool(
             None => match find_page(on_screen, start) {
                 Some(pos) => {
                     let objects = tab.objects(pos.page);
-                    match object_at(&objects, &pos, start, filter) {
-                        Some(i) => {
+                    // Comments and fields lie above the page content.
+                    let annot_hit = if filter == ObjectFilter::All {
+                        selectable_annot_at(tab, &pos, start)
+                    } else {
+                        None
+                    };
+                    match (annot_hit, object_at(&objects, &pos, start, filter)) {
+                        (Some(index), _) => {
+                            let r = AnnotRef { page: pos.page, index };
+                            if !annots.contains(&r) {
+                                let mut chosen: Vec<AnnotRef> = if shift {
+                                    annots.iter().copied().filter(|a| a.page == pos.page).collect()
+                                } else {
+                                    tab.content.clear();
+                                    Vec::new()
+                                };
+                                chosen.push(r);
+                                tab.select_annots(chosen);
+                            }
+                            Some(ObjDrag::Move { start, cur: start })
+                        }
+                        (None, Some(i)) => {
                             let already = pos.page == tab.content.page && tab.content.selected.contains(&i);
                             if !already {
                                 let rev = tab.doc.revision();
@@ -267,10 +319,13 @@ fn objects_tool(
                                 };
                                 sel.push(i);
                                 tab.content.select(pos.page, sel, rev);
+                                if !shift {
+                                    tab.select_annots(Vec::new());
+                                }
                             }
                             Some(ObjDrag::Move { start, cur: start })
                         }
-                        None => Some(ObjDrag::Rubber { start, cur: start }),
+                        (None, None) => Some(ObjDrag::Rubber { start, cur: start }),
                     }
                 }
                 None => None,
@@ -341,6 +396,15 @@ fn objects_tool(
             ObjDrag::Rubber { .. } => {}
         }
     }
+    // Comments and fields moving along (also without page objects).
+    if let Some(ObjDrag::Move { start, cur }) = tab.content.drag.clone() {
+        for a in &annots {
+            if let Some(pos) = on_screen.iter().find(|p| p.page == a.page) {
+                let r = annot_rect(tab, pos, a.index).translate(cur - start);
+                dashed(&painter, &[r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom()], ACCENT);
+            }
+        }
+    }
     if let Some(ObjDrag::Rubber { start, cur }) = &tab.content.drag {
         let r = Rect::from_two_pos(*start, *cur);
         painter.rect(r, 0.0, ACCENT.gamma_multiply(0.12), Stroke::new(1.0, ACCENT), StrokeKind::Inside);
@@ -350,7 +414,7 @@ fn objects_tool(
     if response.drag_stopped()
         && let Some(drag) = tab.content.drag.take()
     {
-        finish_drag(tab, cx, drag, on_screen, sel_page, command || shift);
+        finish_drag(tab, cx, drag, on_screen, (sel_page, &annots), command || shift);
     }
 
     // Click: select, Shift adds/removes; empty space clears.
@@ -361,6 +425,8 @@ fn objects_tool(
         match find_page(on_screen, p) {
             Some(pos) => {
                 let objects = tab.objects(pos.page);
+                let annot =
+                    if filter == ObjectFilter::All { selectable_annot_at(tab, &pos, p) } else { None };
                 match object_at(&objects, &pos, p, filter) {
                     Some(i) if shift && pos.page == tab.content.page => {
                         let mut sel = tab.content.selected.clone();
@@ -371,12 +437,36 @@ fn objects_tool(
                         }
                         tab.content.select(pos.page, sel, rev);
                     }
-                    Some(i) => tab.content.select(pos.page, vec![i], rev),
-                    None => tab.content.clear(),
+                    // A comment or field lies above the page content.
+                    _ if annot.is_some() => {
+                        let r = AnnotRef { page: pos.page, index: annot.unwrap_or_default() };
+                        let mut chosen = if shift { tab.selected_annots() } else { Vec::new() };
+                        chosen.retain(|a| a.page == pos.page);
+                        if let Some(k) = chosen.iter().position(|a| *a == r) {
+                            chosen.remove(k);
+                        } else {
+                            chosen.push(r);
+                        }
+                        if !shift {
+                            tab.content.clear();
+                        }
+                        tab.select_annots(chosen);
+                    }
+                    Some(i) => {
+                        tab.content.select(pos.page, vec![i], rev);
+                        tab.select_annots(Vec::new());
+                    }
+                    None => {
+                        tab.content.clear();
+                        tab.select_annots(Vec::new());
+                    }
                 }
                 tab.current_page = pos.page;
             }
-            None => tab.content.clear(),
+            None => {
+                tab.content.clear();
+                tab.select_annots(Vec::new());
+            }
         }
     }
 
@@ -422,7 +512,7 @@ fn finish_drag(
     cx: &mut CanvasCtx,
     drag: ObjDrag,
     on_screen: &[PageOnScreen],
-    sel_page: Option<PageOnScreen>,
+    (sel_page, annots): (Option<PageOnScreen>, &[AnnotRef]),
     add: bool,
 ) {
     let page = tab.content.page;
@@ -443,22 +533,48 @@ fn finish_drag(
                     tab.content.selected.iter().copied().filter(|i| !hit.contains(i)).collect();
                 hit.extend(extra);
             }
-            // Comments are not page content: say which tool selects them.
-            if hit.is_empty()
-                && tab
-                    .annotations(pos.page)
-                    .iter()
-                    .any(|a| r.contains(pos.pdf_rect_to_screen(&a.rect).center()))
-            {
+            // Comments and form fields whose centre lies in the frame.
+            let inside: Vec<AnnotRef> = tab
+                .annotations(pos.page)
+                .iter()
+                .enumerate()
+                .filter(|(_, a)| r.contains(pos.pdf_rect_to_screen(&a.rect).center()))
+                .filter(|(_, a)| a.kind.is_movable() || a.kind == AnnotKind::Widget)
+                .map(|(index, _)| AnnotRef { page: pos.page, index })
+                .collect();
+            if filter == ObjectFilter::All {
+                let mut chosen: Vec<AnnotRef> = if add {
+                    annots.iter().copied().filter(|a| a.page == pos.page).collect()
+                } else {
+                    Vec::new()
+                };
+                for a in inside {
+                    if !chosen.contains(&a) {
+                        chosen.push(a);
+                    }
+                }
+                tab.select_annots(chosen);
+            } else if hit.is_empty() && !inside.is_empty() {
+                // Only "Alle" takes comments: say so.
                 cx.events.push(CanvasEvent::Status(cx.t.hint_comments_not_objects.into()));
             }
             let rev = tab.doc.revision();
             tab.content.select(pos.page, hit, rev);
         }
-        _ if selected.is_empty() => {}
         ObjDrag::Move { start, cur } => {
-            let Some(pos) = sel_page else { return };
             if start.distance(cur) < 1.0 {
+                return;
+            }
+            // Comments and fields first: page content keeps its selection
+            // only if its change comes last.
+            if let Some(first) = annots.first()
+                && let Some(pos) = on_screen.iter().find(|p| p.page == first.page)
+            {
+                let (a, b) = (pos.pdf_at(start), pos.pdf_at(cur));
+                cx.events.push(CanvasEvent::Move { annot: *first, dx: b.x - a.x, dy: b.y - a.y });
+            }
+            let Some(pos) = sel_page else { return };
+            if selected.is_empty() {
                 return;
             }
             let (a, b) = (pos.pdf_at(start), pos.pdf_at(cur));
@@ -468,6 +584,7 @@ fn finish_drag(
                 moves: selected.iter().map(|i| (*i, m)).collect(),
             }));
         }
+        _ if selected.is_empty() => {}
         ObjDrag::Resize { start, cur, .. } => {
             let Some(pos) = sel_page else { return };
             if start == cur {
@@ -600,17 +717,9 @@ fn open_text_at(tab: &mut DocTab, pos: &PageOnScreen, p: Pos2) -> bool {
     let pdf = pos.pdf_at(p);
     let blocks = text_blocks(&objects);
     let Some(block) = blocks.into_iter().find(|b| b.rect.inflate(2.0).contains(pdf)) else { return false };
-    let width = if block.lines.len() > 1 { block.rect.width() } else { 0.0 };
     let rev = tab.doc.revision();
     tab.content.select(pos.page, block.objects.clone(), rev);
-    tab.content.text = Some(TextEditing {
-        page: pos.page,
-        text: block.text(),
-        style: TextStyle::of_block(&block),
-        width,
-        block,
-        focus_requested: false,
-    });
+    tab.content.text = Some(TextEditing::open(pos.page, block));
     true
 }
 
@@ -709,6 +818,16 @@ fn draw_text_editor(ui: &mut Ui, tab: &mut DocTab, cx: &mut CanvasCtx, on_screen
     if first {
         resp.request_focus();
         edit.focus_requested = true;
+        if edit.select_all
+            && let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), resp.id)
+        {
+            let all = egui::text::CCursorRange::two(
+                egui::text::CCursor::new(0),
+                egui::text::CCursor::new(edit.text.chars().count()),
+            );
+            state.cursor.set_char_range(Some(all));
+            state.store(ui.ctx(), resp.id);
+        }
     }
     let (escape, apply) = ui.input(|i| {
         (i.key_pressed(egui::Key::Escape), i.key_pressed(egui::Key::Enter) && i.modifiers.command)

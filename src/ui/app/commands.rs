@@ -276,6 +276,7 @@ pub const SEARCHABLE: &[Cmd] = &[
     Cmd::Tool(Tool::FieldDate),
     Cmd::Tool(Tool::FieldBarcode),
     Cmd::Tool(Tool::FieldImage),
+    Cmd::Form(super::form_cmds::FormCmd::FillIn),
     Cmd::Form(super::form_cmds::FormCmd::FormPane),
     Cmd::Form(super::form_cmds::FormCmd::DetectForms),
     Cmd::Form(super::form_cmds::FormCmd::EmailFormData),

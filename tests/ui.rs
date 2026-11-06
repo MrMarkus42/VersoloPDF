@@ -95,6 +95,16 @@ fn drag(harness: &mut Harness<'_, VersoloPdfApp>, from: Pos2, to: Pos2) {
     harness.run_steps(4);
 }
 
+/// Opens the combo box that currently shows `value`.
+fn combo(harness: &mut Harness<'_, VersoloPdfApp>, value: &str) {
+    harness
+        .get_all_by_role(egui::accesskit::Role::ComboBox)
+        .find(|n| n.value().as_deref() == Some(value))
+        .unwrap_or_else(|| panic!("combo box showing {value}"))
+        .click();
+    harness.run_steps(2);
+}
+
 fn click(harness: &mut Harness<'_, VersoloPdfApp>, at: Pos2) {
     let input = |h: &mut Harness<'_, VersoloPdfApp>, e: Event| h.input_mut().events.push(e);
     input(harness, Event::PointerMoved(at));
@@ -562,8 +572,8 @@ fn form_tab_features() {
     h.get_all_by_label("Schließen").last().unwrap().click();
     h.run_steps(2);
 
-    // "Formulare ausfüllen" dialog.
-    quick(&mut h, "Formulare ausfüllen");
+    // "Serienformulare aus CSV" dialog.
+    quick(&mut h, "Serienformulare aus CSV");
     assert!(h.query_by_label("Automatisch ermitteln").is_some());
     save(&mut h, "frm-06-fill-forms");
     h.get_all_by_label("Abbrechen").last().unwrap().click();
@@ -1150,12 +1160,38 @@ fn edit_page_content_ui() {
     h.run_steps(2);
     h.get_by_label("Text hinzufügen").click();
     h.run_steps(4);
-    assert_eq!(h.state().tool(), Tool::EditText);
+    // Typed in place with "Objekte bearbeiten"; the properties are on the right.
+    assert_eq!(h.state().tool(), Tool::EditObjects);
+    assert!(h.state().settings().show_properties);
+    assert!(h.query_by_label("Seiteninhalt").is_some(), "content properties shown");
+    save(&mut h, "obj-05b-add-text");
     h.state_mut().active_tab_mut().unwrap().content.text.as_mut().unwrap().text = "Hinzugefügt".into();
     h.key_press_modifiers(Modifiers::COMMAND, egui::Key::Enter);
     h.run_steps(4);
     assert!(h.state().active_tab().unwrap().doc.page_text(0).unwrap().all_text().contains("Hinzugefügt"));
     assert_eq!(objects(&mut h).len(), 3);
+    // The new text stays selected: it can be moved and turned at once.
+    let added = h.state().active_tab().unwrap().content.selected.clone();
+    assert_eq!(added.len(), 1, "new text selected");
+    h.get_by_label("⟳ 90°").click();
+    h.run_steps(4);
+    let turned = objects(&mut h).into_iter().find(|o| o.text.contains("Hinzugef")).unwrap();
+    assert!(turned.matrix.0[1] < -0.9, "turned clockwise: {:?}", turned.matrix);
+    h.key_press_modifiers(Modifiers::COMMAND, egui::Key::Z);
+    h.run_steps(3);
+    // Font of a selected text block straight from the right pane.
+    let c = h.state_mut().active_tab_mut().unwrap().doc.geometry(0).unwrap().crop.center();
+    let p = at(&h, c.x - 30.0, c.y + 4.0);
+    click(&mut h, p);
+    h.run_steps(3);
+    assert!(!h.state().active_tab().unwrap().content.selected.is_empty(), "text selected again");
+    combo(&mut h, "Originalschrift");
+    h.run_steps(2);
+    h.get_by_label("Courier").click();
+    h.run_steps(4);
+    let courier = objects(&mut h).into_iter().find(|o| o.text.contains("Hinzugef")).unwrap();
+    assert!(courier.font.contains("Courier") || courier.monospace, "font now {}", courier.font);
+    save(&mut h, "obj-05c-font-from-pane");
 
     // "Text bearbeiten": click the second line, replace its text.
     quick(&mut h, "Text bearbeiten");
@@ -1178,6 +1214,189 @@ fn edit_page_content_ui() {
     assert!(text.contains("Neuer Inhalt der Zeile") && !text.contains("Zweite Zeile"), "{text}");
     save(&mut h, "obj-07-text-applied");
     assert!(h.state().active_tab().unwrap().doc.is_modified());
+}
+
+/// "Start › Auswahl": one click gives the selection pointer; a frame takes
+/// page content, comments and form fields; they move and go together.
+#[test]
+fn selection_frame_takes_everything() {
+    use versolopdf::forms::NewFieldKind;
+    use versolopdf::geometry::RectF;
+    use versolopdf::ui::tools::Tool;
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let file = sample_file(&dir, 1);
+    let mut h = harness(vec![file], false);
+    h.run_steps(10);
+    {
+        let tab = h.state_mut().active_tab_mut().unwrap();
+        let mut note = versolopdf::pdf_edit::NewAnnotation::new(AnnotKind::Note, Default::default());
+        note.rect = RectF::new(400.0, 700.0, 420.0, 720.0);
+        tab.doc.add_annotation(0, &note).unwrap();
+        tab.doc
+            .create_field(
+                0,
+                RectF::new(100.0, 500.0, 300.0, 524.0),
+                &NewFieldKind::Text { multiline: false },
+                "",
+            )
+            .unwrap();
+        tab.after_edit();
+    }
+    h.run_steps(3);
+    let at = |h: &Harness<'_, VersoloPdfApp>, x: f32, y: f32| {
+        h.state().active_tab().unwrap().screen_pos(0, versolopdf::geometry::PointF::new(x, y)).unwrap()
+    };
+    tab(&mut h, "Start");
+    h.get_by_label("Auswahl").click();
+    h.run_steps(3);
+    assert_eq!(h.state().tool(), Tool::EditObjects, "one click gives the pointer");
+    assert!(h.query_by_label("Ausschneiden").is_none(), "the menu stays closed");
+
+    // A frame over the upper half of the page.
+    let (a, b) = (at(&h, 20.0, 800.0), at(&h, 570.0, 450.0));
+    drag(&mut h, a, b);
+    let tab_ref = h.state().active_tab().unwrap();
+    assert_eq!(tab_ref.content.selected.len(), 2, "both lines of text");
+    assert_eq!(tab_ref.selected_annots().len(), 2, "the note and the field");
+    save(&mut h, "sel-01-frame");
+
+    // Dragging the heading moves everything by 30 pt.
+    let before = h.state_mut().active_tab_mut().unwrap().doc.annotations(0).unwrap();
+    let (a, b) = (at(&h, 150.0, 708.0), at(&h, 150.0, 678.0));
+    drag(&mut h, a, b);
+    h.run_steps(4);
+    let tab_mut = h.state_mut().active_tab_mut().unwrap();
+    let after = tab_mut.doc.annotations(0).unwrap();
+    for (x, y) in before.iter().zip(&after) {
+        assert!((x.rect.y0 - y.rect.y0 - 30.0).abs() < 1.5, "{:?} -> {:?}", x.rect, y.rect);
+    }
+    let heading = tab_mut.doc.page_objects(0).unwrap()[0].origin().y;
+    assert!((heading - 670.0).abs() < 1.5, "heading at {heading}");
+    assert_eq!(tab_mut.content.selected.len(), 2, "still selected");
+    assert_eq!(tab_mut.selected_annots().len(), 2, "still selected");
+
+    // Del removes all of it.
+    h.key_press(egui::Key::Delete);
+    h.run_steps(4);
+    let tab_mut = h.state_mut().active_tab_mut().unwrap();
+    assert!(tab_mut.doc.annotations(0).unwrap().is_empty());
+    assert!(tab_mut.doc.page_objects(0).unwrap().is_empty());
+    save(&mut h, "sel-02-deleted");
+
+    // A click on empty space clears, Esc too.
+    h.key_press_modifiers(Modifiers::COMMAND, egui::Key::Z);
+    h.run_steps(2);
+    h.key_press_modifiers(Modifiers::COMMAND, egui::Key::Z);
+    h.run_steps(3);
+    assert_eq!(h.state_mut().active_tab_mut().unwrap().doc.annotations(0).unwrap().len(), 2);
+    // The note is 30 pt lower since the move.
+    let note = at(&h, 410.0, 680.0);
+    click(&mut h, note);
+    assert_eq!(h.state().active_tab().unwrap().selected_annots().len(), 1, "a click picks the note");
+    let empty = at(&h, 480.0, 560.0);
+    click(&mut h, empty);
+    assert!(h.state().active_tab().unwrap().selected_annot.is_none());
+}
+
+/// "Formular": a new field shows its properties on the right; they are
+/// changed there; "Ausfüllen" fills in, Tab goes to the next field.
+#[test]
+fn field_properties_and_fill_in() {
+    use versolopdf::forms::FieldFont;
+    use versolopdf::ui::tools::Tool;
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let file = sample_file(&dir, 1);
+    let mut h = harness(vec![file], false);
+    h.run_steps(10);
+    let at = |h: &Harness<'_, VersoloPdfApp>, x: f32, y: f32| {
+        h.state().active_tab().unwrap().screen_pos(0, versolopdf::geometry::PointF::new(x, y)).unwrap()
+    };
+    tab(&mut h, "Formular");
+    for y in [560.0, 520.0] {
+        h.get_all_by_label("Text").next().unwrap().click();
+        h.run_steps(3);
+        let (a, b) = (at(&h, 100.0, y), at(&h, 300.0, y - 22.0));
+        drag(&mut h, a, b);
+        h.run_steps(4);
+    }
+    let index = h.state_mut().active_tab_mut().unwrap().doc.annotations(0).unwrap().len() - 1;
+    assert_eq!(
+        h.state().active_tab().unwrap().selected_annot.map(|a| a.index),
+        Some(index),
+        "new field selected"
+    );
+    assert!(h.state().settings().show_properties);
+    assert!(h.query_by_label("Formularfeld").is_some(), "field properties shown");
+    save(&mut h, "frm-10-field-properties");
+
+    // Font and "Pflichtfeld" from the right pane.
+    combo(&mut h, "Helvetica (Arial)");
+    h.run_steps(2);
+    h.get_by_label("Courier").click();
+    h.run_steps(2);
+    h.run_steps(2);
+    h.get_by_label("Pflichtfeld").click();
+    h.run_steps(4);
+    let dialog = h.state().dialog().is_some();
+    let props = h.state_mut().active_tab_mut().unwrap().doc.field_props(0, index).unwrap();
+    assert_eq!(props.font, FieldFont::Courier, "error dialog: {dialog}, {props:?}");
+    assert!(props.required);
+
+    // "Ausfüllen": hand tool; Tab goes on to the next text field.
+    h.get_by_label("Ausfüllen").click();
+    h.run_steps(3);
+    assert_eq!(h.state().tool(), Tool::Hand);
+    let first = at(&h, 200.0, 549.0);
+    click(&mut h, first);
+    h.run_steps(2);
+    assert!(h.state().active_tab().unwrap().field_edit.is_some(), "field editor");
+    h.input_mut().events.push(Event::Text("Erste".into()));
+    h.run_steps(2);
+    h.key_press(egui::Key::Tab);
+    h.run_steps(4);
+    let edit = h.state().active_tab().unwrap().field_edit.as_ref().map(|e| e.annot_index);
+    assert_eq!(edit, Some(index), "Tab opens the second field");
+    h.input_mut().events.push(Event::Text("Zweite".into()));
+    h.run_steps(2);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(4);
+    let values = h.state_mut().active_tab_mut().unwrap().doc.field_values().unwrap();
+    assert_eq!(
+        values,
+        vec![("Text1".to_string(), "Erste".to_string()), ("Text2".to_string(), "Zweite".to_string())]
+    );
+    save(&mut h, "frm-11-filled-with-tab");
+
+    // The text tool fills in fields too.
+    h.key_press(egui::Key::V);
+    h.run_steps(2);
+    assert_eq!(h.state().tool(), Tool::SelectText);
+    click(&mut h, first);
+    h.run_steps(2);
+    assert!(h.state().active_tab().unwrap().field_edit.is_some(), "field editor with the text tool");
+}
+
+/// The search pane keeps its width (it used to grow a little every frame).
+#[test]
+fn search_pane_keeps_its_width() {
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let file = sample_file(&dir, 2);
+    let mut h = harness(vec![file], false);
+    h.run_steps(10);
+    h.key_press_modifiers(Modifiers::COMMAND, egui::Key::F);
+    h.run_steps(5);
+    let width = |h: &Harness<'_, VersoloPdfApp>| {
+        egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("side-panel"))
+            .map(|s| s.outer_rect.width())
+            .expect("side pane state")
+    };
+    let before = width(&h);
+    h.run_steps(60);
+    let after = width(&h);
+    assert!((after - before).abs() < 0.5, "pane grew from {before} to {after}");
 }
 
 /// Keyboard operation of the ribbon: Alt shows letters on the tabs, a

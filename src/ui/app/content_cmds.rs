@@ -148,6 +148,16 @@ impl VersoloPdfApp {
             Deselect => {
                 if let Some(tab) = self.tab() {
                     tab.content.clear();
+                    tab.select_annots(Vec::new());
+                }
+            }
+            // Comments and fields taken by the frame go along.
+            Delete if self.active_tab().is_some_and(|t| t.selected_annot.is_some()) => {
+                self.delete_selected_annotation(ctx);
+                if let Some((page, indices)) = sel {
+                    self.content_edit(ctx, page, |doc| {
+                        doc.delete_objects(page, &indices).map(|_| Vec::new())
+                    });
                 }
             }
             AlignToPage => self.align_to_page = !self.align_to_page,
@@ -248,9 +258,10 @@ impl VersoloPdfApp {
         }
     }
 
-    /// Opens the text block of the selected text object in the editor.
+    /// Opens the text block of the selected text object in the editor
+    /// ("Objekte bearbeiten" edits it in place and keeps the tool).
     fn open_selected_text(&mut self) {
-        if self.tool != Tool::EditText {
+        if !matches!(self.tool, Tool::EditText | Tool::EditObjects) {
             self.select_tool(Tool::EditText);
         }
         let Some(tab) = self.tab() else { return };
@@ -261,18 +272,255 @@ impl VersoloPdfApp {
         let Some(first) = tab.content.selected.first().copied() else { return };
         let objects = tab.objects(page);
         if let Some(block) = text_blocks(&objects).into_iter().find(|b| b.objects.contains(&first)) {
-            let width = if block.lines.len() > 1 { block.rect.width() } else { 0.0 };
             let rev = tab.doc.revision();
             tab.content.select(page, block.objects.clone(), rev);
-            tab.content.text = Some(TextEditing {
-                page,
-                text: block.text(),
-                style: crate::content::TextStyle::of_block(&block),
-                width,
-                block,
-                focus_requested: false,
+            tab.content.text = Some(TextEditing::open(page, block));
+        }
+    }
+
+    /// The text block that contains the first selected object (for the
+    /// font settings of the right pane without opening the editor).
+    fn selected_text_block(&mut self) -> Option<(usize, crate::content::TextBlock)> {
+        let (page, sel) = self.content_selection()?;
+        let tab = self.tab()?;
+        let objects = tab.objects(page);
+        let first = sel
+            .iter()
+            .copied()
+            .find(|i| objects.iter().any(|o| o.index == *i && o.kind == crate::content::ObjectKind::Text))?;
+        text_blocks(&objects).into_iter().find(|b| b.objects.contains(&first)).map(|b| (page, b))
+    }
+
+    /// Applies the text open in the editor (button in the right pane).
+    fn apply_open_text(&mut self, ctx: &Context) {
+        let Some(edit) = self.tab().and_then(|t| t.content.text.take()) else { return };
+        if edit.changed() {
+            self.content_op(ctx, edit.to_op());
+        }
+    }
+
+    /// Right pane for "Objekte bearbeiten" / "Text bearbeiten": text look,
+    /// position, size and rotation of the selection.
+    pub(super) fn content_properties(&mut self, ui: &mut Ui, ctx: &Context) {
+        let de = self.ct_de();
+        let editing = self.active_tab().and_then(|t| t.content.text.clone());
+        let n = self.content_selection().map_or(0, |(_, s)| s.len());
+        ui.label(RichText::new(tr(de, "Seiteninhalt", "Page content")).strong());
+        // Text: the open editor, or else the selected text block directly.
+        let block = if editing.is_none() { self.selected_text_block() } else { None };
+        // The look being changed lives across frames (sizes are dragged).
+        let key =
+            self.active_tab().map(|t| (t.id, t.content.page, t.content.selected.clone(), t.doc.revision()));
+        let stored = block.as_ref().map(|(_, b)| crate::content::TextStyle::of_block(b));
+        let style = editing.as_ref().map(|e| e.style.clone()).or_else(|| match (&self.props_text, &key) {
+            (Some((k, s)), Some(key)) if k == key => Some(s.clone()),
+            _ => stored.clone(),
+        });
+        if let Some(mut s) = style {
+            let before = stored.clone().unwrap_or_else(|| s.clone());
+            ui.add_space(4.0);
+            ui.label(RichText::new(tr(de, "Schrift", "Font")).strong());
+            egui::ComboBox::from_id_salt("props-font").selected_text(s.font.label(de)).width(170.0).show_ui(
+                ui,
+                |ui| {
+                    for f in FontChoice::ALL {
+                        let label = f.label(de);
+                        ui.selectable_value(&mut s.font, f, label);
+                    }
+                },
+            );
+            let mut size_done = false;
+            ui.horizontal(|ui| {
+                ui.label(tr(de, "Größe:", "Size:"));
+                let r = ui.add(
+                    egui::DragValue::new(&mut s.size)
+                        .range(2.0..=400.0)
+                        .speed(0.2)
+                        .max_decimals(1)
+                        .update_while_editing(false)
+                        .suffix(" pt"),
+                );
+                size_done = r.drag_stopped() || r.lost_focus();
+            });
+            ui.horizontal(|ui| {
+                ui.toggle_value(&mut s.bold, RichText::new("B").strong())
+                    .on_hover_text(tr(de, "Fett", "Bold"));
+                ui.toggle_value(&mut s.italic, RichText::new("I").italics())
+                    .on_hover_text(tr(de, "Kursiv", "Italic"));
+                ui.separator();
+                for (a, label, tip) in [
+                    (Align::Left, "⬅", tr(de, "Linksbündig", "Align left")),
+                    (Align::Center, "↔", tr(de, "Zentriert", "Centre")),
+                    (Align::Right, "➡", tr(de, "Rechtsbündig", "Align right")),
+                ] {
+                    if ui.selectable_label(s.align == a, label).on_hover_text(tip).clicked() {
+                        s.align = a;
+                    }
+                }
+            });
+            ui.label(tr(de, "Farbe:", "Colour:"));
+            if let Some(c) = super::properties::color_row(ui, s.color) {
+                s.color = c;
+            }
+            // Bold/italic need another font than the original.
+            let (bold0, italic0, mono, serif) = match (&editing, &block) {
+                (Some(e), _) => (e.block.bold, e.block.italic, e.block.monospace, e.block.serif),
+                (None, Some((_, b))) => (b.bold, b.italic, b.monospace, b.serif),
+                _ => (false, false, false, false),
+            };
+            if (s.bold != bold0 || s.italic != italic0) && s.font == FontChoice::Original {
+                s.font = if mono {
+                    FontChoice::Courier
+                } else if serif {
+                    FontChoice::Times
+                } else {
+                    FontChoice::Helvetica
+                };
+            }
+            match (&editing, block) {
+                // While typing, the editor shows the look; applied with the text.
+                (Some(_), _) => {
+                    if let Some(e) = self.tab().and_then(|t| t.content.text.as_mut()) {
+                        e.style = s;
+                    }
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        if ui.button(tr(de, "Übernehmen", "Apply")).clicked() {
+                            self.apply_open_text(ctx);
+                        }
+                        ui.label(
+                            RichText::new(tr(
+                                de,
+                                "(oder Klick neben den Text)",
+                                "(or click beside the text)",
+                            ))
+                            .weak()
+                            .small(),
+                        );
+                    });
+                }
+                // A selected text block changes at once (sizes when released).
+                (None, Some((page, b))) => {
+                    let dragging = ui.input(|i| i.pointer.any_down());
+                    let changed = s != before && (s.size == before.size || size_done || !dragging);
+                    if changed {
+                        self.props_text = None;
+                        let mut edit = TextEditing::open(page, b);
+                        edit.style = s;
+                        self.content_op(ctx, edit.to_op());
+                    } else {
+                        self.props_text = key.map(|k| (k, s));
+                    }
+                }
+                _ => {}
+            }
+            ui.separator();
+        }
+        if editing.is_some() {
+            ui.label(
+                RichText::new(tr(
+                    de,
+                    "Text direkt auf der Seite tippen. Danach lässt er sich verschieben, in der Größe ändern und drehen.",
+                    "Type the text on the page. Afterwards it can be moved, resized and turned.",
+                ))
+                .weak()
+                .small(),
+            );
+            return;
+        }
+        if n == 0 {
+            return;
+        }
+        // Position and size of the selection.
+        if let Some(mut f) = self.format_ui_for() {
+            let old = f.frame;
+            let mut apply = false;
+            ui.label(RichText::new(tr(de, "Lage und Größe", "Position and size")).strong());
+            egui::Grid::new("props-frame").num_columns(4).spacing([4.0, 4.0]).show(ui, |ui| {
+                for (i, label) in ["X:", "Y:", tr(de, "B:", "W:"), "H:"].iter().enumerate() {
+                    ui.label(*label);
+                    let r = ui.add(
+                        egui::DragValue::new(&mut f.frame[i])
+                            .speed(0.5)
+                            .range(if i >= 2 { 0.5..=20000.0 } else { -20000.0..=20000.0 })
+                            .max_decimals(1)
+                            .suffix(" pt"),
+                    );
+                    apply |= r.drag_stopped() || r.lost_focus();
+                    if i % 2 == 1 {
+                        ui.end_row();
+                    }
+                }
+            });
+            self.content_format = Some(f.clone());
+            if apply
+                && f.frame != old
+                && let Some((page, indices)) = self.content_selection()
+            {
+                let from = RectF::new(old[0], old[1], old[0] + old[2], old[1] + old[3]);
+                let to = RectF::new(f.frame[0], f.frame[1], f.frame[0] + f.frame[2], f.frame[1] + f.frame[3]);
+                let m = crate::content::fit_rect(&from, &to);
+                self.content_edit(ctx, page, |doc| {
+                    doc.transform_objects(page, &indices, m).map(|_| indices.clone())
+                });
+            }
+        }
+        // Rotation by any angle.
+        ui.add_space(4.0);
+        ui.label(RichText::new(tr(de, "Drehen", "Rotate")).strong());
+        let mut turn = None;
+        ui.horizontal(|ui| {
+            if ui
+                .button("⟲ 90°")
+                .on_hover_text(tr(de, "90° gegen den Uhrzeigersinn", "90° counter-clockwise"))
+                .clicked()
+            {
+                turn = Some(90.0);
+            }
+            if ui.button("⟳ 90°").on_hover_text(tr(de, "90° im Uhrzeigersinn", "90° clockwise")).clicked()
+            {
+                turn = Some(-90.0);
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.add(egui::DragValue::new(&mut self.props_angle).range(-360.0..=360.0).speed(1.0).suffix("°"));
+            if ui
+                .button(tr(de, "Drehen", "Rotate"))
+                .on_hover_text(tr(de, "Positiv: gegen den Uhrzeigersinn", "Positive: counter-clockwise"))
+                .clicked()
+                && self.props_angle.abs() > 0.01
+            {
+                turn = Some(self.props_angle);
+            }
+        });
+        if let Some(deg) = turn
+            && let Some((page, indices)) = self.content_selection()
+            && let Some(r) = union(self.selected_objects().iter().map(|o| o.rect))
+        {
+            let m = Affine::about(Affine::rotate(deg), r.center());
+            self.content_edit(ctx, page, |doc| {
+                doc.transform_objects(page, &indices, m).map(|_| indices.clone())
             });
         }
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            if ui.button(tr(de, "Duplizieren", "Duplicate")).clicked() {
+                self.run(ctx, Cmd::Content(ContentCmd::Duplicate));
+            }
+            if ui.button(tr(de, "Löschen", "Delete")).clicked() {
+                self.run(ctx, Cmd::Content(ContentCmd::Delete));
+            }
+        });
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new(tr(
+                de,
+                "Auf der Seite: Ziehen verschiebt, die eckigen Griffe ändern die Größe, der runde Griff oben dreht. Doppelklick auf Text bearbeitet ihn.",
+                "On the page: drag to move, the square handles resize, the round handle on top turns. Double-click text to edit it.",
+            ))
+            .weak()
+            .small(),
+        );
     }
 
     fn paste_clip(&mut self, ctx: &Context, page: usize, offset: (f32, f32)) {
@@ -300,12 +548,25 @@ impl VersoloPdfApp {
                 matrix: Affine::translate(c.x - 40.0, c.y),
             }],
         };
-        self.select_tool(Tool::EditText);
+        // "Objekte bearbeiten": typing first; afterwards the text stays
+        // selected and can be moved, scaled and turned. Font and the rest
+        // are in the right pane.
+        if self.tool != Tool::EditObjects {
+            self.select_tool(Tool::EditObjects);
+        }
+        if let Some(tab) = self.tab() {
+            tab.content.filter = ObjectFilter::All;
+        }
+        self.settings.show_properties = true;
         self.content_edit(ctx, page, |doc| doc.paste_objects(page, &clip, (0.0, 0.0)));
         if let Some(tab) = self.tab() {
             tab.current_page = page;
         }
         self.open_selected_text();
+        // The whole sample text is replaced by typing.
+        if let Some(edit) = self.tab().and_then(|t| t.content.text.as_mut()) {
+            edit.select_all = true;
+        }
     }
 
     fn add_content_image(&mut self, ctx: &Context, page: usize) {
@@ -337,6 +598,10 @@ impl VersoloPdfApp {
                 matrix: Affine([w, 0.0, 0.0, h, c.x - w / 2.0, c.y - h / 2.0]),
             }],
         };
+        if let Some(tab) = self.tab() {
+            tab.content.filter = ObjectFilter::All;
+        }
+        self.settings.show_properties = true;
         self.paste_new(ctx, page, clip);
     }
 
@@ -401,7 +666,12 @@ impl VersoloPdfApp {
     /// Keys of "Objekte bearbeiten"; true when one was used.
     pub(super) fn content_shortcuts(&mut self, ctx: &Context) -> bool {
         use egui::{Key, KeyboardShortcut, Modifiers};
-        if self.tool != Tool::EditObjects || ctx.egui_wants_keyboard_input() || self.active_tab().is_none() {
+        // An open text editor keeps its keys (also after a click into the
+        // right pane): Esc there discards the text, Del does not delete it.
+        if self.tool != Tool::EditObjects
+            || ctx.egui_wants_keyboard_input()
+            || self.active_tab().is_none_or(|t| t.content.text.is_some())
+        {
             return false;
         }
         let cmd = Modifiers::COMMAND;
@@ -465,15 +735,19 @@ impl VersoloPdfApp {
     /// Group "Objekte" of the Start tab.
     pub(super) fn ribbon_objects_group(&mut self, ui: &mut Ui, ctx: &Context) {
         let de = self.ct_de();
+        let enabled = !self.tabs.is_empty();
+        let filter = self.active_tab().map_or(ObjectFilter::All, |t| t.content.filter);
         group(ui, tr(de, "Objekte", "Objects"), |ui| {
             self.big(ui, ctx, Cmd::Tool(Tool::EditText));
-            // "Objekte bearbeiten ▾": the button selects the tool, the menu the filter.
-            let selected = self.tool == Tool::EditObjects;
+            // "Objekte bearbeiten ▾": the upper part selects the tool (with
+            // the filter chosen last), the arrow the filter.
+            let selected = self.tool == Tool::EditObjects && filter != ObjectFilter::All;
             let label = tr(de, "Objekte bearbeiten", "Edit objects");
-            let resp = big_menu_button(ui, Icon::EditObjects, label, !self.tabs.is_empty(), selected);
-            self.popup_menu(
+            self.split_button(
+                ui,
                 ctx,
-                &resp,
+                (Icon::EditObjects, label, enabled, selected),
+                Cmd::Content(ContentCmd::Filter(filter)),
                 &[ObjectFilter::All, ObjectFilter::Text, ObjectFilter::Images, ObjectFilter::Shapes]
                     .map(|f| super::ribbon::Entry::C(Cmd::Content(ContentCmd::Filter(f)))),
             );
@@ -487,11 +761,15 @@ impl VersoloPdfApp {
                     super::ribbon::Entry::C(Cmd::Content(ContentCmd::AddImage)),
                 ],
             );
-            self.big_menu(
+            // "Auswahl": a click gives the pointer that selects everything in a
+            // frame (page content, comments, form fields); the arrow lists
+            // the commands for the selection.
+            let selected = self.tool == Tool::EditObjects && filter == ObjectFilter::All;
+            self.split_button(
                 ui,
                 ctx,
-                Icon::Pointer,
-                ("Auswahl", "Selection"),
+                (Icon::Pointer, tr(de, "Auswahl", "Selection"), enabled, selected),
+                Cmd::Content(ContentCmd::Filter(ObjectFilter::All)),
                 &[
                     super::ribbon::Entry::C(Cmd::Content(ContentCmd::Cut)),
                     super::ribbon::Entry::C(Cmd::Content(ContentCmd::Copy)),
@@ -504,6 +782,35 @@ impl VersoloPdfApp {
                 ],
             );
         });
+    }
+
+    /// A big button whose upper part runs `main` and whose arrow strip at
+    /// the bottom opens `entries`.
+    fn split_button(
+        &mut self,
+        ui: &mut Ui,
+        ctx: &Context,
+        (icon, label, enabled, selected): (Icon, &str, bool, bool),
+        main: Cmd,
+        entries: &[super::ribbon::Entry],
+    ) {
+        let resp = big_menu_button(ui, icon, label, enabled, selected);
+        let split = resp.rect.bottom() - 14.0;
+        let on_main = resp.clicked() && resp.interact_pointer_pos().is_some_and(|p| p.y < split);
+        if resp.hovered() {
+            let stroke = egui::Stroke::new(1.0, ui.visuals().widgets.hovered.bg_stroke.color);
+            ui.painter().hline(resp.rect.x_range().shrink(4.0), split, stroke);
+        }
+        let de = self.ct_de();
+        let resp = resp.on_hover_text(tr(
+            de,
+            "Oberer Teil: auswählen · Pfeil: Menü",
+            "Upper part: select · Arrow: menu",
+        ));
+        self.popup_menu_ext(ctx, &resp, entries, on_main);
+        if on_main {
+            self.run(ctx, main);
+        }
     }
 
     /// Whether the contextual tabs "Format" / "Anordnen" of the content

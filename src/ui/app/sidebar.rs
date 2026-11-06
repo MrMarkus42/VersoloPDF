@@ -517,10 +517,13 @@ impl VersoloPdfApp {
         let t = self.t();
         let mut start = false;
         ui.horizontal(|ui| {
+            // Leave exactly the room of the button: a field that is even a
+            // little too wide widens the resizable pane on every frame.
+            let button = 24.0 + ui.spacing().item_spacing.x;
             let edit = ui.add(
                 egui::TextEdit::singleline(&mut self.search_query)
                     .hint_text(t.search_hint)
-                    .desired_width(ui.available_width() - 30.0),
+                    .desired_width((ui.available_width() - button).max(40.0)),
             );
             if self.focus_search {
                 edit.request_focus();

@@ -21,6 +21,8 @@ use crate::ui::widgets::{group, small_menu_button};
 /// The commands; used as `Cmd::Form(..)`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FormCmd {
+    /// "Ausfüllen": the hand tool, with the fields highlighted.
+    FillIn,
     Highlight(FieldGroup),
     RequiredOnly,
     FormPane,
@@ -36,12 +38,13 @@ impl FormCmd {
     pub fn names(self) -> (&'static str, &'static str) {
         use FormCmd::*;
         match self {
+            FillIn => ("Ausfüllen", "Fill in"),
             Highlight(g) => g.names(),
             RequiredOnly => ("Nur erforderliche Felder", "Required fields only"),
             FormPane => ("Formular", "Form"),
             DetectForms => ("Formulare erkennen", "Detect form fields"),
             EmailFormData => ("Formulardaten per E-Mail versenden", "Send form data by e-mail"),
-            FillForms => ("Formulare ausfüllen", "Fill forms"),
+            FillForms => ("Serienformulare aus CSV", "Fill forms from CSV"),
             DocJavaScript => ("JavaScript", "JavaScript"),
             DocActions => ("Dokumentaktionen", "Document actions"),
             AllJavaScripts => ("Alle JavaScripte", "All JavaScripts"),
@@ -51,6 +54,7 @@ impl FormCmd {
     pub fn icon(self) -> Icon {
         use FormCmd::*;
         match self {
+            FillIn => Icon::FieldText,
             Highlight(_) | RequiredOnly => Icon::Form,
             FormPane => Icon::Sidebar,
             DetectForms => Icon::Search,
@@ -114,6 +118,7 @@ impl VersoloPdfApp {
     pub(super) fn form_selected(&self, cmd: FormCmd) -> bool {
         let s = &self.settings;
         match cmd {
+            FormCmd::FillIn => self.tool == Tool::Hand && s.highlight_fields,
             FormCmd::Highlight(g) => !s.highlight_off.contains(&g),
             FormCmd::RequiredOnly => s.highlight_required_only,
             FormCmd::FormPane => s.show_sidebar && self.side == SidePanel::Fields,
@@ -124,6 +129,19 @@ impl VersoloPdfApp {
     pub(super) fn run_form(&mut self, ctx: &Context, cmd: FormCmd) {
         let s = &mut self.settings;
         match cmd {
+            FormCmd::FillIn => {
+                s.highlight_fields = true;
+                self.select_tool(Tool::Hand);
+                let de = self.fc_de();
+                self.set_status(
+                    ctx,
+                    tr(
+                        de,
+                        "Ausfüllen: ins Feld klicken und tippen, Tab springt zum nächsten Feld. Kästchen und Knöpfe mit einem Klick.",
+                        "Fill in: click into a field and type, Tab moves to the next field. Check boxes and buttons with one click.",
+                    ),
+                );
+            }
             FormCmd::Highlight(g) => {
                 if s.highlight_off.contains(&g) {
                     s.highlight_off.retain(|x| *x != g);
@@ -171,6 +189,7 @@ impl VersoloPdfApp {
         let de = self.fc_de();
         self.tools_group(ui, ctx);
         group(ui, tr(de, "Formularfelder", "Form fields"), |ui| {
+            self.big(ui, ctx, Cmd::Form(FormCmd::FillIn));
             self.big(ui, ctx, Cmd::Tool(Tool::SelectFields));
             for tool in [
                 Tool::FieldText,
@@ -404,7 +423,15 @@ impl VersoloPdfApp {
 
     pub(super) fn fill_forms_dialog(&mut self, ui: &mut Ui, s: &mut FillState) -> (Outcome, Option<Action>) {
         let de = self.fc_de();
-        super::dialogs::set_title(ui, tr(de, "PDF-Formulare ausfüllen", "Fill PDF forms"));
+        super::dialogs::set_title(ui, tr(de, "Serienformulare aus CSV-Datei", "Fill forms from a CSV file"));
+        ui.label(
+            RichText::new(tr(
+                de,
+                "Erzeugt für jede Zeile einer CSV-Datei ein ausgefülltes PDF. Ein einzelnes Formular füllen Sie direkt aus: Formular › Ausfüllen.",
+                "Makes one filled PDF per row of a CSV file. To fill in a single form, use Form › Fill in.",
+            ))
+            .weak(),
+        );
         let section = |ui: &mut Ui, title: &str| {
             ui.add_space(4.0);
             ui.label(RichText::new(title).strong());

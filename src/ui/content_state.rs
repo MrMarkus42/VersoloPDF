@@ -60,9 +60,26 @@ pub struct TextEditing {
     /// Wrap width (0: lines as typed).
     pub width: f32,
     pub focus_requested: bool,
+    /// Select the whole text when the editor opens (new sample text).
+    pub select_all: bool,
 }
 
 impl TextEditing {
+    /// Opens `block` of `page` in the editor.
+    pub fn open(page: usize, block: TextBlock) -> Self {
+        // Several lines keep their width (the text is wrapped again).
+        let width = if block.lines.len() > 1 { block.rect.width() } else { 0.0 };
+        Self {
+            page,
+            text: block.text(),
+            style: TextStyle::of_block(&block),
+            width,
+            block,
+            focus_requested: false,
+            select_all: false,
+        }
+    }
+
     pub fn changed(&self) -> bool {
         self.text != self.block.text() || self.style != TextStyle::of_block(&self.block)
     }

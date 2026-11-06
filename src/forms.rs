@@ -122,7 +122,7 @@ fn widget_style(widget: &Dictionary) -> Option<WidgetStyle> {
 fn text_appearance(
     style: &WidgetStyle,
     da: &str,
-    font_ref: Option<Object>,
+    (font_ref, font): (Option<Object>, FieldFont),
     value: &str,
     multiline: bool,
     password: bool,
@@ -131,7 +131,7 @@ fn text_appearance(
     let (font_name, mut size, color) = parse_da(da);
     let shown = if password { "*".repeat(value.chars().count()) } else { value.to_string() };
     let encoded = win_ansi(&shown);
-    let metrics = StdFont::Helvetica;
+    let metrics = font.metrics();
     let (w, h) = (style.w, style.h);
     let pad = 2.0 + style.border_width;
     if size <= 0.0 {
@@ -196,14 +196,7 @@ fn text_appearance(
     let mut fonts = Dictionary::new();
     match font_ref {
         Some(f) => fonts.set(font_name.as_bytes().to_vec(), f),
-        None => {
-            let mut f = Dictionary::new();
-            f.set("Type", Object::Name(b"Font".to_vec()));
-            f.set("Subtype", Object::Name(b"Type1".to_vec()));
-            f.set("BaseFont", Object::Name(b"Helvetica".to_vec()));
-            f.set("Encoding", Object::Name(b"WinAnsiEncoding".to_vec()));
-            fonts.set(font_name.as_bytes().to_vec(), Object::Dictionary(f));
-        }
+        None => fonts.set(font_name.as_bytes().to_vec(), Object::Dictionary(font.dict())),
     }
     let mut resources = Dictionary::new();
     resources.set("Font", Object::Dictionary(fonts));
@@ -332,13 +325,14 @@ fn regenerate_text(
         .and_then(|fonts| edit.resolve(&fonts).ok().and_then(|f| f.as_dict().ok()).cloned())
         .and_then(|fonts| fonts.get(font_name.as_bytes()).ok().cloned());
     let quadding = inherited(edit, field_id, b"Q").and_then(|o| o.as_i64().ok()).unwrap_or(0);
+    let font = FieldFont::of(&font_name, base_font_of(edit, font_ref.as_ref()).as_deref());
     for widget_id in widgets_of(edit, field_id) {
         let widget = edit.object(widget_id)?.as_dict()?.clone();
         let Some(style) = widget_style(&widget) else { continue };
         let stream = text_appearance(
             &style,
             &da,
-            font_ref.clone(),
+            (font_ref.clone(), font),
             text,
             flags & FLAG_MULTILINE != 0,
             flags & FLAG_PASSWORD != 0,
@@ -1171,6 +1165,520 @@ pub fn field_extras(bytes: &[u8], password: Option<&str>, page: usize, index: us
     })
 }
 
+// ---------------------------------------------------------------------------
+// Field properties ("Eigenschaften" of the form designer)
+
+const FLAG_REQUIRED: u32 = 1 << 1;
+const FLAG_COMBO: u32 = 1 << 17;
+
+/// Font of the text of a form field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FieldFont {
+    #[default]
+    Helvetica,
+    HelveticaBold,
+    Times,
+    Courier,
+}
+
+impl FieldFont {
+    pub const ALL: [FieldFont; 4] =
+        [FieldFont::Helvetica, FieldFont::HelveticaBold, FieldFont::Times, FieldFont::Courier];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            FieldFont::Helvetica => "Helvetica (Arial)",
+            FieldFont::HelveticaBold => "Helvetica fett / bold",
+            FieldFont::Times => "Times",
+            FieldFont::Courier => "Courier",
+        }
+    }
+
+    /// Name in the form's font resources (the usual names of PDF forms).
+    fn resource(self) -> &'static str {
+        match self {
+            FieldFont::Helvetica => "Helv",
+            FieldFont::HelveticaBold => "HeBo",
+            FieldFont::Times => "TiRo",
+            FieldFont::Courier => "Cour",
+        }
+    }
+
+    fn base_font(self) -> &'static str {
+        match self {
+            FieldFont::Helvetica => "Helvetica",
+            FieldFont::HelveticaBold => "Helvetica-Bold",
+            FieldFont::Times => "Times-Roman",
+            FieldFont::Courier => "Courier",
+        }
+    }
+
+    /// Widths for placing the text (Times: Helvetica's, a little wider).
+    fn metrics(self) -> StdFont {
+        match self {
+            FieldFont::HelveticaBold => StdFont::HelveticaBold,
+            FieldFont::Courier => StdFont::Courier,
+            _ => StdFont::Helvetica,
+        }
+    }
+
+    /// The font of a resource name and (if known) its base font.
+    fn of(resource: &str, base_font: Option<&str>) -> FieldFont {
+        let key = base_font.unwrap_or(resource).to_ascii_lowercase();
+        if key.contains("cour") {
+            FieldFont::Courier
+        } else if key.contains("times") || key.starts_with("tiro") || key.contains("serif") {
+            FieldFont::Times
+        } else if key.contains("bold") || key == "hebo" {
+            FieldFont::HelveticaBold
+        } else {
+            FieldFont::Helvetica
+        }
+    }
+
+    fn dict(self) -> Dictionary {
+        let mut f = Dictionary::new();
+        f.set("Type", Object::Name(b"Font".to_vec()));
+        f.set("Subtype", Object::Name(b"Type1".to_vec()));
+        f.set("BaseFont", Object::Name(self.base_font().as_bytes().to_vec()));
+        f.set("Encoding", Object::Name(b"WinAnsiEncoding".to_vec()));
+        f
+    }
+}
+
+/// What kind of field the properties belong to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PropsKind {
+    #[default]
+    Text,
+    ComboBox,
+    ListBox,
+    CheckBox,
+    Radio,
+    Button,
+    Signature,
+    Other,
+}
+
+impl PropsKind {
+    /// Fields whose text look (font, size, colour, alignment) can be set.
+    pub fn has_text_look(self) -> bool {
+        matches!(self, PropsKind::Text | PropsKind::ComboBox)
+    }
+}
+
+/// The properties of a form field that the form designer can change.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldProps {
+    pub kind: PropsKind,
+    /// Full field name.
+    pub name: String,
+    /// "QuickInfo" (/TU): shown when the pointer rests on the field.
+    pub tooltip: String,
+    pub required: bool,
+    pub read_only: bool,
+    /// Text fields: the value given in advance (also used by "Formular
+    /// zurücksetzen"). Lists: the item chosen in advance.
+    pub default_value: String,
+    pub font: FieldFont,
+    /// 0: automatic (fits the field).
+    pub font_size: f32,
+    pub color: crate::model::Rgba,
+    /// 0 left, 1 centre, 2 right.
+    pub align: u8,
+    pub multiline: bool,
+    pub password: bool,
+    /// Maximum number of characters (0: no limit).
+    pub max_len: u32,
+    pub border: Option<crate::model::Rgba>,
+    pub background: Option<crate::model::Rgba>,
+    /// Items of list and combo boxes.
+    pub options: Vec<String>,
+}
+
+fn rgba_of(c: [f32; 3]) -> crate::model::Rgba {
+    let b = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    crate::model::Rgba::rgb(b(c[0]), b(c[1]), b(c[2]))
+}
+
+fn rgb_array(c: crate::model::Rgba) -> Object {
+    let f = |v: u8| Object::Real(f32::from(v) / 255.0);
+    Object::Array(vec![f(c.r), f(c.g), f(c.b)])
+}
+
+/// Colour of the operators in a default appearance ("0 g", "1 0 0 rg").
+fn da_color(ops: &str) -> crate::model::Rgba {
+    let v: Vec<f32> = ops.split_whitespace().filter_map(|t| t.parse().ok()).collect();
+    match v.as_slice() {
+        [g] => rgba_of([*g, *g, *g]),
+        [r, g, b] => rgba_of([*r, *g, *b]),
+        [c, m, y, k] => rgba_of([(1.0 - c) * (1.0 - k), (1.0 - m) * (1.0 - k), (1.0 - y) * (1.0 - k)]),
+        _ => crate::model::Rgba::BLACK,
+    }
+}
+
+/// The terminal field of the widget `annot_index` on `page`: (widget, field).
+fn widget_and_field(edit: &mut Edit, page: usize, annot_index: usize) -> Result<(ObjectId, ObjectId)> {
+    let page_id = edit.page_id(page)?;
+    let widget_id = edit.annotation_id(page_id, annot_index)?;
+    let widget = edit.object(widget_id)?.as_dict()?.clone();
+    if name(&widget, b"Subtype").as_deref() != Some("Widget") {
+        return Err(Error::Invalid("not a form field".into()));
+    }
+    let field_id = if widget.has(b"T") || !widget.has(b"Parent") {
+        widget_id
+    } else {
+        widget.get(b"Parent")?.as_reference()?
+    };
+    Ok((widget_id, field_id))
+}
+
+fn text_of(obj: Option<Object>) -> String {
+    match obj {
+        Some(Object::String(b, _)) => crate::pdf_edit::decode_text_string(&b),
+        Some(Object::Name(n)) => String::from_utf8_lossy(&n).into_owned(),
+        _ => String::new(),
+    }
+}
+
+fn da_of(edit: &Edit, field_id: ObjectId, form: Option<&Dictionary>) -> String {
+    inherited(edit, field_id, b"DA")
+        .and_then(|o| match o {
+            Object::String(b, _) => Some(String::from_utf8_lossy(&b).into_owned()),
+            _ => None,
+        })
+        .or_else(|| form.and_then(|f| string(f, b"DA")))
+        .unwrap_or_else(|| "/Helv 0 Tf 0 g".to_string())
+}
+
+/// The font dictionary of the form's resources named `resource`.
+fn form_font(edit: &Edit, form: Option<&Dictionary>, resource: &str) -> Option<Object> {
+    form.and_then(|f| f.get(b"DR").ok())
+        .and_then(|dr| edit.resolve(dr).ok().and_then(|d| d.as_dict().ok()).cloned())
+        .and_then(|dr| dr.get(b"Font").ok().cloned())
+        .and_then(|fonts| edit.resolve(&fonts).ok().and_then(|f| f.as_dict().ok()).cloned())
+        .and_then(|fonts| fonts.get(resource.as_bytes()).ok().cloned())
+}
+
+fn base_font_of(edit: &Edit, font: Option<&Object>) -> Option<String> {
+    let dict = edit.resolve(font?).ok()?.as_dict().ok()?;
+    name(dict, b"BaseFont")
+}
+
+/// Reads the properties of the field whose widget is `annot_index` on `page`.
+pub fn field_props(
+    bytes: &[u8],
+    password: Option<&str>,
+    page: usize,
+    annot_index: usize,
+) -> Result<FieldProps> {
+    guarded(|| {
+        let mut edit = Edit::open(bytes, password)?;
+        let (widget_id, field_id) = widget_and_field(&mut edit, page, annot_index)?;
+        let form = acroform(&edit);
+        let ft = inherited(&edit, field_id, b"FT")
+            .and_then(|o| o.as_name().ok().map(<[u8]>::to_vec))
+            .unwrap_or_default();
+        let flags = inherited(&edit, field_id, b"Ff").and_then(|o| number(&o)).unwrap_or(0.0) as u32;
+        let kind = match ft.as_slice() {
+            b"Tx" => PropsKind::Text,
+            b"Ch" if flags & FLAG_COMBO != 0 => PropsKind::ComboBox,
+            b"Ch" => PropsKind::ListBox,
+            b"Btn" if flags & FLAG_PUSHBUTTON != 0 => PropsKind::Button,
+            b"Btn" if flags & FLAG_RADIO != 0 => PropsKind::Radio,
+            b"Btn" => PropsKind::CheckBox,
+            b"Sig" => PropsKind::Signature,
+            _ => PropsKind::Other,
+        };
+        let full_name = form
+            .as_ref()
+            .and(acroform_id(&edit))
+            .and_then(|form_id| terminal_fields(&edit, form_id).ok())
+            .and_then(|all| all.into_iter().find(|(_, id)| *id == field_id).map(|(n, _)| n))
+            .unwrap_or_default();
+        let da = da_of(&edit, field_id, form.as_ref());
+        let (resource, size, color) = parse_da(&da);
+        let font_obj = form_font(&edit, form.as_ref(), &resource);
+        let base = base_font_of(&edit, font_obj.as_ref());
+        let widget = edit.object(widget_id)?.as_dict()?.clone();
+        let style = widget_style(&widget);
+        let options = match inherited(&edit, field_id, b"Opt") {
+            Some(obj) => edit
+                .resolve(&obj)
+                .ok()
+                .and_then(|o| o.as_array().ok())
+                .map(|items| {
+                    items
+                        .iter()
+                        .map(|item| match edit.resolve(item) {
+                            // [export value, shown text] pairs: the shown text.
+                            Ok(Object::Array(pair)) => text_of(pair.get(1).or(pair.first()).cloned()),
+                            Ok(other) => text_of(Some(other.clone())),
+                            Err(_) => String::new(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+            None => Vec::new(),
+        };
+        Ok(FieldProps {
+            kind,
+            name: full_name,
+            tooltip: text_of(edit.object(field_id)?.as_dict()?.get(b"TU").ok().cloned()),
+            required: flags & FLAG_REQUIRED != 0,
+            read_only: flags & FLAG_READONLY != 0,
+            default_value: text_of(inherited(&edit, field_id, b"DV")),
+            font: FieldFont::of(&resource, base.as_deref()),
+            font_size: size.max(0.0),
+            color: da_color(&color),
+            align: inherited(&edit, field_id, b"Q").and_then(|o| o.as_i64().ok()).unwrap_or(0).clamp(0, 2)
+                as u8,
+            multiline: flags & FLAG_MULTILINE != 0,
+            password: flags & FLAG_PASSWORD != 0,
+            max_len: inherited(&edit, field_id, b"MaxLen").and_then(|o| o.as_i64().ok()).unwrap_or(0).max(0)
+                as u32,
+            border: style.as_ref().and_then(|s| s.border).map(rgba_of),
+            background: style.as_ref().and_then(|s| s.background).map(rgba_of),
+            options,
+        })
+    })
+}
+
+/// Makes sure the form's font resources contain `font`.
+fn ensure_form_font(edit: &mut Edit, font: FieldFont) -> Result<()> {
+    let form_id = ensure_acroform(edit)?;
+    let form = edit.object(form_id)?.as_dict()?.clone();
+    let mut dr = match form.get(b"DR") {
+        Ok(obj) => edit.resolve(obj)?.as_dict().cloned().unwrap_or_default(),
+        Err(_) => Dictionary::new(),
+    };
+    let mut fonts = match dr.get(b"Font") {
+        Ok(obj) => edit.resolve(obj)?.as_dict().cloned().unwrap_or_default(),
+        Err(_) => Dictionary::new(),
+    };
+    if !fonts.has(font.resource().as_bytes()) {
+        let id = edit.add(Object::Dictionary(font.dict()));
+        fonts.set(font.resource(), Object::Reference(id));
+        dr.set("Font", Object::Dictionary(fonts));
+        edit.dict_mut(form_id)?.set("DR", Object::Dictionary(dr));
+    }
+    Ok(())
+}
+
+/// The appearance of a list box: all items, the chosen one marked.
+fn list_appearance(style: &WidgetStyle, options: &[String], chosen: &str) -> Stream {
+    let (w, h) = (style.w, style.h);
+    let size = 10.0;
+    let mut content = String::new();
+    let bg = style.background.unwrap_or([1.0, 1.0, 1.0]);
+    content.push_str(&format!(
+        "{} {} {} rg 0 0 {} {} re f\n",
+        num(bg[0]),
+        num(bg[1]),
+        num(bg[2]),
+        num(w),
+        num(h)
+    ));
+    if let Some([r, g, b]) = style.border {
+        content.push_str(&format!(
+            "{} {} {} RG 1 w 0.5 0.5 {} {} re S\n",
+            num(r),
+            num(g),
+            num(b),
+            num(w - 1.0),
+            num(h - 1.0)
+        ));
+    }
+    for (i, o) in options.iter().enumerate() {
+        let y = h - 3.0 - (i as f32 + 1.0) * size * 1.25;
+        if y < 0.0 {
+            break;
+        }
+        if o == chosen {
+            content.push_str(&format!(
+                "0.6 0.75 0.95 rg 1 {} {} {} re f\n",
+                num(y - 2.0),
+                num(w - 2.0),
+                num(size * 1.25)
+            ));
+        }
+        let bytes = escape(&win_ansi(o));
+        content.push_str(&format!("BT /Helv {} Tf 0 g 3 {} Td (", num(size), num(y + 1.0)));
+        content.push_str(&latin1(&bytes));
+        content.push_str(") Tj ET\n");
+    }
+    form_stream(w, h, content, true)
+}
+
+/// Writes changed properties of the field whose widget is `annot_index` on
+/// `page` and draws its look again.
+pub fn set_field_props(
+    bytes: &[u8],
+    password: Option<&str>,
+    page: usize,
+    annot_index: usize,
+    props: &FieldProps,
+) -> Result<Vec<u8>> {
+    guarded(|| {
+        let old = field_props(bytes, password, page, annot_index)?;
+        let mut edit = Edit::open(bytes, password)?;
+        let (_, field_id) = widget_and_field(&mut edit, page, annot_index)?;
+        let form_id = ensure_acroform(&mut edit)?;
+        let widgets = widgets_of(&edit, field_id);
+        let kind = old.kind;
+
+        // Name: the last part of the full name is the field's own /T.
+        let new_name = props.name.trim();
+        if !new_name.is_empty() && new_name != old.name {
+            if terminal_fields(&edit, form_id)?.iter().any(|(n, id)| n == new_name && *id != field_id) {
+                return Err(Error::Invalid(format!("Name already used: {new_name}")));
+            }
+            let own = match old.name.rfind('.') {
+                Some(dot) if new_name.starts_with(&old.name[..=dot]) => &new_name[dot + 1..],
+                _ => new_name,
+            };
+            edit.dict_mut(field_id)?.set("T", text_string(own));
+        }
+        let field = edit.dict_mut(field_id)?;
+        if props.tooltip.trim().is_empty() {
+            field.remove(b"TU");
+        } else {
+            field.set("TU", text_string(props.tooltip.trim()));
+        }
+        let mut flags = inherited(&edit, field_id, b"Ff").and_then(|o| number(&o)).unwrap_or(0.0) as u32;
+        let mut set_flag = |bit: u32, on: bool| {
+            if on {
+                flags |= bit;
+            } else {
+                flags &= !bit;
+            }
+        };
+        set_flag(FLAG_REQUIRED, props.required);
+        set_flag(FLAG_READONLY, props.read_only);
+        if kind == PropsKind::Text {
+            set_flag(FLAG_MULTILINE, props.multiline);
+            set_flag(FLAG_PASSWORD, props.password);
+        }
+        edit.dict_mut(field_id)?.set("Ff", Object::Integer(i64::from(flags)));
+
+        // Current value and the one given in advance.
+        let mut value = text_of(inherited(&edit, field_id, b"V"));
+        match kind {
+            PropsKind::Text => {
+                if props.max_len > 0 {
+                    edit.dict_mut(field_id)?.set("MaxLen", Object::Integer(i64::from(props.max_len)));
+                } else {
+                    edit.dict_mut(field_id)?.remove(b"MaxLen");
+                }
+                if props.default_value != old.default_value {
+                    let dv = props.default_value.as_str();
+                    if dv.is_empty() {
+                        edit.dict_mut(field_id)?.remove(b"DV");
+                    } else {
+                        edit.dict_mut(field_id)?.set("DV", text_string(dv));
+                    }
+                    // An untouched field shows the new text right away.
+                    if value.is_empty() || value == old.default_value {
+                        value = dv.to_string();
+                        edit.dict_mut(field_id)?.set("V", text_string(&value));
+                    }
+                }
+                if props.max_len > 0 && value.chars().count() > props.max_len as usize {
+                    value = value.chars().take(props.max_len as usize).collect();
+                    edit.dict_mut(field_id)?.set("V", text_string(&value));
+                }
+            }
+            PropsKind::ComboBox | PropsKind::ListBox => {
+                let options: Vec<String> =
+                    props.options.iter().map(|o| o.trim().to_string()).filter(|o| !o.is_empty()).collect();
+                if options != old.options {
+                    edit.dict_mut(field_id)?
+                        .set("Opt", Object::Array(options.iter().map(|o| text_string(o)).collect()));
+                }
+                let dv = props.default_value.trim();
+                if dv.is_empty() || !options.iter().any(|o| o == dv) {
+                    edit.dict_mut(field_id)?.remove(b"DV");
+                } else {
+                    edit.dict_mut(field_id)?.set("DV", text_string(dv));
+                }
+                if !options.contains(&value) {
+                    value = if options.iter().any(|o| o == dv) {
+                        dv.to_string()
+                    } else {
+                        options.first().cloned().unwrap_or_default()
+                    };
+                    edit.dict_mut(field_id)?.set("V", text_string(&value));
+                }
+            }
+            _ => {}
+        }
+
+        // Look: font, size, colour, alignment, border and background.
+        if kind.has_text_look() || kind == PropsKind::ListBox {
+            ensure_form_font(&mut edit, props.font)?;
+            let c = props.color;
+            let color = if c.r == c.g && c.g == c.b {
+                format!("{} g", num(f32::from(c.r) / 255.0))
+            } else {
+                format!(
+                    "{} {} {} rg",
+                    num(f32::from(c.r) / 255.0),
+                    num(f32::from(c.g) / 255.0),
+                    num(f32::from(c.b) / 255.0)
+                )
+            };
+            let da =
+                format!("/{} {} Tf {color}", props.font.resource(), num(props.font_size.clamp(0.0, 144.0)));
+            edit.dict_mut(field_id)?.set("DA", Object::string_literal(da.clone()));
+            edit.dict_mut(field_id)?.set("Q", Object::Integer(i64::from(props.align.min(2))));
+            for w in &widgets {
+                let widget = edit.dict_mut(*w)?;
+                if widget.has(b"DA") {
+                    widget.set("DA", Object::string_literal(da.clone()));
+                }
+                let mut mk = match widget.get(b"MK") {
+                    Ok(Object::Dictionary(d)) => d.clone(),
+                    _ => Dictionary::new(),
+                };
+                match props.border {
+                    Some(c) => mk.set("BC", rgb_array(c)),
+                    None => {
+                        mk.remove(b"BC");
+                    }
+                }
+                match props.background {
+                    Some(c) => mk.set("BG", rgb_array(c)),
+                    None => {
+                        mk.remove(b"BG");
+                    }
+                }
+                widget.set("MK", Object::Dictionary(mk));
+            }
+        }
+        let form = acroform(&edit);
+        match kind {
+            PropsKind::Text => regenerate_text(&mut edit, field_id, form.as_ref(), &value, flags)?,
+            PropsKind::ComboBox => {
+                regenerate_text(&mut edit, field_id, form.as_ref(), &value, flags & !FLAG_MULTILINE)?
+            }
+            PropsKind::ListBox => {
+                let options: Vec<String> =
+                    props.options.iter().map(|o| o.trim().to_string()).filter(|o| !o.is_empty()).collect();
+                for w in &widgets {
+                    let widget = edit.object(*w)?.as_dict()?.clone();
+                    let Some(style) = widget_style(&widget) else { continue };
+                    let id = edit.add(list_appearance(&style, &options, &value));
+                    let mut ap = Dictionary::new();
+                    ap.set("N", Object::Reference(id));
+                    edit.dict_mut(*w)?.set("AP", Object::Dictionary(ap));
+                }
+            }
+            _ => {}
+        }
+        edit.finish()
+    })
+}
+
 /// "Bild": shows `image` in the button, fitted and centred.
 pub fn set_button_image(
     bytes: &[u8],
@@ -1252,11 +1760,28 @@ mod tests {
     fn appearance_contains_escaped_text() {
         let style =
             WidgetStyle { w: 200.0, h: 20.0, background: None, border: Some([0.0; 3]), border_width: 1.0 };
-        let s = text_appearance(&style, "/Helv 0 Tf 0 g", None, "a(b)", false, false, 0);
+        let helv = (None, FieldFont::Helvetica);
+        let s = text_appearance(&style, "/Helv 0 Tf 0 g", helv.clone(), "a(b)", false, false, 0);
         let content = String::from_utf8_lossy(&s.content);
         assert!(content.contains("(a\\(b\\)) Tj"), "{content}");
         assert!(content.contains("/Tx BMC"));
-        let pw = text_appearance(&style, "/Helv 10 Tf 0 g", None, "geheim", false, true, 0);
+        let pw = text_appearance(&style, "/Helv 10 Tf 0 g", helv, "geheim", false, true, 0);
         assert!(String::from_utf8_lossy(&pw.content).contains("(******)"));
+    }
+
+    #[test]
+    fn field_fonts_and_colours_are_read() {
+        assert_eq!(FieldFont::of("TiRo", None), FieldFont::Times);
+        assert_eq!(FieldFont::of("F1", Some("Courier-Bold")), FieldFont::Courier);
+        assert_eq!(FieldFont::of("HeBo", None), FieldFont::HelveticaBold);
+        assert_eq!(FieldFont::of("Helv", Some("Helvetica")), FieldFont::Helvetica);
+        assert_eq!(da_color("0 g"), crate::model::Rgba::BLACK);
+        assert_eq!(da_color("1 0 0 rg"), crate::model::Rgba::rgb(255, 0, 0));
+        // Courier: every letter is equally wide.
+        let style = WidgetStyle { w: 200.0, h: 20.0, background: None, border: None, border_width: 1.0 };
+        let s = text_appearance(&style, "/Cour 10 Tf 0 g", (None, FieldFont::Courier), "ab", false, false, 2);
+        let content = String::from_utf8_lossy(&s.content);
+        assert!(content.contains("/Cour 10 Tf"), "{content}");
+        assert!(format!("{:?}", s.dict).contains("Courier"));
     }
 }

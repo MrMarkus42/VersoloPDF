@@ -1940,7 +1940,12 @@ fn handle_click(tab: &mut DocTab, cx: &mut CanvasCtx, on_screen: &[PageOnScreen]
             tab.selected_annot =
                 widget_at(tab, pos.page, pdf).map(|index| AnnotRef { page: pos.page, index });
         }
-        Tool::SelectText => tab.selection = None,
+        // Form fields can be filled in with the text tool too.
+        Tool::SelectText => {
+            if !fill_field_at(tab, cx, &pos, pdf) {
+                tab.selection = None;
+            }
+        }
         Tool::Zoom => {
             tab.zoom = if shift { zoom_out(tab.zoom) } else { zoom_in(tab.zoom) };
             tab.zoom_mode = ZoomMode::Custom;
@@ -1993,21 +1998,29 @@ fn handle_click(tab: &mut DocTab, cx: &mut CanvasCtx, on_screen: &[PageOnScreen]
 }
 
 fn click_hand(tab: &mut DocTab, cx: &mut CanvasCtx, pos: &PageOnScreen, pdf: PointF, tol: f32) {
+    if fill_field_at(tab, cx, pos, pdf) {
+        return;
+    }
+    if let Some(link) = tab.links(pos.page).iter().find(|l| l.rect.contains(pdf)).cloned() {
+        match link.target {
+            LinkTarget::Page(target) => tab.jump_to_page(target),
+            LinkTarget::Uri(uri) => cx.events.push(CanvasEvent::OpenUri(uri)),
+            LinkTarget::Unsupported => cx.events.push(CanvasEvent::Status(cx.t.link_not_supported.into())),
+        }
+        return;
+    }
+    tab.selected_annot =
+        annotation_at(tab, pos.page, pdf, tol).map(|index| AnnotRef { page: pos.page, index });
+}
+
+/// Filling in: a click on a form field edits, ticks or presses it.
+/// Returns false if there is no (writable) field at `pdf`.
+fn fill_field_at(tab: &mut DocTab, cx: &mut CanvasCtx, pos: &PageOnScreen, pdf: PointF) -> bool {
     if let Some(field) = tab.fields(pos.page).iter().rev().find(|f| f.rect.contains(pdf)).cloned()
         && !field.read_only
     {
         match field.kind {
-            FieldKind::Text { multiline, password } => {
-                tab.field_edit = Some(FieldEdit {
-                    page: field.page,
-                    annot_index: field.annot_index,
-                    value: field.value.clone(),
-                    multiline,
-                    password,
-                    rect: field.rect,
-                    focus_requested: false,
-                });
-            }
+            FieldKind::Text { .. } => tab.field_edit = field_editor(&field),
             FieldKind::CheckBox => cx.events.push(CanvasEvent::SetChecked {
                 page: field.page,
                 annot_index: field.annot_index,
@@ -2031,18 +2044,9 @@ fn click_hand(tab: &mut DocTab, cx: &mut CanvasCtx, pos: &PageOnScreen, pdf: Poi
             }
             _ => cx.events.push(CanvasEvent::Status(cx.t.field_not_supported.into())),
         }
-        return;
+        return true;
     }
-    if let Some(link) = tab.links(pos.page).iter().find(|l| l.rect.contains(pdf)).cloned() {
-        match link.target {
-            LinkTarget::Page(target) => tab.jump_to_page(target),
-            LinkTarget::Uri(uri) => cx.events.push(CanvasEvent::OpenUri(uri)),
-            LinkTarget::Unsupported => cx.events.push(CanvasEvent::Status(cx.t.link_not_supported.into())),
-        }
-        return;
-    }
-    tab.selected_annot =
-        annotation_at(tab, pos.page, pdf, tol).map(|index| AnnotRef { page: pos.page, index });
+    false
 }
 
 fn handle_double_click(
@@ -2075,6 +2079,13 @@ fn handle_double_click(
                 } else {
                     cx.events.push(CanvasEvent::ShowProperties);
                 }
+            }
+        }
+        // Form designer: a double click shows the field's properties.
+        Tool::SelectFields => {
+            if let Some(index) = widget_at(tab, pos.page, pdf) {
+                tab.selected_annot = Some(AnnotRef { page: pos.page, index });
+                cx.events.push(CanvasEvent::ShowProperties);
             }
         }
         t if t.gesture() == Gesture::Vertices => {
@@ -2165,14 +2176,58 @@ fn draw_field_editor(ui: &mut Ui, tab: &mut DocTab, on_screen: &[PageOnScreen], 
         return;
     }
     let enter = !edit.multiline && ui.input(|i| i.key_pressed(Key::Enter));
-    if response.lost_focus() || enter {
+    // Tab (Shift+Tab) goes on to the next (previous) text field.
+    let (tab_key, back) = ui.input(|i| (i.key_pressed(Key::Tab) && !i.modifiers.command, i.modifiers.shift));
+    if response.lost_focus() || enter || tab_key {
         let edit = tab.field_edit.take().expect("field edit present");
-        cx.events.push(CanvasEvent::CommitField {
-            page: edit.page,
-            annot_index: edit.annot_index,
-            value: edit.value,
-        });
+        let (page, index) = (edit.page, edit.annot_index);
+        cx.events.push(CanvasEvent::CommitField { page, annot_index: index, value: edit.value });
+        if tab_key && let Some(next) = next_text_field(tab, page, index, back) {
+            if next.page != page {
+                tab.jump_to_page(next.page);
+            }
+            tab.field_edit = field_editor(&next);
+        }
     }
+}
+
+/// The editor for a text field (None for other kinds).
+fn field_editor(field: &crate::model::FormFieldInfo) -> Option<FieldEdit> {
+    match field.kind {
+        FieldKind::Text { multiline, password } if !field.read_only => Some(FieldEdit {
+            page: field.page,
+            annot_index: field.annot_index,
+            value: field.value.clone(),
+            multiline,
+            password,
+            rect: field.rect,
+            focus_requested: false,
+        }),
+        _ => None,
+    }
+}
+
+/// The text field after (before) widget `index` on `page`, in the order of
+/// the pages and of the fields on each page; wraps around.
+fn next_text_field(
+    tab: &mut DocTab,
+    page: usize,
+    index: usize,
+    back: bool,
+) -> Option<crate::model::FormFieldInfo> {
+    let mut list = Vec::new();
+    for p in 0..tab.doc.page_count().min(2000) {
+        list.extend(
+            tab.fields(p)
+                .iter()
+                .filter(|f| matches!(f.kind, FieldKind::Text { .. }) && !f.read_only)
+                .cloned(),
+        );
+    }
+    let at = list.iter().position(|f| f.page == page && f.annot_index == index)?;
+    let n = list.len();
+    let next = if back { (at + n - 1) % n } else { (at + 1) % n };
+    (next != at).then(|| list[next].clone())
 }
 
 #[cfg(test)]

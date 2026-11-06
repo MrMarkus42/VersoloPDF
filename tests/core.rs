@@ -1175,6 +1175,79 @@ fn temp_file(name: &str) -> std::path::PathBuf {
 }
 
 #[test]
+fn form_field_properties_are_changed() {
+    use versolopdf::forms::{FieldFont, NewFieldKind, PropsKind};
+    use versolopdf::model::Rgba;
+    let _guard = common::lock();
+    let mut doc = open(1);
+    let r = |x: f32, y: f32, w: f32, h: f32| RectF::new(x, y, x + w, y + h);
+    doc.create_field(0, r(100.0, 700.0, 200.0, 24.0), &NewFieldKind::Text { multiline: false }, "").unwrap();
+    let index = doc.annotations(0).unwrap().len() - 1;
+    let mut p = doc.field_props(0, index).unwrap();
+    assert_eq!(p.kind, PropsKind::Text);
+    assert_eq!(p.name, "Text1");
+    assert_eq!(p.font, FieldFont::Helvetica);
+    assert_eq!(p.font_size, 0.0);
+    p.name = "Nachname".into();
+    p.tooltip = "Ihr Nachname".into();
+    p.required = true;
+    p.default_value = "Muster".into();
+    p.font = FieldFont::Courier;
+    p.font_size = 14.0;
+    p.color = Rgba::rgb(0, 0, 255);
+    p.align = 1;
+    p.max_len = 20;
+    p.background = Some(Rgba::rgb(255, 255, 200));
+    doc.set_field_props(0, index, &p).unwrap();
+    let back = doc.field_props(0, index).unwrap();
+    assert_eq!(back.name, "Nachname");
+    assert_eq!(back.tooltip, "Ihr Nachname");
+    assert!(back.required && !back.read_only);
+    assert_eq!(back.default_value, "Muster");
+    assert_eq!(back.font, FieldFont::Courier);
+    assert_eq!(back.font_size, 14.0);
+    assert_eq!(back.color, Rgba::rgb(0, 0, 255));
+    assert_eq!(back.align, 1);
+    assert_eq!(back.max_len, 20);
+    assert_eq!(back.background, Some(Rgba::rgb(255, 255, 200)));
+    // The untouched field shows the text given in advance; resetting keeps it.
+    assert_eq!(doc.field_values().unwrap(), vec![("Nachname".to_string(), "Muster".to_string())]);
+    doc.reset_form().unwrap();
+    assert_eq!(doc.field_values().unwrap()[0].1, "Muster");
+    let info = doc.form_fields(0).unwrap().into_iter().find(|f| f.annot_index == index).unwrap();
+    assert_eq!(info.value, "Muster");
+    assert!(info.required);
+    // Each change is one undo step.
+    doc.undo().unwrap();
+    assert_eq!(doc.field_props(0, index).unwrap().name, "Nachname");
+    doc.undo().unwrap();
+    assert_eq!(doc.field_props(0, index).unwrap().name, "Text1");
+    doc.redo().unwrap();
+
+    // A second field may not get the same name.
+    doc.create_field(0, r(100.0, 600.0, 200.0, 24.0), &NewFieldKind::Text { multiline: false }, "").unwrap();
+    let second = doc.annotations(0).unwrap().len() - 1;
+    let mut q = doc.field_props(0, second).unwrap();
+    q.name = "Nachname".into();
+    assert!(doc.set_field_props(0, second, &q).is_err());
+
+    // List items can be changed.
+    let options = vec!["rot".to_string(), "grün".to_string()];
+    doc.create_field(0, r(100.0, 500.0, 120.0, 20.0), &NewFieldKind::ComboBox { options }, "").unwrap();
+    let combo = doc.annotations(0).unwrap().len() - 1;
+    let mut c = doc.field_props(0, combo).unwrap();
+    assert_eq!(c.kind, PropsKind::ComboBox);
+    assert_eq!(c.options, vec!["rot".to_string(), "grün".to_string()]);
+    c.options = vec!["blau".into(), "gelb".into()];
+    c.default_value = "gelb".into();
+    doc.set_field_props(0, combo, &c).unwrap();
+    let back = doc.field_props(0, combo).unwrap();
+    assert_eq!(back.options, vec!["blau".to_string(), "gelb".to_string()]);
+    let values = doc.field_values().unwrap();
+    assert!(values.iter().any(|(n, v)| n == "ComboBox1" && v == "gelb"), "{values:?}");
+}
+
+#[test]
 fn form_fields_can_be_created_reset_and_exchanged() {
     use versolopdf::forms::NewFieldKind;
     let _guard = common::lock();
