@@ -373,7 +373,10 @@ impl VersoloPdfApp {
                             let label = cmd.label(lang);
                             let response = column_row(ui, label, self.cmd_enabled(cmd), false);
                             let response = match cmd.shortcut() {
-                                Some(keys) => response.on_hover_text(format!("{label} ({})", pick(keys))),
+                                Some(keys) => response.on_hover_text(format!(
+                                    "{label} ({})",
+                                    super::mac_menu::key_text(pick(keys))
+                                )),
                                 None => response,
                             };
                             if response.clicked() {

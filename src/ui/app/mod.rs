@@ -20,6 +20,7 @@ mod insert_source;
 pub mod keytips;
 mod labels_dialog;
 mod layout_dialogs;
+pub mod mac_menu;
 mod marks_dialogs;
 mod office_dialogs;
 mod optimize_dialog;
@@ -294,6 +295,9 @@ pub struct VersoloPdfApp {
     pending_open: VecDeque<PathBuf>,
     /// Files handed over by later starts of VersoloPDF (see crate::instance).
     inbox: Option<crate::instance::Inbox>,
+    /// Language of the macOS menu bar built last (None: not built yet).
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    mac_menu_language: Option<crate::ui::i18n::Language>,
     exit_confirmed: bool,
     search_query: String,
     search_case: bool,
@@ -457,6 +461,7 @@ impl VersoloPdfApp {
             status: None,
             pending_open: files.into(),
             inbox: None,
+            mac_menu_language: None,
             exit_confirmed: false,
             search_query: String::new(),
             search_case: false,
@@ -1024,6 +1029,10 @@ impl eframe::App for VersoloPdfApp {
         let ctx = ui.ctx().clone();
         self.apply_view_settings(&ctx);
         self.check_inbox(&ctx);
+        // Menu bar of macOS: chosen entries become commands or key presses
+        // before the shortcuts are read.
+        #[cfg(target_os = "macos")]
+        self.mac_menu(&ctx);
         if let Some(path) = self.pending_open.pop_front() {
             self.open_path(&ctx, path, None);
         }

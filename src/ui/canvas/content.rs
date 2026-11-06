@@ -530,7 +530,11 @@ fn context_menu(tab: &mut DocTab, cx: &mut CanvasCtx, response: &egui::Response,
         let mut item = |ui: &mut Ui, cmd: ContentCmd, enabled: bool| {
             let (g, e) = cmd.names();
             let label = match cmd.shortcut() {
-                Some((sg, se)) => format!("{}\t{}", if de { g } else { e }, if de { sg } else { se }),
+                Some((sg, se)) => format!(
+                    "{}\t{}",
+                    if de { g } else { e },
+                    crate::ui::app::mac_menu::key_text(if de { sg } else { se })
+                ),
                 None => (if de { g } else { e }).to_string(),
             };
             if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {

@@ -3,8 +3,9 @@
 //! * PDFs opened in the Finder (double click, "Öffnen mit", dropped on the
 //!   Dock icon) arrive as an "open documents" Apple Event, also while
 //!   VersoloPDF already runs.
-//! * "Per E-Mail senden": a new message in Apple Mail (sharing service) or
-//!   Microsoft Outlook with the files attached.
+//! * "Per E-Mail senden": a new message in Apple Mail or Microsoft Outlook
+//!   with the files attached.
+//! * The macOS menu bar with VersoloPDF's commands (see `crate::ui::macos_menu`).
 //! * Printing through the macOS print dialog (PDFKit).
 //! * Text recognition with Apple's Vision framework (no extra program).
 //! * Digital IDs (certificate + private key) from the keychain; the private
@@ -150,46 +151,195 @@ fn mail_program() -> Option<PathBuf> {
     app.path().map(|p| PathBuf::from(p.to_string()))
 }
 
-/// A new message with `subject` and the `files` attached. Apple Mail gets
-/// it through the sharing service, Outlook by opening the files with it.
-/// `false`: no supported mail program (the caller falls back to `mailto:`).
-pub fn compose_mail(subject: &str, files: &[PathBuf]) -> bool {
-    if MainThreadMarker::new().is_none() {
+/// Apple Mail, where macOS keeps it.
+const APPLE_MAIL: &str = "/System/Applications/Mail.app";
+
+/// Mail programs that start a new message with the files attached when
+/// they are asked to open them (as when files are dropped on their Dock icon).
+pub fn opens_files_as_attachments(program: &Path) -> bool {
+    let name = program.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+    name == "mail.app" || name.contains("outlook")
+}
+
+/// A new message with the `files` attached in the user's mail program
+/// (Apple Mail or Outlook): the program is asked to open the files, which
+/// starts a message with them attached. That needs no permission to
+/// control other programs; the subject is left to the user.
+/// `false`: no such mail program (the caller falls back to `mailto:`).
+/// The mail program "Per E-Mail senden" uses, if it can take attachments
+/// this way: the one macOS has for `mailto:`, else Apple Mail.
+pub fn attachment_mail_program() -> Option<PathBuf> {
+    mail_program()
+        .or_else(|| Some(PathBuf::from(APPLE_MAIL)).filter(|p| p.exists()))
+        .filter(|p| opens_files_as_attachments(p))
+}
+
+pub fn compose_mail(files: &[PathBuf]) -> bool {
+    if files.is_empty() {
         return false;
     }
-    let program = mail_program();
-    let name = program
-        .as_ref()
-        .and_then(|p| p.file_name())
-        .map(|n| n.to_string_lossy().to_lowercase())
-        .unwrap_or_default();
-    if name.contains("outlook") && !files.is_empty() {
-        // Opening files with Outlook starts a message with them attached.
-        let mut cmd = std::process::Command::new("/usr/bin/open");
-        cmd.arg("-a").arg(program.unwrap_or_default());
-        return cmd.args(files).status().is_ok_and(|s| s.success());
-    }
-    if !(name.is_empty() || name == "mail.app") {
+    let Some(program) = attachment_mail_program() else {
+        log::info!("E-Mail: kein Mailprogramm mit Anhang-Unterstützung, mailto: wird benutzt");
         return false;
-    }
-    autoreleasepool(|_| {
-        // SAFETY: constant of AppKit.
-        let service_name = unsafe { objc2_app_kit::NSSharingServiceNameComposeEmail };
-        let Some(service) = objc2_app_kit::NSSharingService::sharingServiceNamed(service_name) else {
-            return false;
-        };
-        service.setSubject(Some(&ns_string(subject)));
-        let urls: Vec<Retained<NSURL>> = files.iter().map(|f| file_url(f)).collect();
-        let items = NSArray::from_retained_slice(&urls);
-        // SAFETY: an array of file URLs is what the e-mail service takes.
-        let can: bool = unsafe { msg_send![&*service, canPerformWithItems: &*items] };
-        if !can {
-            return false;
+    };
+    let status = std::process::Command::new("/usr/bin/open").arg("-a").arg(&program).args(files).status();
+    match status {
+        Ok(s) if s.success() => {
+            log::info!("E-Mail: {} mit {} Anhang/Anhängen geöffnet", program.display(), files.len());
+            true
         }
-        // SAFETY: as above.
-        let () = unsafe { msg_send![&*service, performWithItems: &*items] };
-        true
-    })
+        other => {
+            log::warn!("E-Mail: {} ließ sich nicht öffnen ({other:?})", program.display());
+            false
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Menu bar
+
+/// Greyed out / ticked state of each menu entry (by its number).
+static MENU_STATES: Mutex<Vec<(bool, bool)>> = Mutex::new(Vec::new());
+/// Numbers of the entries chosen since the last frame.
+static MENU_CLICKS: Mutex<Vec<usize>> = Mutex::new(Vec::new());
+
+define_class!(
+    /// Target of VersoloPDF's menu entries.
+    #[unsafe(super(NSObject))]
+    #[name = "VersoloPDFMenuHandler"]
+    struct MenuHandler;
+
+    impl MenuHandler {
+        #[unsafe(method(versoloMenuItem:))]
+        fn menu_item(&self, item: &objc2_app_kit::NSMenuItem) {
+            let Ok(tag) = usize::try_from(item.tag()) else { return };
+            if let Ok(mut clicks) = MENU_CLICKS.lock() {
+                clicks.push(tag);
+            }
+            if let Ok(waker) = WAKER.lock()
+                && let Some(ctx) = waker.as_ref()
+            {
+                ctx.request_repaint();
+            }
+        }
+
+        /// Asked by macOS before a menu opens and before a key reaches it.
+        #[unsafe(method(validateMenuItem:))]
+        fn validate_menu_item(&self, item: &objc2_app_kit::NSMenuItem) -> objc2::runtime::Bool {
+            let Ok(tag) = usize::try_from(item.tag()) else { return objc2::runtime::Bool::YES };
+            let (enabled, on) =
+                MENU_STATES.lock().ok().and_then(|s| s.get(tag).copied()).unwrap_or((true, false));
+            // SAFETY: NSControlStateValue is an NSInteger (1 on, 0 off).
+            let () = unsafe { msg_send![item, setState: isize::from(on)] };
+            objc2::runtime::Bool::new(enabled)
+        }
+    }
+);
+
+/// macOS key modifier flags.
+const MOD_SHIFT: usize = 1 << 17;
+const MOD_CONTROL: usize = 1 << 18;
+const MOD_OPTION: usize = 1 << 19;
+const MOD_COMMAND: usize = 1 << 20;
+
+/// Builds the menu bar from `menus` (in German when `de`). Entries with a
+/// command are numbered in order (see `mac_menu::items`).
+pub fn set_menu_bar(menus: &[crate::ui::app::mac_menu::Menu], de: bool) {
+    use crate::ui::app::mac_menu::{Entry, Role, Standard, pick};
+    use crate::ui::i18n::Language;
+    use objc2::MainThreadOnly;
+    use objc2_app_kit::{NSApplication, NSEventModifierFlags, NSMenu, NSMenuItem};
+    let Some(mtm) = MainThreadMarker::new() else { return };
+    let lang = if de { Language::German } else { Language::English };
+    // SAFETY: plain object creation.
+    let handler: Retained<MenuHandler> = unsafe { msg_send![MenuHandler::class(), new] };
+    let app = NSApplication::sharedApplication(mtm);
+    let new_item = |title: &str, action: Option<objc2::runtime::Sel>, key: &str, mask: usize| {
+        // SAFETY: the selectors name methods of the handler or of AppKit's
+        // responders; strings are valid.
+        let item = unsafe {
+            NSMenuItem::initWithTitle_action_keyEquivalent(
+                NSMenuItem::alloc(mtm),
+                &ns_string(title),
+                action,
+                &ns_string(key),
+            )
+        };
+        item.setKeyEquivalentModifierMask(NSEventModifierFlags(mask));
+        item
+    };
+    let bar = NSMenu::new(mtm);
+    let mut tag: isize = 0;
+    for menu in menus {
+        let title = ns_string(pick(menu.title, lang));
+        let sub = NSMenu::initWithTitle(NSMenu::alloc(mtm), &title);
+        for entry in &menu.entries {
+            match entry {
+                Entry::Separator => sub.addItem(&NSMenuItem::separatorItem(mtm)),
+                Entry::Item(it) => {
+                    let (key, mask) = it.keys.map_or((String::new(), 0), |k| {
+                        let mut mask = MOD_COMMAND;
+                        for (on, flag) in [(k.shift, MOD_SHIFT), (k.alt, MOD_OPTION), (k.ctrl, MOD_CONTROL)] {
+                            if on {
+                                mask |= flag;
+                            }
+                        }
+                        (k.character(), mask)
+                    });
+                    let item = new_item(pick(it.label, lang), Some(sel!(versoloMenuItem:)), &key, mask);
+                    // SAFETY: the handler is never released.
+                    unsafe { item.setTarget(Some(&handler)) };
+                    item.setTag(tag);
+                    tag += 1;
+                    sub.addItem(&item);
+                }
+                Entry::Standard(Standard::Services) => {
+                    let services =
+                        NSMenu::initWithTitle(NSMenu::alloc(mtm), &ns_string(Standard::Services.label(de)));
+                    let item = new_item(Standard::Services.label(de), None, "", 0);
+                    item.setSubmenu(Some(&services));
+                    app.setServicesMenu(Some(&services));
+                    sub.addItem(&item);
+                }
+                Entry::Standard(s) => {
+                    let (action, key, mask) = match s {
+                        Standard::Hide => (sel!(hide:), "h", MOD_COMMAND),
+                        Standard::HideOthers => (sel!(hideOtherApplications:), "h", MOD_COMMAND | MOD_OPTION),
+                        Standard::ShowAll => (sel!(unhideAllApplications:), "", 0),
+                        Standard::Minimize => (sel!(performMiniaturize:), "", 0),
+                        Standard::Zoom => (sel!(performZoom:), "", 0),
+                        Standard::BringAllToFront => (sel!(arrangeInFront:), "", 0),
+                        Standard::Services => unreachable!(),
+                    };
+                    // No target: the program or the front window answers.
+                    sub.addItem(&new_item(s.label(de), Some(action), key, mask));
+                }
+            }
+        }
+        let top = new_item(pick(menu.title, lang), None, "", 0);
+        top.setSubmenu(Some(&sub));
+        bar.addItem(&top);
+        match menu.role {
+            Role::Window => app.setWindowsMenu(Some(&sub)),
+            Role::Help => app.setHelpMenu(Some(&sub)),
+            Role::App | Role::Plain => {}
+        }
+    }
+    app.setMainMenu(Some(&bar));
+    std::mem::forget(handler);
+    log::info!("Menüleiste: {} Menüs, {tag} Befehle", menus.len());
+}
+
+/// Greyed out / ticked state of the entries, by number.
+pub fn set_menu_states(states: Vec<(bool, bool)>) {
+    if let Ok(mut s) = MENU_STATES.lock() {
+        *s = states;
+    }
+}
+
+/// Entries chosen since the last call, by number.
+pub fn take_menu_clicks() -> Vec<usize> {
+    MENU_CLICKS.lock().map(|mut c| std::mem::take(&mut *c)).unwrap_or_default()
 }
 
 // ---------------------------------------------------------------------------

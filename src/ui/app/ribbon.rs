@@ -277,9 +277,12 @@ impl VersoloPdfApp {
         let lang = self.settings.language;
         let (de, en) = cmd.menu_names();
         let label = if lang == Language::German { de } else { en };
-        let shortcut = cmd.shortcut().map(|(de, en)| if lang == Language::German { de } else { en });
+        let shortcut = cmd
+            .shortcut()
+            .map(|(de, en)| super::mac_menu::key_text(if lang == Language::German { de } else { en }));
         let enabled = self.cmd_enabled(cmd);
-        let resp = menu_item(ui, cmd.icon(), label, shortcut, enabled, self.cmd_selected(cmd), false);
+        let resp =
+            menu_item(ui, cmd.icon(), label, shortcut.as_deref(), enabled, self.cmd_selected(cmd), false);
         let keyed = self.keytips.button(ui, &resp, label, enabled, KeyKind::Button, true);
         resp.on_hover_text(self.cmd_tooltip(cmd)).clicked() || keyed
     }

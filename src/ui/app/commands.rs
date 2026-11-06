@@ -1288,7 +1288,7 @@ impl VersoloPdfApp {
                     None => cmd.label(lang).to_string(),
                 };
                 if let Some((g, e)) = cmd.shortcut() {
-                    tip = format!("{tip}  ({})", if de { g } else { e });
+                    tip = format!("{tip}  ({})", super::mac_menu::key_text(if de { g } else { e }));
                 }
                 if let Some((g, e)) = explain(cmd) {
                     tip = format!("{tip}\n{}", if de { g } else { e });

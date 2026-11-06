@@ -85,7 +85,8 @@ If the window stays black on older graphics cards, start VersoloPDF with
    *System Settings › Privacy & Security*, scroll down and click
    *Open Anyway* next to VersoloPDF. This is needed only once.
 
-On the Mac, VersoloPDF prints through the macOS print dialog, recognises text
+On the Mac, VersoloPDF has the usual menu bar with its commands, prints
+through the macOS print dialog, recognises text
 with the text recognition built into macOS, signs with digital IDs from the
 keychain, attaches files to a new message in Apple Mail or Outlook and opens
 PDFs from the Finder. New versions install themselves from

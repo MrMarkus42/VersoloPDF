@@ -35,7 +35,7 @@ pub fn compose(subject: &str, files: Vec<PathBuf>) -> bool {
         true
     }
     #[cfg(target_os = "macos")]
-    if crate::macos::compose_mail(&subject, &files) {
+    if crate::macos::compose_mail(&files) {
         return true;
     }
     #[cfg(not(windows))]

@@ -128,6 +128,16 @@ fn keychain_id_signs_a_pdf() {
 }
 
 #[test]
+fn mail_goes_to_a_program_that_takes_attachments() {
+    assert!(versolopdf::macos::opens_files_as_attachments(Path::new("/System/Applications/Mail.app")));
+    assert!(versolopdf::macos::opens_files_as_attachments(Path::new("/Applications/Microsoft Outlook.app")));
+    assert!(!versolopdf::macos::opens_files_as_attachments(Path::new("/Applications/Safari.app")));
+    // On a Mac as delivered, Apple Mail handles e-mail.
+    let program = versolopdf::macos::attachment_mail_program().expect("a mail program");
+    assert!(program.ends_with("Mail.app"), "{program:?}");
+}
+
+#[test]
 fn open_files_start_empty() {
     assert!(versolopdf::macos::take_opened_files().is_empty());
 }

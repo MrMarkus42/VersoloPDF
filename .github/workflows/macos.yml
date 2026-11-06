@@ -4,7 +4,7 @@ name: macOS
 
 on:
   push:
-    branches: [master, macos]
+    branches: [master, macos, "macos-*"]
   release:
     types: [published]
   workflow_dispatch:
@@ -60,6 +60,9 @@ jobs:
           kill "$pid"
           grep -h "gestartet\|PDFium" ~/Library/Application\ Support/VersoloPDF/logs/*.log | tail -4
           grep -q "loaded PDFium from .*VersoloPDF.app/Contents/.*Frameworks/libpdfium.dylib" ~/Library/Application\ Support/VersoloPDF/logs/*.log
+          # The macOS menu bar was built.
+          grep -h "Menüleiste" ~/Library/Application\ Support/VersoloPDF/logs/*.log | tail -1
+          grep -q "Menüleiste: 8 Menüs" ~/Library/Application\ Support/VersoloPDF/logs/*.log
 
       - uses: actions/upload-artifact@v4
         with:

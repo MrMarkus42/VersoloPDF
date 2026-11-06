@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.3.0 – 2026-11-06
+
+* macOS: the menu bar of the Mac (VersoloPDF, Ablage, Bearbeiten,
+  Darstellung, Dokument, Kommentare, Fenster, Hilfe) with VersoloPDF's
+  commands, the usual Mac keys (⌘, for the settings, ⌘Q, ⌃⌘F), "Dienste",
+  hiding the program and the search field in "Hilfe"; entries that are not
+  possible right now are greyed out, switched on ones are ticked
+* macOS: shortcuts are shown with ⌘ ⇧ ⌥ instead of "Strg"
+* macOS: "Per E-Mail senden" works again with Apple Mail – the files are
+  handed to Mail, which starts a new message with them attached (before,
+  Mail did not open)
+
 ## 1.2.0 – 2026-11-05
 
 * **VersoloPDF for macOS**: one app for Apple chips and Intel (macOS 11 or
