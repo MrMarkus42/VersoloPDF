@@ -7,7 +7,7 @@ use crate::geometry::{PointF, RectF};
 use crate::model::Rgba;
 
 /// Kind of a page object.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ObjectKind {
     Text,
     Image,
@@ -41,7 +41,7 @@ impl ObjectFilter {
 }
 
 /// An object on a page as VersoloPDF shows it.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ContentObject {
     /// Index among the page objects (back to front).
     pub index: usize,
@@ -85,7 +85,7 @@ impl ContentObject {
 // Matrices
 
 /// An affine matrix as in PDF: x' = a·x + c·y + e, y' = b·x + d·y + f.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Affine(pub [f32; 6]);
 
 impl Default for Affine {
@@ -216,7 +216,7 @@ impl TextBlock {
 }
 
 /// Horizontal alignment of a text block.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum Align {
     #[default]
     Left,
@@ -393,7 +393,7 @@ pub fn win_ansi_only(s: &str) -> bool {
 }
 
 /// Font for new or changed text.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum FontChoice {
     /// The font of the edited text (falls back if characters are missing).
     #[default]
@@ -424,7 +424,7 @@ impl FontChoice {
 }
 
 /// Look of edited text.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TextStyle {
     pub font: FontChoice,
     pub size: f32,
@@ -448,7 +448,7 @@ impl TextStyle {
 }
 
 /// Changes of the look of objects ("Format").
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct ObjectStyle {
     pub fill: Option<Rgba>,
     pub stroke: Option<Rgba>,
@@ -463,7 +463,7 @@ pub struct ObjectStyle {
 }
 
 /// "Mischmodus".
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum BlendMode {
     #[default]
     Normal,

@@ -50,11 +50,13 @@
 * **Review and convert** – compare documents, word count, spell check,
   accessibility report, export as images, text or Word (DOCX), create PDFs
   from images, text and office files, optimise file size
-* **Security** – password protection with AES-256 and permissions, secure
+* **Security** – protected mode: every document is read by its own
+  sandboxed helper process without access to your files, the network or
+  other programs; password protection with AES-256 and permissions, secure
   redaction, attachments, no execution of JavaScript or embedded programs
 * **Comfort** – quick command search (Ctrl+.), keyboard operation of the
   ribbon (Alt), undo history, recovery after a crash, sessions, own presets
-  in dialogs, updates from GitHub with checksum verification
+  in dialogs, signed updates from GitHub
 * **German and English** user interface
 
 <p align="center">
@@ -164,9 +166,11 @@ einfügen, löschen, drehen, zuschneiden, zusammenfügen und aufteilen,
 Wasserzeichen, Kopf- und Fußzeilen, Bates-Nummern; Texte und Objekte
 bearbeiten; Lesezeichen-Werkzeuge; Dokumente vergleichen,
 Rechtschreibprüfung, Barrierefreiheitsprüfung; Export als Bild, Text und
-Word; Kennwortschutz mit AES-256 und sicheres Schwärzen; Schnellsuche nach
+Word; Kennwortschutz mit AES-256 und sicheres Schwärzen; geschützter Modus
+(jedes Dokument wird in einem abgeschirmten Hilfsprogramm ohne Zugriff auf
+Ihre Dateien, das Netz und andere Programme gelesen); Schnellsuche nach
 Befehlen (Strg+.), Tastaturbedienung des Menübands, Wiederherstellung nach
-Abstürzen, Updates direkt aus GitHub.
+Abstürzen, signierte Updates direkt aus GitHub.
 
 **Installation unter Windows:** Zip-Datei `…-windows-x64.zip` aus dem
 [neuesten Release](https://github.com/MrMarkus42/VersoloPDF/releases/latest)

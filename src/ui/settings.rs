@@ -184,6 +184,9 @@ pub struct Settings {
     /// "Exklusiver Modus": while a comment tool is active, comments of its
     /// type can be selected and moved; other comments are ignored.
     pub exclusive_mode: bool,
+    /// "Geschützter Modus": documents are read by a restricted helper
+    /// process (see `crate::engine`). Only switched off for trouble.
+    pub protected_mode: bool,
     /// Tax rate of the calculator in percent ("TAX+", "TAX−").
     pub tax_rate: f64,
     /// "Felder hervorheben ▾": field kinds that are not highlighted.
@@ -382,6 +385,7 @@ impl Default for Settings {
             tab_groups_vertical: true,
             keep_tool: Vec::new(),
             exclusive_mode: false,
+            protected_mode: true,
             tax_rate: 19.0,
             // Buttons and combo boxes are not highlighted.
             highlight_off: vec![FieldGroup::Buttons, FieldGroup::ComboBoxes],

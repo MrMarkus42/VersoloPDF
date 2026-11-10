@@ -7,10 +7,22 @@ use std::sync::{Mutex, MutexGuard};
 use lopdf::{Dictionary, Object, Stream, dictionary};
 use pdfium_render::prelude::*;
 
-/// PDFium is not thread safe; tests that use it hold this lock.
+/// PDFium is not thread safe; tests that use it hold this lock. Documents
+/// are read in protected mode, by the program built for the tests as
+/// restricted helper (VERSOLOPDF_ENGINE=inprocess: inside the tests).
 pub fn lock() -> MutexGuard<'static, ()> {
     static LOCK: Mutex<()> = Mutex::new(());
-    LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    let guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    if std::env::var("VERSOLOPDF_ENGINE").is_ok_and(|v| v == "inprocess") {
+        versolopdf::engine::use_in_process();
+    } else {
+        // Test programs copied to another machine name the program there.
+        let exe = std::env::var_os("VERSOLOPDF_ENGINE_EXE")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from(env!("CARGO_BIN_EXE_versolopdf")));
+        versolopdf::engine::use_helper(exe);
+    }
+    guard
 }
 
 /// A PDF with one A4 page per entry of `pages`: its text lines (14 pt, from

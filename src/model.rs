@@ -134,7 +134,7 @@ impl AnnotKind {
 }
 
 /// Summary of an existing annotation.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AnnotationInfo {
     pub page: usize,
     /// Index into the page's `/Annots` array.
@@ -150,7 +150,7 @@ pub struct AnnotationInfo {
 
 /// Which comments are shown ("Anmerkungen > Anzeigen"). Only affects the
 /// display; the document is not changed.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct AnnotFilter {
     pub hidden_kinds: Vec<AnnotKind>,
     pub hidden_authors: Vec<String>,
@@ -266,27 +266,27 @@ impl StampPreset {
 }
 
 /// An entry of the document outline.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Bookmark {
     pub title: String,
     pub page: Option<usize>,
     pub children: Vec<Bookmark>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum LinkTarget {
     Page(usize),
     Uri(String),
     Unsupported,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LinkInfo {
     pub rect: RectF,
     pub target: LinkTarget,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum FieldKind {
     Text { multiline: bool, password: bool },
     CheckBox,
@@ -298,7 +298,7 @@ pub enum FieldKind {
     Unknown,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FormFieldInfo {
     pub page: usize,
     pub annot_index: usize,
@@ -313,7 +313,7 @@ pub struct FormFieldInfo {
     pub required: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Metadata {
     pub title: String,
     pub author: String,

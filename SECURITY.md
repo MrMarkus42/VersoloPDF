@@ -11,13 +11,40 @@ You will get an answer within a few days.
 VersoloPDF opens files from untrusted sources, so it is built defensively:
 
 * **Memory safety** – the application is written in Rust. `unsafe` code is
-  denied crate-wide; the only exception is the small, reviewed Windows printing
-  module that calls Win32 APIs.
+  denied crate-wide; the only exceptions are small, reviewed modules that call
+  operating system functions (Win32, macOS, Linux sandbox set-up).
+* **Protected mode (sandbox)** – PDFium, the C++ engine that reads and draws
+  the documents, does not run inside the program. Every open document gets
+  its own helper process (the program started with `--pdf-engine`) that only
+  receives that document and answers requests over a pipe; every answer is
+  size-checked and decoded by safe Rust code (`src/engine/`). The helper is
+  locked down before it sees a document:
+  * Windows: AppContainer without capabilities (no access to the user's
+    files, registry or the network; low integrity), a job object (no further
+    processes, memory limit, no clipboard/desktop access, killed with the
+    program) and hardening policies (no dynamic or remote code, strict
+    handles, only system fonts, extension points disabled).
+  * macOS: the macOS sandbox (Seatbelt) with a deny-by-default profile: only
+    fonts and system libraries can be read; no writing, network or new
+    processes.
+  * Linux: Landlock (only font folders readable, nothing writable) and a
+    seccomp filter (no sockets, no new processes, no ptrace, no mounts).
+  A crashed or hanging helper (3 minutes) is ended and replaced; a document
+  that crashes its helper repeatedly is given up. Tests (`tests/engine.rs`)
+  check on every system that the helper cannot read a user file, write a
+  file, connect to a server or start a program. The status is shown under
+  Einstellungen › Sicherheit.
 * **PDF parsing** – rendering, text extraction and form handling are done by
-  PDFium, the engine used and fuzzed continuously by Google Chrome. Structural
-  edits use `lopdf` (pure Rust) with a limit on decompressed stream sizes
-  (protection against "decompression bombs"); parser panics are caught and
-  turned into errors.
+  PDFium, the engine used and fuzzed continuously by Google Chrome, inside the
+  sandbox described above. Structural edits use `lopdf` (pure Rust) with a
+  limit on decompressed stream sizes (protection against "decompression
+  bombs"); parser panics are caught and turned into errors.
+* **Signed updates** – the built-in update only installs packages that carry a
+  valid ECDSA P-256 signature of the project's update key (the public key is
+  built into the program, the private key never leaves the developer's
+  machine and is not stored on GitHub). The file name – with version and
+  system – is signed together with the SHA-256 checksum, so an older or
+  foreign package cannot be passed off as the new one.
 * **No active content** – JavaScript, launch actions, embedded executables and
   remote content are never executed. PDFium is built without V8/XFA.
 * **Links** – only `http`, `https` and `mailto` links can be opened, and only

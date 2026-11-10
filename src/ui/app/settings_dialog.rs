@@ -402,6 +402,7 @@ impl VersoloPdfApp {
         self.settings_draft = Some(draft);
         if ok || apply {
             self.apply_draft();
+            crate::engine::set_enabled(self.settings.protected_mode);
         }
         if ok || cancel {
             self.settings_draft = None;
@@ -993,6 +994,35 @@ fn settings_page(ui: &mut Ui, de: bool, s: &mut SettingsPage, d: &mut Settings) 
             });
         }
         Cat::Security => {
+            section(ui, tr(de, "Geschützter Modus", "Protected mode"), |ui| {
+                use crate::engine::Protection;
+                let (text, ok) = match crate::engine::protection() {
+                    Protection::Protected(d) => (format!("{} {d}", tr(de, "Aktiv:", "Active:")), true),
+                    Protection::Partial(d) => {
+                        (format!("{} {d}", tr(de, "Teilweise aktiv:", "Partly active:")), false)
+                    }
+                    Protection::Off(d) => (format!("{} {d}", tr(de, "Nicht aktiv:", "Not active:")), false),
+                };
+                let color =
+                    if ok { egui::Color32::from_rgb(40, 140, 60) } else { ui.visuals().warn_fg_color };
+                ui.colored_label(color, text);
+                ui.checkbox(
+                    &mut d.protected_mode,
+                    tr(
+                        de,
+                        "Dokumente geschützt öffnen (empfohlen)",
+                        "Open documents protected (recommended)",
+                    ),
+                );
+                hint(
+                    ui,
+                    tr(
+                        de,
+                        "Jedes Dokument wird von einem eigenen, abgeschirmten Hilfsprogramm gelesen. Es kann nicht auf Ihre Dateien, das Netz oder andere Programme zugreifen – auch dann nicht, wenn ein bösartiges PDF eine Lücke im PDF-Kern ausnutzt. Die Änderung gilt für Dokumente, die danach geöffnet werden.",
+                        "Every document is read by a separate, shielded helper program. It cannot reach your files, the network or other programs – not even if a malicious PDF exploits a flaw in the PDF engine. The change applies to documents opened afterwards.",
+                    ),
+                );
+            });
             section(ui, tr(de, "Öffnen und Ausführen", "Opening and running"), |ui| {
                 ui.horizontal(|ui| {
                     ui.label(tr(de, "Webseite vom Dokument geöffnet:", "Web page opened by the document:"));

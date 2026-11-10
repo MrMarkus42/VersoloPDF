@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+* **Protected mode**: PDFium, the C++ engine that reads and draws the
+  documents, no longer runs inside the program. Every open document is read
+  by its own helper process that is locked down before it sees the file –
+  on Windows an AppContainer in a job (no access to the user's files or the
+  network, no further processes), on macOS the macOS sandbox, on Linux
+  Landlock and seccomp. Even a malicious PDF that exploits an unknown flaw
+  in PDFium cannot reach the user's files, the network or other programs. A
+  crashed or hanging helper is replaced. Shown and switchable under
+  Einstellungen › Sicherheit (on by default)
+* **Signed updates**: the update only installs packages signed with the
+  project's update key (ECDSA P-256; the private key is not on GitHub).
+  Version and system are signed with the checksum, so an older or foreign
+  package cannot be passed off as the new one
 * Forms: **properties of form fields** in the right pane – name, tooltip
   ("QuickInfo"), required, read only; for text fields a text given in
   advance, multi-line, password, maximum length, font (Helvetica, Helvetica

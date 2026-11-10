@@ -21,3 +21,11 @@ cp vendor/pdfium/win-x64/LICENSE "$OUT/licenses/pdfium/LICENSE"
 cp vendor/pdfium/win-x64/licenses/* "$OUT/licenses/pdfium/"
 (cd dist && python3 -c "import shutil; shutil.make_archive('$NAME', 'zip', '.', '$NAME')")
 sha256sum "dist/$NAME.zip" | tee "dist/$NAME.zip.sha256"
+
+# Signature for the update check (only on the machine that holds the key).
+KEY="${VERSOLOPDF_SIGNING_KEY:-$HOME/.config/versolopdf/update-signing.key}"
+if [ -f "$KEY" ]; then
+  cargo run --quiet --release --example sign_release -- sign "$KEY" "dist/$NAME.zip"
+else
+  echo "no signing key: dist/$NAME.zip is not signed (updates will not install it)"
+fi

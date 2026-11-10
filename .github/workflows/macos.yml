@@ -41,6 +41,9 @@ jobs:
       - name: Tests
         run: cargo test --locked
 
+      - name: Sandbox of the PDF engine
+        run: cargo test --locked --test engine -- --nocapture --test-threads=1
+
       - name: Keychain test
         run: cargo test --locked --test macos -- --ignored --nocapture
 
@@ -58,8 +61,9 @@ jobs:
           sleep 15
           kill -0 "$pid"
           kill "$pid"
-          grep -h "gestartet\|PDFium" ~/Library/Application\ Support/VersoloPDF/logs/*.log | tail -4
-          grep -q "loaded PDFium from .*VersoloPDF.app/Contents/.*Frameworks/libpdfium.dylib" ~/Library/Application\ Support/VersoloPDF/logs/*.log
+          grep -h "gestartet\|PDFium\|PDF-Kern" ~/Library/Application\ Support/VersoloPDF/logs/*.log | tail -6
+          # The document was read by the sandboxed PDF engine helper.
+          grep -q "PDF-Kern geschützt gestartet: macOS sandbox" ~/Library/Application\ Support/VersoloPDF/logs/*.log
           # The macOS menu bar was built.
           grep -h "Menüleiste" ~/Library/Application\ Support/VersoloPDF/logs/*.log | tail -1
           grep -q "Menüleiste: 8 Menüs" ~/Library/Application\ Support/VersoloPDF/logs/*.log

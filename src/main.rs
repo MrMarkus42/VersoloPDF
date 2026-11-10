@@ -26,6 +26,11 @@ fn options(renderer: eframe::Renderer) -> eframe::NativeOptions {
 }
 
 fn main() -> eframe::Result {
+    // The PDF engine helper of a running VersoloPDF (protected mode): no
+    // window, no files of its own, only requests on stdin/stdout.
+    if std::env::args_os().nth(1).is_some_and(|a| a == versolopdf::engine::ENGINE_ARG) {
+        std::process::exit(versolopdf::engine::run_helper());
+    }
     // "Neue Version": this (new) program copies itself into the program
     // folder of the running old version, then ends. No window.
     let mut raw = std::env::args_os().skip(1);
@@ -72,6 +77,14 @@ fn main() -> eframe::Result {
         log::info!(
             "macOS startet eine schreibgeschützte Kopie (App Translocation); Programm liegt in {original:?}"
         );
+    }
+    // Protected mode: documents are read by restricted helper processes
+    // (this program started with --pdf-engine). VERSOLOPDF_ENGINE=inprocess
+    // or the setting switch it off.
+    let in_process = std::env::var("VERSOLOPDF_ENGINE").is_ok_and(|v| v.eq_ignore_ascii_case("inprocess"));
+    match std::env::current_exe() {
+        Ok(exe) if !in_process => versolopdf::engine::use_helper(exe),
+        _ => versolopdf::engine::use_in_process(),
     }
     // For testing the crash report only.
     if std::env::var_os("VERSOLOPDF_TEST_CRASH").is_some() {

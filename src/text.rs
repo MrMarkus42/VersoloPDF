@@ -3,7 +3,7 @@
 use crate::geometry::{PointF, RectF};
 
 /// One character of the page text as reported by PDFium.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CharInfo {
     pub ch: char,
     /// Bounding box in PDF user space. Empty for generated characters
@@ -13,7 +13,7 @@ pub struct CharInfo {
 }
 
 /// All characters of one page, in reading order.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct PageText {
     pub chars: Vec<CharInfo>,
     /// Font and colour per character; empty unless asked for
@@ -24,7 +24,7 @@ pub struct PageText {
 
 /// Font (index into `PageText::fonts`), fill colour, size and baseline
 /// origin (PDF space) of a character.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct CharStyle {
     pub font: u16,
     pub color: [u8; 3],
@@ -40,7 +40,7 @@ impl CharStyle {
 }
 
 /// A font as named in the PDF.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct FontInfo {
     pub name: String,
     pub bold: bool,

@@ -3,8 +3,11 @@
 //!
 //! Like "Von URL öffnen", the system's `curl` program does the network work
 //! (VersoloPDF has no own network or TLS library). The release package is only
-//! taken from this project's GitHub releases, must match its SHA-256
-//! checksum and is unpacked with the system's own program (`tar` on
+//! taken from this project's GitHub releases, must carry a valid signature
+//! of the project's update key (see [`verify_signature`]; the public key is
+//! built into the program, the private key never leaves the developer's
+//! machine), must match the SHA-256 checksum named in it and is unpacked
+//! with the system's own program (`tar` on
 //! Windows, `ditto` on macOS). The new program then installs itself
 //! (`--install-update`, with administrator rights when the folder is
 //! write-protected): on Windows it copies its files into the program
@@ -48,9 +51,12 @@ pub struct Release {
     pub windows: Option<Asset>,
     /// Its checksum file ("….zip.sha256"), used when GitHub gives no digest.
     pub windows_sha: Option<Asset>,
+    /// Its signature ("….zip.sig").
+    pub windows_sig: Option<Asset>,
     /// The macOS package ("…-macos.zip", the app for Intel and Apple chips).
     pub macos: Option<Asset>,
     pub macos_sha: Option<Asset>,
+    pub macos_sig: Option<Asset>,
 }
 
 /// The package for this system and its checksum file, if the release has one.
@@ -62,6 +68,121 @@ pub fn package_of(release: &Release) -> Option<(&Asset, Option<&Asset>)> {
     } else {
         None
     }
+}
+
+/// The signature file of the package for this system.
+pub fn signature_of(release: &Release) -> Option<&Asset> {
+    if cfg!(windows) {
+        release.windows_sig.as_ref()
+    } else if cfg!(target_os = "macos") {
+        release.macos_sig.as_ref()
+    } else {
+        None
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Signatures of release packages
+//
+// A ".sig" file next to each package says (text, one item per line):
+//
+//     versolopdf-signature-v1
+//     file: VersoloPDF-1.4.0-windows-x64.zip
+//     sha256: <64 hex digits>
+//     signature: <128 hex digits: ECDSA P-256 r‖s over SIGNED_PREFIX + file + "\n" + sha256 + "\n">
+//
+// The file name is signed too, so an older (also signed) version cannot be
+// passed off as a newer one, and a Windows package not as a Mac one.
+
+/// Public keys whose signatures are accepted (SEC1, uncompressed, hex). A
+/// second key can be added before the first one is retired.
+pub const UPDATE_KEYS: &[&str] = &[
+    // Created 2026-11-10; the private key is kept by the developer.
+    "04add7026fa7c4ca6b96cff63700c8c781ac0f7383bd15799272925734bcb780c2691bfb43399b14d3dd1b2cfaea1f53be034ba2b1f924853c13776d6a9916e38c",
+];
+
+const SIGNATURE_HEADER: &str = "versolopdf-signature-v1";
+const SIGNED_PREFIX: &str = "versolopdf-update-v1\n";
+
+/// The text that is signed for `file` with checksum `sha256` (lower-case hex).
+pub fn signed_message(file: &str, sha256: &str) -> String {
+    format!("{SIGNED_PREFIX}{file}\n{sha256}\n")
+}
+
+/// The content of a ".sig" file.
+pub fn signature_file(file: &str, sha256: &str, signature: &[u8]) -> String {
+    let hex: String = signature.iter().map(|b| format!("{b:02x}")).collect();
+    format!("{SIGNATURE_HEADER}\nfile: {file}\nsha256: {sha256}\nsignature: {hex}\n")
+}
+
+fn from_hex(hex: &str) -> Option<Vec<u8>> {
+    let hex = hex.trim();
+    if !hex.len().is_multiple_of(2) {
+        return None;
+    }
+    (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok()).collect()
+}
+
+/// Checks a ".sig" file against the package name `file` with the keys
+/// `keys`; returns the signed SHA-256 checksum (lower-case hex).
+pub fn verify_signature(text: &str, file: &str, keys: &[&str]) -> Result<String> {
+    use p256::ecdsa::signature::Verifier;
+    let bad = |why: &str| Error::Invalid(format!("Update-Signatur ungültig: {why}"));
+    let mut lines = text.lines().map(str::trim).filter(|l| !l.is_empty());
+    if lines.next() != Some(SIGNATURE_HEADER) {
+        return Err(bad("unbekanntes Format"));
+    }
+    let mut value = |key: &str| -> Result<String> {
+        lines
+            .next()
+            .and_then(|l| l.strip_prefix(key))
+            .map(|v| v.trim().to_string())
+            .ok_or_else(|| bad("unvollständig"))
+    };
+    let signed_file = value("file:")?;
+    let sha256 = value("sha256:")?.to_ascii_lowercase();
+    let signature = value("signature:")?;
+    if signed_file != file {
+        return Err(bad("sie gehört zu einer anderen Datei"));
+    }
+    if !is_sha256_hex(&sha256) {
+        return Err(bad("Prüfsumme fehlt"));
+    }
+    let signature = from_hex(&signature)
+        .and_then(|b| p256::ecdsa::Signature::from_slice(&b).ok())
+        .ok_or_else(|| bad("Unterschrift unlesbar"))?;
+    let message = signed_message(&signed_file, &sha256);
+    let trusted = keys.iter().filter_map(|k| from_hex(k)).any(|k| {
+        p256::ecdsa::VerifyingKey::from_sec1_bytes(&k)
+            .is_ok_and(|key| key.verify(message.as_bytes(), &signature).is_ok())
+    });
+    if !trusted {
+        return Err(bad("sie stammt nicht vom Herausgeber von VersoloPDF"));
+    }
+    Ok(sha256)
+}
+
+/// Signs a package (used by the release script `examples/sign_release.rs`):
+/// returns the content of its ".sig" file. `secret` is the 32-byte private
+/// key.
+pub fn sign_package(secret: &[u8], file: &str, sha256: &str) -> Result<String> {
+    use p256::ecdsa::signature::Signer;
+    let key =
+        p256::ecdsa::SigningKey::from_slice(secret).map_err(|_| Error::Invalid("invalid key".into()))?;
+    let signature: p256::ecdsa::Signature = key.sign(signed_message(file, sha256).as_bytes());
+    Ok(signature_file(file, sha256, &signature.to_bytes()))
+}
+
+/// The public key (SEC1 uncompressed hex) of a private key.
+pub fn public_key_hex(secret: &[u8]) -> Result<String> {
+    let key =
+        p256::ecdsa::SigningKey::from_slice(secret).map_err(|_| Error::Invalid("invalid key".into()))?;
+    Ok(key.verifying_key().to_encoded_point(false).as_bytes().iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// The SHA-256 checksum of a file (lower-case hex).
+pub fn file_sha256(path: &Path) -> Result<String> {
+    sha256_file(path)
 }
 
 /// The running version.
@@ -270,8 +391,10 @@ pub fn parse_release(text: &str) -> Result<Release> {
         page: json.str("html_url").unwrap_or_default().to_string(),
         windows: None,
         windows_sha: None,
+        windows_sig: None,
         macos: None,
         macos_sha: None,
+        macos_sig: None,
     };
     if let Some(Json::Arr(assets)) = json.get("assets") {
         for a in assets {
@@ -294,10 +417,14 @@ pub fn parse_release(text: &str) -> Result<Release> {
                 release.windows = Some(asset);
             } else if lower.ends_with("-windows-x64.zip.sha256") {
                 release.windows_sha = Some(asset);
+            } else if lower.ends_with("-windows-x64.zip.sig") {
+                release.windows_sig = Some(asset);
             } else if lower.ends_with("-macos.zip") {
                 release.macos = Some(asset);
             } else if lower.ends_with("-macos.zip.sha256") {
                 release.macos_sha = Some(asset);
+            } else if lower.ends_with("-macos.zip.sig") {
+                release.macos_sig = Some(asset);
             }
         }
     }
@@ -391,26 +518,29 @@ fn download(asset: &Asset, dest: &Path, max: u64) -> Result<()> {
     Ok(())
 }
 
-/// Downloads the package of `release` for this system into `dir` and checks
-/// its SHA-256 checksum (GitHub's digest or the release's ".sha256" file).
+/// Shown when a release carries no signature.
+pub const UNSIGNED: &str = "Dieses Update ist nicht signiert und wird deshalb nicht installiert. Bitte etwas später erneut versuchen oder die neue Version selbst von der Projektseite laden.";
+
+/// Downloads the package of `release` for this system into `dir`. It is only
+/// kept if its signature (".sig") is valid for this package and its
+/// SHA-256 checksum is the signed one (and GitHub's digest, if given).
 pub fn download_package(release: &Release, dir: &Path) -> Result<PathBuf> {
-    let (asset, sha_asset) =
+    let (asset, _) =
         package_of(release).ok_or_else(|| Error::Invalid("no package for this system".into()))?;
+    let sig_asset = signature_of(release).ok_or_else(|| Error::Invalid(UNSIGNED.into()))?;
+    // The package name must belong to this release's version.
+    if !asset.name.contains(&format!("-{}-", release.version)) {
+        return Err(Error::Invalid("the package does not belong to this release".into()));
+    }
     std::fs::create_dir_all(dir).map_err(|e| Error::io(dir, e))?;
-    let expected = match (&asset.sha256, sha_asset) {
-        (Some(h), _) => h.clone(),
-        (None, Some(sha_file)) => {
-            let path = dir.join("package.sha256");
-            download(sha_file, &path, 4096)?;
-            let text = std::fs::read_to_string(&path).map_err(|e| Error::io(&path, e))?;
-            let hex = text.split_whitespace().next().unwrap_or_default().to_ascii_lowercase();
-            if !is_sha256_hex(&hex) {
-                return Err(Error::Invalid("invalid checksum file".into()));
-            }
-            hex
-        }
-        (None, None) => return Err(Error::Invalid("the release has no checksum".into())),
-    };
+    let sig_path = dir.join("package.sig");
+    download(sig_asset, &sig_path, 4096)?;
+    let text = std::fs::read_to_string(&sig_path).map_err(|e| Error::io(&sig_path, e))?;
+    std::fs::remove_file(&sig_path).ok();
+    let expected = verify_signature(&text, &asset.name, UPDATE_KEYS)?;
+    if asset.sha256.as_ref().is_some_and(|h| *h != expected) {
+        return Err(Error::Invalid("checksum mismatch – the release was changed".into()));
+    }
     let dest = dir.join("VersoloPDF-update.zip");
     download(asset, &dest, MAX_PACKAGE)?;
     if sha256_file(&dest)? != expected {
@@ -952,6 +1082,66 @@ mod tests {
         assert!(install_bundle(&base.join("leer"), &target).is_err());
         assert_eq!(std::fs::read(&exe).unwrap(), b"neu");
         std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn signatures_are_checked() {
+        let secret = [7u8; 32];
+        let other = [9u8; 32];
+        let public = public_key_hex(&secret).unwrap();
+        let keys = [public.as_str()];
+        let file = "VersoloPDF-9.9.9-windows-x64.zip";
+        let sha = "ab".repeat(32);
+        let sig = sign_package(&secret, file, &sha).unwrap();
+        assert_eq!(verify_signature(&sig, file, &keys).unwrap(), sha);
+        // Another file (older version, other system) is refused.
+        assert!(verify_signature(&sig, "VersoloPDF-9.9.8-windows-x64.zip", &keys).is_err());
+        assert!(verify_signature(&sig, "VersoloPDF-9.9.9-macos.zip", &keys).is_err());
+        // A changed checksum or a foreign key is refused.
+        let changed = sig.replace(&sha, &"cd".repeat(32));
+        assert!(verify_signature(&changed, file, &keys).is_err());
+        let foreign = sign_package(&other, file, &sha).unwrap();
+        assert!(verify_signature(&foreign, file, &keys).is_err());
+        // Broken files.
+        assert!(verify_signature("", file, &keys).is_err());
+        assert!(verify_signature(&sig.replace("signature: ", "signature: zz"), file, &keys).is_err());
+        assert!(verify_signature(&sig, file, &[]).is_err());
+        // A second key is accepted next to the first.
+        let both = [public_key_hex(&other).unwrap(), public.clone()];
+        let both: Vec<&str> = both.iter().map(String::as_str).collect();
+        assert!(verify_signature(&sig, file, &both).is_ok());
+    }
+
+    #[test]
+    fn the_built_in_key_is_valid() {
+        assert!(!UPDATE_KEYS.is_empty());
+        for key in UPDATE_KEYS {
+            let bytes = from_hex(key).expect("hex");
+            assert!(p256::ecdsa::VerifyingKey::from_sec1_bytes(&bytes).is_ok(), "{key}");
+        }
+    }
+
+    #[test]
+    fn signatures_are_found_in_the_release() {
+        let base = "https://github.com/MrMarkus42/VersoloPDF/releases/download/v1.4.0/";
+        let json = format!(
+            r#"{{"tag_name": "v1.4.0", "assets": [
+              {{"name": "VersoloPDF-1.4.0-windows-x64.zip", "browser_download_url": "{base}VersoloPDF-1.4.0-windows-x64.zip"}},
+              {{"name": "VersoloPDF-1.4.0-windows-x64.zip.sig", "browser_download_url": "{base}VersoloPDF-1.4.0-windows-x64.zip.sig"}},
+              {{"name": "VersoloPDF-1.4.0-macos.zip.sig", "browser_download_url": "{base}VersoloPDF-1.4.0-macos.zip.sig"}}
+            ]}}"#
+        );
+        let r = parse_release(&json).unwrap();
+        assert!(r.windows_sig.is_some() && r.macos_sig.is_some());
+        // Without a signature nothing is downloaded.
+        let mut unsigned = r.clone();
+        unsigned.windows_sig = None;
+        unsigned.macos_sig = None;
+        if package_of(&unsigned).is_some() {
+            let err =
+                download_package(&unsigned, &std::env::temp_dir().join("versolopdf-unsigned")).unwrap_err();
+            assert!(err.to_string().contains("nicht signiert"), "{err}");
+        }
     }
 
     #[test]

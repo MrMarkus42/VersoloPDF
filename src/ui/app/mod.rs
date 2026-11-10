@@ -451,6 +451,8 @@ impl VersoloPdfApp {
     /// Creates the application without persistent storage (used by tests).
     pub fn with_settings(ctx: &Context, settings: Settings, files: Vec<PathBuf>) -> Self {
         ctx.options_mut(|o| o.zoom_with_keyboard = false);
+        // "Geschützter Modus" before any document is opened.
+        crate::engine::set_enabled(settings.protected_mode);
         // "Letzte Sitzung beim Start wiederherstellen".
         let files: Vec<PathBuf> = if files.is_empty() && settings.restore_session {
             settings.last_session.files.iter().filter(|p| p.exists()).cloned().collect()
