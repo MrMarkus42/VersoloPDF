@@ -7,7 +7,7 @@ PDFium, in the `licenses/` folder shipped next to the program.
 ## PDFium
 
 PDF rendering engine by Google and the PDFium authors, prebuilt by
-https://github.com/bblanchon/pdfium-binaries (release chromium/8111).
+https://github.com/bblanchon/pdfium-binaries (release chromium/8125).
 Licence: BSD-3-Clause and Apache-2.0; bundled third-party code
 (FreeType, libjpeg-turbo, OpenJPEG, LittleCMS, zlib, libpng, libtiff, ICU,
 Abseil, AGG 2.3, fast_float, simdutf, LLVM libc) under their respective
@@ -85,14 +85,14 @@ permissive licences.
 | calloop-wayland-source | 0.3.0 | MIT | https://github.com/smithay/calloop-wayland-source |
 | calloop-wayland-source | 0.4.1 | MIT | https://github.com/smithay/calloop-wayland-source |
 | cbc | 0.2.1 | MIT OR Apache-2.0 | https://github.com/RustCrypto/block-modes |
-| cc | 1.9.0 | MIT OR Apache-2.0 | https://github.com/rust-lang/cc-rs |
+| cc | 1.10.0 | MIT OR Apache-2.0 | https://github.com/rust-lang/cc-rs |
 | cfg-if | 1.0.5 | MIT OR Apache-2.0 | https://github.com/rust-lang/cfg-if |
 | cfg_aliases | 0.2.2 | MIT | https://github.com/katharostech/cfg_aliases |
 | cgl | 0.3.2 | MIT / Apache-2.0 | https://github.com/servo/cgl-rs |
 | chacha20 | 0.10.2 | MIT OR Apache-2.0 | https://github.com/RustCrypto/stream-ciphers |
 | chrono | 0.4.45 | MIT OR Apache-2.0 | https://github.com/chronotope/chrono |
 | cipher | 0.5.2 | MIT OR Apache-2.0 | https://github.com/RustCrypto/traits |
-| clipboard-win | 5.4.1 | BSL-1.0 | https://github.com/DoumanAsh/clipboard-win |
+| clipboard-win | 5.4.3 | BSL-1.0 | https://github.com/DoumanAsh/clipboard-win |
 | cmov | 0.5.4 | Apache-2.0 OR MIT | https://github.com/RustCrypto/utils |
 | cms | 0.3.0-pre.1 | Apache-2.0 OR MIT | https://github.com/RustCrypto/formats |
 | cobs | 0.3.0 | MIT OR Apache-2.0 | https://github.com/jamesmunns/cobs.rs |
@@ -117,7 +117,7 @@ permissive licences.
 | crypto-common | 0.1.6 | MIT OR Apache-2.0 | https://github.com/RustCrypto/traits |
 | crypto-common | 0.2.2 | MIT OR Apache-2.0 | https://github.com/RustCrypto/traits |
 | ctr | 0.10.1 | MIT OR Apache-2.0 | https://github.com/RustCrypto/block-modes |
-| ctutils | 0.4.3 | Apache-2.0 OR MIT | https://github.com/RustCrypto/utils |
+| ctutils | 0.4.6 | Apache-2.0 OR MIT | https://github.com/RustCrypto/utils |
 | cursor-icon | 1.2.0 | MIT OR Apache-2.0 OR Zlib | https://github.com/rust-windowing/cursor-icon |
 | data-encoding | 2.11.1 | MIT | https://github.com/ia0/data-encoding |
 | defmt | 1.2.0 | MIT OR Apache-2.0 | https://github.com/knurling-rs/defmt |
@@ -384,7 +384,7 @@ permissive licences.
 | siphasher | 1.0.4 | MIT OR Apache-2.0 | https://github.com/jedisct1/rust-siphash |
 | skrifa | 0.44.0 | MIT OR Apache-2.0 | https://github.com/googlefonts/fontations |
 | slab | 0.4.12 | MIT | https://github.com/tokio-rs/slab |
-| smallvec | 1.16.3 | MIT OR Apache-2.0 | https://github.com/servo/rust-smallvec |
+| smallvec | 1.16.4 | MIT OR Apache-2.0 | https://github.com/servo/rust-smallvec |
 | smithay-client-toolkit | 0.19.2 | MIT | https://github.com/smithay/client-toolkit |
 | smithay-client-toolkit | 0.20.0 | MIT | https://github.com/smithay/client-toolkit |
 | smithay-clipboard | 0.7.3 | MIT | https://github.com/smithay/smithay-clipboard |
@@ -472,6 +472,7 @@ permissive licences.
 | windows-result | 0.4.1 | MIT OR Apache-2.0 | https://github.com/microsoft/windows-rs |
 | windows-strings | 0.5.1 | MIT OR Apache-2.0 | https://github.com/microsoft/windows-rs |
 | windows-sys | 0.52.0 | MIT OR Apache-2.0 | https://github.com/microsoft/windows-rs |
+| windows-sys | 0.59.0 | MIT OR Apache-2.0 | https://github.com/microsoft/windows-rs |
 | windows-sys | 0.60.2 | MIT OR Apache-2.0 | https://github.com/microsoft/windows-rs |
 | windows-sys | 0.61.2 | MIT OR Apache-2.0 | https://github.com/microsoft/windows-rs |
 | windows-targets | 0.52.6 | MIT OR Apache-2.0 | https://github.com/microsoft/windows-rs |

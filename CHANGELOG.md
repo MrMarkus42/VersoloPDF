@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.4.0 – 2026-11-10
 
 * **Protected mode**: PDFium, the C++ engine that reads and draws the
   documents, no longer runs inside the program. Every open document is read
@@ -38,6 +38,9 @@
   any selected text), position and size, and turning by 90° or any angle
 * The search pane no longer grows wider by itself
 * The "Schreibmaschine" tool shows its font size in the right pane
+* PDFium chromium/8125 (newest release that is at least 14 days old) and
+  current libraries. Not yet: egui 0.37 (larger change of the user
+  interface library, follows in a later version)
 
 ## 1.3.1 – 2026-11-06
 
