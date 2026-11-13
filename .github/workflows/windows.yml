@@ -1,0 +1,70 @@
+# Builds and tests VersoloPDF on a Windows computer of GitHub: the unit
+# tests, the sandbox of the PDF engine helper (AppContainer) with the release
+# build of the helper, as shipped, and a start test of the program.
+name: Windows
+
+on:
+  push:
+    branches: [master, "test-*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 120
+    env:
+      CARGO_TERM_COLOR: never
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          rustc --version
+
+      - name: PDFium
+        shell: bash
+        run: bash scripts/fetch-pdfium.sh win-x64
+
+      - name: Tests
+        run: cargo test --locked --lib --test core --test sign
+
+      - name: Release build
+        run: cargo build --locked --release
+
+      - name: Libraries of the engine helper
+        shell: bash
+        run: |
+          # The helper must not load window or UI libraries (an AppContainer
+          # refuses some of them at start).
+          "$(ls "C:/Program Files/Microsoft Visual Studio"/*/*/VC/Tools/MSVC/*/bin/Hostx64/x64/dumpbin.exe | head -1)" //dependents target/release/versolopdf-engine.exe | tee deps.txt
+          ! grep -iE "propsys|uiautomation|user32|gdi32|opengl32|dxgi" deps.txt
+
+      - name: Sandbox of the PDF engine
+        env:
+          VERSOLOPDF_ENGINE_EXE: ${{ github.workspace }}\target\release\versolopdf-engine.exe
+        run: cargo test --locked --test engine -- --nocapture --test-threads=1
+
+      - name: Start test of the program
+        # Hosted runners may have no real desktop for the window.
+        continue-on-error: true
+        shell: bash
+        run: |
+          cp vendor/pdfium/win-x64/bin/pdfium.dll target/release/
+          printf '%%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj\ntrailer<</Root 1 0 R>>\n%%%%EOF\n' > "$RUNNER_TEMP/start.pdf"
+          target/release/versolopdf.exe "$RUNNER_TEMP/start.pdf" &
+          pid=$!
+          sleep 20
+          kill "$pid" || true
+          logs="$LOCALAPPDATA/VersoloPDF/logs"
+          grep -h "gestartet\|PDF-Kern\|PDFium" "$logs"/*.log | tail -8
+          # The document was read by the sandboxed helper.
+          grep -q "PDF-Kern geschützt gestartet: Windows AppContainer" "$logs"/*.log
+
+      - name: Interface tests
+        continue-on-error: true
+        run: cargo test --locked --test ui

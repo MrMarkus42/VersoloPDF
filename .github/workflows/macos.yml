@@ -7,7 +7,7 @@ name: macOS
 
 on:
   push:
-    branches: [master, macos, "macos-*"]
+    branches: [master, macos, "macos-*", "test-*"]
   workflow_dispatch:
     inputs:
       release_tag:
