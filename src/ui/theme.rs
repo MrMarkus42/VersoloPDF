@@ -84,6 +84,18 @@ pub fn apply_fonts(ctx: &Context, modern: bool) {
             list.insert(0, "system-ui".into());
         }
     }
+    // The key symbols of the Mac (⌘ ⇧ ⌥ ⌃), which neither the system font
+    // (Arial) nor egui's fonts contain.
+    if cfg!(target_os = "macos")
+        && let Ok(data) = std::fs::read("/System/Library/Fonts/Apple Symbols.ttf")
+    {
+        fonts.font_data.insert("mac-symbols".into(), std::sync::Arc::new(egui::FontData::from_owned(data)));
+        for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+            if let Some(list) = fonts.families.get_mut(&family) {
+                list.push("mac-symbols".into());
+            }
+        }
+    }
     ctx.set_fonts(fonts);
 }
 
