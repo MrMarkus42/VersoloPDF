@@ -100,8 +100,15 @@ pub struct Settings {
     /// Signaturen: add a time stamp when signing; the time stamp authority.
     pub sign_time_stamp: bool,
     pub tsa_url: String,
-    /// Neue Version: look for a new release at start (at most once a day).
-    pub update_check: bool,
+    /// Neue Version: how often to look for a new release. Nothing is asked
+    /// on the network before the user agreed (`update_asked`).
+    pub update_freq: UpdateFreq,
+    /// Neue Version: what happens when one is found.
+    pub update_mode: UpdateMode,
+    /// The user has answered the question at first start.
+    pub update_asked: bool,
+    /// A version the user chose to skip.
+    pub update_skip: String,
     /// Neue Version: time of the last automatic check (seconds since 1970).
     pub update_last_check: u64,
     /// Identität (the name is `author`).
@@ -189,7 +196,7 @@ pub struct Settings {
     pub protected_mode: bool,
     /// Tax rate of the calculator in percent ("TAX+", "TAX−").
     pub tax_rate: f64,
-    /// "Felder hervorheben ▾": field kinds that are not highlighted.
+    /// "Felder hervorheben ⏷": field kinds that are not highlighted.
     pub highlight_off: Vec<FieldGroup>,
     /// "Nur erforderliche Felder".
     pub highlight_required_only: bool,
@@ -203,7 +210,7 @@ pub struct Settings {
     pub spell_personal: Vec<String>,
 }
 
-/// Kinds of form fields in "Felder hervorheben ▾".
+/// Kinds of form fields in "Felder hervorheben ⏷".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum FieldGroup {
     Buttons,
@@ -249,6 +256,74 @@ impl FieldGroup {
             FieldGroup::ListBoxes => ("Listen", "List boxes"),
             FieldGroup::TextFields => ("Textfelder", "Text fields"),
             FieldGroup::Signatures => ("Signaturen", "Signatures"),
+        }
+    }
+}
+
+/// How often VersoloPDF looks for a new version.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum UpdateFreq {
+    /// Never (also before the user answered the question at first start).
+    #[default]
+    Never,
+    Startup,
+    Daily,
+    Weekly,
+}
+
+impl UpdateFreq {
+    pub const ALL: [UpdateFreq; 4] =
+        [UpdateFreq::Startup, UpdateFreq::Daily, UpdateFreq::Weekly, UpdateFreq::Never];
+
+    pub fn label(self, de: bool) -> &'static str {
+        match (self, de) {
+            (UpdateFreq::Never, true) => "Nie",
+            (UpdateFreq::Never, false) => "Never",
+            (UpdateFreq::Startup, true) => "Bei jedem Start",
+            (UpdateFreq::Startup, false) => "At every start",
+            (UpdateFreq::Daily, true) => "Täglich",
+            (UpdateFreq::Daily, false) => "Daily",
+            (UpdateFreq::Weekly, true) => "Wöchentlich",
+            (UpdateFreq::Weekly, false) => "Weekly",
+        }
+    }
+
+    /// Whether a check is due at `now` after the last one at `last`
+    /// (seconds since 1970). A clock set back makes it due.
+    pub fn due(self, last: u64, now: u64) -> bool {
+        let interval = match self {
+            UpdateFreq::Never => return false,
+            UpdateFreq::Startup => return true,
+            UpdateFreq::Daily => 24 * 3600,
+            UpdateFreq::Weekly => 7 * 24 * 3600,
+        };
+        last > now || now - last >= interval
+    }
+}
+
+/// What happens when a new version is found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum UpdateMode {
+    /// Only say so.
+    Notify,
+    /// Download and check it, then offer to install it.
+    #[default]
+    Offer,
+    /// Download and check it, install it when VersoloPDF is closed.
+    AtExit,
+}
+
+impl UpdateMode {
+    pub const ALL: [UpdateMode; 3] = [UpdateMode::Notify, UpdateMode::Offer, UpdateMode::AtExit];
+
+    pub fn label(self, de: bool) -> &'static str {
+        match (self, de) {
+            (UpdateMode::Notify, true) => "Nur Bescheid sagen",
+            (UpdateMode::Notify, false) => "Just let me know",
+            (UpdateMode::Offer, true) => "Herunterladen, prüfen und Installation anbieten",
+            (UpdateMode::Offer, false) => "Download, check and offer to install",
+            (UpdateMode::AtExit, true) => "Herunterladen, prüfen und beim Beenden installieren",
+            (UpdateMode::AtExit, false) => "Download, check and install when closing",
         }
     }
 }
@@ -337,7 +412,10 @@ impl Default for Settings {
             sign_corner: 0,
             sign_time_stamp: false,
             tsa_url: crate::sign::tsa::DEFAULT_URL.into(),
-            update_check: true,
+            update_freq: UpdateFreq::Never,
+            update_mode: UpdateMode::Offer,
+            update_asked: false,
+            update_skip: String::new(),
             update_last_check: 0,
             identity: Identity::default(),
             snapshot_dpi: 0,

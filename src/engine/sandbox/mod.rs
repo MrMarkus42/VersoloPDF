@@ -34,6 +34,10 @@ pub struct Helper {
 /// Ending the helper process.
 pub trait Process: Send {
     fn kill(&mut self);
+    /// The exit code once the process has ended (for error messages).
+    fn exit_code(&mut self) -> Option<i64> {
+        None
+    }
 }
 
 impl Helper {
@@ -62,7 +66,13 @@ impl Helper {
     pub fn receive(&mut self, limit: Duration) -> std::io::Result<Vec<u8>> {
         match self.frames.recv_timeout(limit) {
             Ok(Ok(Some(frame))) => Ok(frame),
-            Ok(Ok(None)) => Err(std::io::ErrorKind::UnexpectedEof.into()),
+            Ok(Ok(None)) => Err(match self.process.exit_code() {
+                Some(code) => std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    format!("the helper ended (exit code {code:#x})"),
+                ),
+                None => std::io::ErrorKind::UnexpectedEof.into(),
+            }),
             Ok(Err(e)) => Err(e),
             Err(RecvTimeoutError::Timeout) => {
                 self.process.kill();

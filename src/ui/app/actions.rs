@@ -121,6 +121,16 @@ impl VersoloPdfApp {
     /// Opens a document in a new tab (or activates it if already open).
     /// Other supported files are converted into a new document.
     pub fn open_path(&mut self, ctx: &Context, path: PathBuf, password: Option<String>) {
+        // A session file (double click, Dateizuordnung): its documents.
+        if path.extension().is_some_and(|e| {
+            e.eq_ignore_ascii_case("versolopdfsession") || e.eq_ignore_ascii_case("mrpdfsession")
+        }) {
+            match crate::ui::settings::read_session(&path) {
+                Ok(session) => self.open_session(&session),
+                Err(err) => self.show_error(&err),
+            }
+            return;
+        }
         if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case("pdf"))
             && super::page_dialogs::openable(&path)
         {
@@ -362,6 +372,14 @@ impl VersoloPdfApp {
             AfterSave::CloseAll => {
                 self.close_tab(ctx, tab_id);
                 self.request_close_all(ctx);
+            }
+            AfterSave::Update => {
+                if !save {
+                    // "Nein": the changes are given up with the document.
+                    self.close_tab(ctx, tab_id);
+                }
+                // The next unsaved document, or the installation.
+                self.install_update_when_saved(ctx);
             }
             AfterSave::Exit => {
                 if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) {

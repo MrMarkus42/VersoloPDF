@@ -1,12 +1,13 @@
-# Builds and tests the macOS app on a Mac of GitHub. A published release
-# gets the app package (VersoloPDF-<version>-macos.zip + .sha256) added.
+# Builds and tests the macOS app on a Mac of GitHub. Started by hand with a
+# release tag, it adds the app package (VersoloPDF-<version>-macos.zip +
+# .sha256) to that (draft) release; it is then signed on the developer's
+# computer (scripts/sign-release.ps1), which also publishes the release. Nothing is
+# rebuilt after publishing, so the signed package stays the one released.
 name: macOS
 
 on:
   push:
     branches: [master, macos, "macos-*"]
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       release_tag:
@@ -74,8 +75,8 @@ jobs:
           path: dist/*-macos.zip*
 
       - name: Add to the release
-        if: github.event_name == 'release' || inputs.release_tag != ''
+        if: inputs.release_tag != ''
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+          TAG: ${{ inputs.release_tag }}
         run: gh release upload "$TAG" dist/*-macos.zip dist/*-macos.zip.sha256 --clobber

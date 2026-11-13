@@ -389,11 +389,11 @@ pub(super) struct FooterRequest {
 }
 
 fn footer_request_id() -> egui::Id {
-    egui::Id::new("versolopdf-dialog-footer-request")
+    egui::Id::unique("versolopdf-dialog-footer-request")
 }
 
 fn footer_result_id() -> egui::Id {
-    egui::Id::new("versolopdf-dialog-footer-result")
+    egui::Id::unique("versolopdf-dialog-footer-result")
 }
 
 /// Footer with optional "Einstellungen" button; returns (ok, cancel,
@@ -547,7 +547,7 @@ pub(super) fn unique_path(dir: &Path, name: &str) -> PathBuf {
     (2..10_000).map(|i| dir.join(format!("{stem} ({i}).pdf"))).find(|p| !p.exists()).unwrap_or(path)
 }
 
-/// Macro menu "[···] ▾" next to file name and caption fields.
+/// Macro menu "[···] ⏷" next to file name and caption fields.
 pub(super) fn macro_menu(
     ui: &mut Ui,
     de: bool,

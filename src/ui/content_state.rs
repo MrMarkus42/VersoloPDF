@@ -17,7 +17,7 @@ pub struct ContentEdit {
     pub revision: u64,
     pub drag: Option<ObjDrag>,
     pub text: Option<TextEditing>,
-    /// "Objekte bearbeiten ▾": which kinds can be selected.
+    /// "Objekte bearbeiten ⏷": which kinds can be selected.
     pub filter: ObjectFilter,
     /// Page and point of the last right click ("Einfügen" there).
     pub menu_at: Option<(usize, PointF)>,
@@ -137,7 +137,7 @@ pub enum ContentCmd {
     /// "Auswählen › Text/Bilder/Formen".
     SelectKind(ObjectFilter),
     Deselect,
-    /// "Objekte bearbeiten ▾": tool with a filter.
+    /// "Objekte bearbeiten ⏷": tool with a filter.
     Filter(ObjectFilter),
     Arrange(Arrange),
     /// Align to the page instead of the selection.

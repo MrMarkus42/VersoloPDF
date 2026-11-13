@@ -153,7 +153,7 @@ impl VersoloPdfApp {
             let mut open = true;
             let title = format!("{} #{}", if de { "Rechner" } else { "Calculator" }, w.id);
             egui::Window::new(title)
-                .id(egui::Id::new(("calculator", w.id)))
+                .id(egui::Id::unique(("calculator", w.id)))
                 .open(&mut open)
                 .resizable(false)
                 .collapsible(false)

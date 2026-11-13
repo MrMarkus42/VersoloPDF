@@ -277,7 +277,7 @@ impl VersoloPdfApp {
         let labels: Vec<String> = items.iter().map(|t| t.label.clone()).collect();
         let codes = assign(&labels);
         k.shown = items.into_iter().zip(codes).collect();
-        let painter = ctx.layer_painter(LayerId::new(Order::Tooltip, Id::new("versolopdf-keytips")));
+        let painter = ctx.layer_painter(LayerId::new(Order::Tooltip, Id::unique("versolopdf-keytips")));
         let font = egui::FontId::proportional(12.0);
         for (tip, code) in &k.shown {
             if !code.starts_with(&k.typed) {

@@ -739,7 +739,7 @@ impl VersoloPdfApp {
         let filter = self.active_tab().map_or(ObjectFilter::All, |t| t.content.filter);
         group(ui, tr(de, "Objekte", "Objects"), |ui| {
             self.big(ui, ctx, Cmd::Tool(Tool::EditText));
-            // "Objekte bearbeiten ▾": the upper part selects the tool (with
+            // "Objekte bearbeiten ⏷": the upper part selects the tool (with
             // the filter chosen last), the arrow the filter.
             let selected = self.tool == Tool::EditObjects && filter != ObjectFilter::All;
             let label = tr(de, "Objekte bearbeiten", "Edit objects");

@@ -11,6 +11,7 @@
 
 pub mod accessibility;
 pub mod appearance;
+pub mod assoc;
 pub mod calculator;
 pub mod compare;
 pub mod compose;

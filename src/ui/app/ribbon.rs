@@ -108,7 +108,7 @@ impl VersoloPdfApp {
         }
     }
 
-    /// "▾" next to Rückgängig/Wiederholen: the list of steps; choosing one
+    /// "⏷" next to Rückgängig/Wiederholen: the list of steps; choosing one
     /// undoes (or redoes) it together with all steps above it.
     fn history_menu(&mut self, ui: &mut Ui, ctx: &Context, redo: bool) {
         let de = self.settings.language == Language::German;
@@ -128,7 +128,7 @@ impl VersoloPdfApp {
         };
         let (rect, resp) = ui.allocate_exact_size(egui::vec2(12.0, 24.0), egui::Sense::click());
         let enabled = !steps.is_empty();
-        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, tip));
+        resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, tip));
         if ui.is_rect_visible(rect) {
             if enabled && resp.hovered() {
                 ui.painter().rect_filled(rect, 3.0, theme::ACCENT.gamma_multiply(0.15));
@@ -149,7 +149,7 @@ impl VersoloPdfApp {
         let mut chosen = None;
         egui::Popup::menu(&resp).show(|ui| {
             ui.set_min_width(240.0);
-            let hover_id = ui.id().with("history-hover");
+            let hover_id = ui.scope_id().with("history-hover");
             let hovered: Option<usize> = ui.data(|d| d.get_temp(hover_id));
             let mut now_hovered = None;
             egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
@@ -208,7 +208,7 @@ impl VersoloPdfApp {
         self.keytips.button(ui, resp, label, enabled, KeyKind::MenuButton(popup), false);
     }
 
-    /// Large button with drop-down ("Einfügen ▾").
+    /// Large button with drop-down ("Einfügen ⏷").
     pub(super) fn big_menu(
         &mut self,
         ui: &mut Ui,
@@ -228,7 +228,7 @@ impl VersoloPdfApp {
         self.popup_menu(ctx, &resp, entries);
     }
 
-    /// Small button with drop-down ("Aufteilen ▾").
+    /// Small button with drop-down ("Aufteilen ⏷").
     fn small_menu(&mut self, ui: &mut Ui, ctx: &Context, icon: Icon, label: (&str, &str), entries: &[Entry]) {
         let label = if self.settings.language == Language::German { label.0 } else { label.1 };
         let resp = small_menu_button(ui, icon, label, !self.tabs.is_empty(), false);
@@ -455,7 +455,7 @@ impl VersoloPdfApp {
         if !self.ribbon_peek {
             return;
         }
-        let area = egui::Area::new(egui::Id::new("ribbon-peek"))
+        let area = egui::Area::new(egui::Id::unique("ribbon-peek"))
             .order(egui::Order::Middle)
             .fixed_pos(panel.left_bottom())
             .show(ctx, |ui| {
@@ -748,7 +748,7 @@ impl VersoloPdfApp {
     /// The command search ("Schnellstart") at the right end of the tab row.
     fn quick_start(&mut self, ui: &mut Ui, ctx: &Context) {
         let t = self.t();
-        let id = egui::Id::new("quick-start");
+        let id = egui::Id::unique("quick-start");
         let edit = ui.add(
             egui::TextEdit::singleline(&mut self.quick_query)
                 .id(id)
@@ -836,7 +836,7 @@ impl VersoloPdfApp {
     pub(super) fn stamp_picker(&mut self, ui: &mut Ui) {
         let t = self.t();
         let current = self.settings.stamp;
-        egui::ComboBox::from_id_salt("stamp-preset")
+        let shown = egui::ComboBox::from_id_salt("stamp-preset")
             .selected_text(t.stamp_label(current))
             .width(120.0)
             .show_ui(ui, |ui| {
@@ -850,6 +850,9 @@ impl VersoloPdfApp {
                     }
                 }
             });
+        // Name for screen readers (nothing visible names the box).
+        let de = self.settings.language == Language::German;
+        shown.response.accessible_name(if de { "Stempel" } else { "Stamp" });
     }
 
     fn zoom_box(&mut self, ui: &mut Ui) {
@@ -875,7 +878,7 @@ impl VersoloPdfApp {
                 tab.zoom_mode = crate::ui::view::ZoomMode::Custom;
             }
             // Preset values.
-            let resp = ui.small_button("▾");
+            let resp = ui.small_button("⏷");
             egui::Popup::menu(&resp).show(|ui| {
                 use crate::ui::view::ZoomMode;
                 for p in
@@ -1226,13 +1229,15 @@ impl VersoloPdfApp {
 
     fn language_picker(&mut self, ui: &mut Ui) {
         let current = self.settings.language;
-        egui::ComboBox::from_id_salt("language").selected_text(current.name()).show_ui(ui, |ui| {
-            for lang in Language::ALL {
-                if ui.selectable_label(current == lang, lang.name()).clicked() {
-                    self.settings.language = lang;
+        let shown =
+            egui::ComboBox::from_id_salt("language").selected_text(current.name()).show_ui(ui, |ui| {
+                for lang in Language::ALL {
+                    if ui.selectable_label(current == lang, lang.name()).clicked() {
+                        self.settings.language = lang;
+                    }
                 }
-            }
-        });
+            });
+        shown.response.accessible_name(if current == Language::German { "Sprache" } else { "Language" });
     }
 
     fn ribbon_protect(&mut self, ui: &mut Ui, ctx: &Context) {

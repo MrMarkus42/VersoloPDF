@@ -565,7 +565,7 @@ impl VersoloPdfApp {
         if self.settings.show_loupe {
             let mut open = true;
             egui::Window::new(if de { "Lupe" } else { "Loupe" })
-                .id(egui::Id::new("versolopdf-loupe"))
+                .id(egui::Id::unique("versolopdf-loupe"))
                 .open(&mut open)
                 .resizable(false)
                 .default_pos(ctx.content_rect().left_top() + egui::vec2(260.0, 200.0))
@@ -580,7 +580,7 @@ impl VersoloPdfApp {
         if self.settings.show_pan_zoom {
             let mut open = true;
             egui::Window::new(if de { "Ausschnitt und Vergrößerung" } else { "Pan and zoom" })
-                .id(egui::Id::new("versolopdf-pan-zoom"))
+                .id(egui::Id::unique("versolopdf-pan-zoom"))
                 .open(&mut open)
                 .resizable(false)
                 .default_pos(ctx.content_rect().right_bottom() + egui::vec2(-300.0, -420.0))

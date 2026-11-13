@@ -106,6 +106,8 @@ pub enum AfterSave {
     Exit,
     /// "Verschieben: Neues Fenster".
     NewWindow,
+    /// "Neue Version": install once every document is saved or closed.
+    Update,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -243,6 +245,10 @@ pub enum Dialog {
     /// The dialogs of the ribbon tab "Lesezeichen".
     Bookmark(Box<bookmark_dialogs::BookmarkDialog>),
     About,
+    /// First start: may VersoloPDF look for new versions?
+    UpdateConsent,
+    /// "Neue Version" found by the automatic check.
+    UpdateFound,
     /// "Von URL öffnen".
     OpenUrl {
         url: String,
@@ -343,9 +349,13 @@ pub struct VersoloPdfApp {
     ribbon_peek: bool,
     /// Height of the ribbon panel in the last frame (for tests).
     ribbon_height: f32,
+    /// Width of the side pane in the last frame (for tests).
+    side_panel_width: f32,
     /// "Verschieben: Neues Fenster" in progress: the tabs to hand over and
     /// those whose unsaved changes were already asked about.
     new_window: Option<(Vec<u64>, Vec<u64>)>,
+    /// Result of the last change on the settings page "Dateizuordnung".
+    file_assoc_note: Option<String>,
     /// Files handed to new VersoloPDF windows (each start one entry).
     spawned_windows: Vec<Vec<PathBuf>>,
     /// "Neue Version": search and installation.
@@ -500,8 +510,10 @@ impl VersoloPdfApp {
             recent_filter: String::new(),
             ribbon_peek: false,
             ribbon_height: 0.0,
+            side_panel_width: 0.0,
             new_window: None,
             spawned_windows: Vec::new(),
+            file_assoc_note: None,
             update: update_ui::UpdateState::Idle,
             open_view: backstage::OpenView::Recent,
             session_name: String::new(),
@@ -596,6 +608,11 @@ impl VersoloPdfApp {
     }
 
     /// Height of the ribbon (quick access row, tabs and commands).
+    /// Width of the side pane in the last frame (0: not shown).
+    pub fn side_panel_width(&self) -> f32 {
+        self.side_panel_width
+    }
+
     pub fn ribbon_height(&self) -> f32 {
         self.ribbon_height
     }
@@ -1040,6 +1057,11 @@ impl VersoloPdfApp {
 }
 
 impl eframe::App for VersoloPdfApp {
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        // "Beim Beenden installieren".
+        self.install_update_at_exit();
+    }
+
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.apply_view_settings(&ctx);

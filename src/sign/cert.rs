@@ -170,7 +170,7 @@ fn digest_info(hash: &str, digest: &[u8]) -> Vec<u8> {
 
 /// A private key that signs.
 pub enum Key {
-    Rsa(Box<rsa::RsaPrivateKey>),
+    Rsa(Box<rsa::PrivateKey>),
     P256(p256::ecdsa::SigningKey),
     P384(p384::ecdsa::SigningKey),
     /// A key kept by the operating system (macOS keychain), found by its
@@ -191,7 +191,7 @@ impl Key {
         if let Ok(k) = p384::SecretKey::from_pkcs8_der(der_bytes) {
             return Ok(Key::P384(k.into()));
         }
-        rsa::RsaPrivateKey::from_pkcs8_der(der_bytes)
+        rsa::PrivateKey::from_pkcs8_der(der_bytes)
             .map(|k| Key::Rsa(Box::new(k)))
             .map_err(|_| bad("Schlüsselart wird nicht unterstützt (RSA, ECDSA P-256 oder P-384)"))
     }
@@ -242,8 +242,7 @@ pub fn verify(cert: &Cert, hash: &str, digest: &[u8], signature: &[u8]) -> Resul
     match cert.key_alg.as_str() {
         RSA => {
             use rsa::pkcs1::DecodeRsaPublicKey as _;
-            let key =
-                rsa::RsaPublicKey::from_pkcs1_der(&cert.public_key).map_err(|_| bad("RSA-Schlüssel"))?;
+            let key = rsa::PublicKey::from_pkcs1_der(&cert.public_key).map_err(|_| bad("RSA-Schlüssel"))?;
             Ok(key.verify(rsa::Pkcs1v15Sign::new_unprefixed(), &digest_info(hash, digest), signature).is_ok())
         }
         EC_PUBLIC_KEY if cert.curve == P256 => {
@@ -288,7 +287,7 @@ pub fn create_self_signed(id: &NewId<'_>, now_unix: i64) -> Result<(Vec<u8>, Vec
     };
     let pkcs8 = secret.to_pkcs8_der().map_err(|_| bad("Schlüssel speichern"))?.as_bytes().to_vec();
     let signing: p256::ecdsa::SigningKey = secret.clone().into();
-    let point = p256::ecdsa::VerifyingKey::from(&signing).to_encoded_point(false);
+    let point = p256::ecdsa::VerifyingKey::from(&signing).to_sec1_point(false);
     let mut name_parts: Vec<Vec<u8>> = Vec::new();
     let mut rdn = |oid: &str, value: Vec<u8>| {
         name_parts.push(der::set_of(&[&der::seq(&[&der::oid(oid), &value])]));

@@ -66,14 +66,21 @@
 
 ## Installation (Windows)
 
-1. Download `VersoloPDF-<version>-windows-x64.zip` from the
-   [latest release](https://github.com/MrMarkus42/VersoloPDF/releases/latest).
-2. Unpack it into a folder of your choice, e.g. `Documents\VersoloPDF`.
-3. Start `VersoloPDF.exe`. No installation and no administrator rights needed.
+**With the installer:** download `VersoloPDF-<version>-windows-x64-setup.exe`
+from the [latest release](https://github.com/MrMarkus42/VersoloPDF/releases/latest)
+and run it. It installs VersoloPDF for you only (no administrator rights) or
+for all users, adds it to the start menu, can make it the program for PDF
+files and can be removed under *Settings › Apps*.
+
+**Without installing:** download `VersoloPDF-<version>-windows-x64.zip`,
+unpack it into a folder of your choice (e.g. `Documents\VersoloPDF`) and start
+`VersoloPDF.exe`.
 
 If the window stays black on older graphics cards, start VersoloPDF with
-`VersoloPDF.exe --opengl`. New versions can be installed from
-*File › Settings › Updates*.
+`VersoloPDF.exe --opengl`. Which files open with VersoloPDF on a double click
+is chosen under *File › Settings › File association*. New versions are
+installed from *File › Settings › Updates*; VersoloPDF asks once whether it
+may look for them and only installs versions signed by the publisher.
 
 ## Installation (macOS)
 
@@ -96,7 +103,7 @@ PDFs from the Finder. New versions install themselves from
 
 ## Building from source
 
-Requirements: Rust 1.88 or newer.
+Requirements: Rust 1.95 or newer.
 
 ```bash
 scripts/fetch-pdfium.sh          # downloads and verifies PDFium
@@ -172,10 +179,13 @@ Ihre Dateien, das Netz und andere Programme gelesen); Schnellsuche nach
 Befehlen (Strg+.), Tastaturbedienung des Menübands, Wiederherstellung nach
 Abstürzen, signierte Updates direkt aus GitHub.
 
-**Installation unter Windows:** Zip-Datei `…-windows-x64.zip` aus dem
+**Installation unter Windows:** `…-windows-x64-setup.exe` aus dem
 [neuesten Release](https://github.com/MrMarkus42/VersoloPDF/releases/latest)
-herunterladen, in einen beliebigen Ordner entpacken und `VersoloPDF.exe` starten –
-keine Installation und keine Administratorrechte nötig.
+herunterladen und starten – wahlweise nur für Sie (ohne Administratorrechte)
+oder für alle Benutzer, auf Wunsch gleich als Programm für PDF-Dateien. Oder
+ohne Installation: `…-windows-x64.zip` in einen beliebigen Ordner entpacken und
+`VersoloPDF.exe` starten. Welche Dateien sich per Doppelklick mit VersoloPDF
+öffnen, steht unter *Datei › Einstellungen › Dateizuordnung*.
 
 **Installation auf dem Mac:** `…-macos.zip` herunterladen, öffnen und
 `VersoloPDF.app` in den Ordner *Programme* ziehen (macOS 11 oder neuer, Apple-

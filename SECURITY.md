@@ -15,7 +15,8 @@ VersoloPDF opens files from untrusted sources, so it is built defensively:
   operating system functions (Win32, macOS, Linux sandbox set-up).
 * **Protected mode (sandbox)** – PDFium, the C++ engine that reads and draws
   the documents, does not run inside the program. Every open document gets
-  its own helper process (the program started with `--pdf-engine`) that only
+  its own helper process (`versolopdf-engine`, a small program of its own that
+  contains only the PDF engine) that only
   receives that document and answers requests over a pipe; every answer is
   size-checked and decoded by safe Rust code (`src/engine/`). The helper is
   locked down before it sees a document:
@@ -40,11 +41,29 @@ VersoloPDF opens files from untrusted sources, so it is built defensively:
   limit on decompressed stream sizes (protection against "decompression
   bombs"); parser panics are caught and turned into errors.
 * **Signed updates** – the built-in update only installs packages that carry a
-  valid ECDSA P-256 signature of the project's update key (the public key is
-  built into the program, the private key never leaves the developer's
-  machine and is not stored on GitHub). The file name – with version and
-  system – is signed together with the SHA-256 checksum, so an older or
-  foreign package cannot be passed off as the new one.
+  valid [minisign](https://jedisct1.github.io/minisign/) signature (Ed25519)
+  of the project's update key. The public key is compiled into the program
+  (`keys/update-key.pub`), never read from a file or setting; the secret key
+  is password-protected and never leaves the developer's own computer (not on
+  GitHub, not in CI, not in a cloud folder). The signed comment names system
+  and version (`versolopdf-windows 1.5.0`), and only a version newer than the
+  running one is accepted, so an older or foreign package cannot be passed off
+  as the new one. Packages are downloaded into a private folder of the user
+  (`%LOCALAPPDATA%\VersoloPDF\updates`, `~/Library/Caches/VersoloPDF/updates`)
+  and checked; then the **installed** program – never the downloaded one –
+  installs the update: it opens the package so that nobody can change it,
+  checks the signature again with its own built-in key, unpacks it into a
+  folder next to the program folder (with the same protection) and replaces
+  the program files. Only this step runs with administrator rights, and only
+  where the program folder is protected (installation for all users); the new
+  version is started without them. Nothing goes to the network before the user
+  agreed once, and then only the project's release list is asked for.
+  Versions up to 1.4 used an ECDSA P-256 signature (`.sig`); 1.5.0 carries both
+  so that they can still update.
+* **File association** – VersoloPDF registers itself for PDF and session files
+  only when the user asks for it (installer option or *Einstellungen ›
+  Dateizuordnung*), for the current user, and removes the registration again
+  when uninstalled.
 * **No active content** – JavaScript, launch actions, embedded executables and
   remote content are never executed. PDFium is built without V8/XFA.
 * **Links** – only `http`, `https` and `mailto` links can be opened, and only

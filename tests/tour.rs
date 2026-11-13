@@ -152,7 +152,7 @@ fn command_tour() {
                     }
                     // The dialog must fit into the window.
                     let screen = h.ctx.content_rect();
-                    let area = h.ctx.memory(|m| m.area_rect(egui::Id::new("versolopdf-dialog")));
+                    let area = h.ctx.memory(|m| m.area_rect(egui::Id::unique("versolopdf-dialog")));
                     match area {
                         Some(r) if !screen.expand(1.0).contains_rect(r) => {
                             too_big += 1;

@@ -212,7 +212,7 @@ fn search_and_sidebar_panels() {
     tab(&mut h, "Dokumentaufbau");
     h.run_steps(3);
     save(&mut h, "08-organize-ribbon");
-    // "Drehen ▾" opens a drop-down menu.
+    // "Drehen ⏷" opens a drop-down menu.
     h.get_by_label("Drehen").click();
     h.run_steps(3);
     save(&mut h, "08b-rotate-menu");
@@ -551,7 +551,7 @@ fn form_tab_features() {
     assert_eq!(fields[0].value, "03.04.2026");
     save(&mut h, "frm-02-date-image");
 
-    // "Felder hervorheben ▾" per kind.
+    // "Felder hervorheben ⏷" per kind.
     h.get_by_label("Felder hervorheben").click();
     h.run_steps(3);
     save(&mut h, "frm-03-highlight-menu");
@@ -1389,9 +1389,9 @@ fn search_pane_keeps_its_width() {
     h.key_press_modifiers(Modifiers::COMMAND, egui::Key::F);
     h.run_steps(5);
     let width = |h: &Harness<'_, VersoloPdfApp>| {
-        egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("side-panel"))
-            .map(|s| s.outer_rect.width())
-            .expect("side pane state")
+        let w = h.state().side_panel_width();
+        assert!(w > 0.0, "side pane shown");
+        w
     };
     let before = width(&h);
     h.run_steps(60);
@@ -1611,7 +1611,7 @@ fn select_move_delete_several_comments() {
     assert!(rects(&mut h).is_empty(), "both deleted");
 }
 
-/// The "▾" next to Rückgängig lists the steps; choosing one undoes it and
+/// The "⏷" next to Rückgängig lists the steps; choosing one undoes it and
 /// all newer ones.
 #[test]
 fn undo_history_list() {
@@ -1860,7 +1860,7 @@ fn spell_check_and_comment_menus() {
     h.run_steps(3);
     assert!(h.state().dialog().is_none());
 
-    // "Anmerkungen löschen ▾" > "Anmerkungen dieser Seite löschen".
+    // "Anmerkungen löschen ⏷" > "Anmerkungen dieser Seite löschen".
     h.get_by_label("Anmerkungen löschen").click();
     h.run_steps(3);
     save(&mut h, "rev-03-delete-menu");
@@ -1875,7 +1875,7 @@ fn spell_check_and_comment_menus() {
     h.run_steps(3);
     assert_eq!(notes(&mut h).len(), 2);
 
-    // "Anmerkungen einbetten ▾" > "Alle Anmerkungen einbetten".
+    // "Anmerkungen einbetten ⏷" > "Alle Anmerkungen einbetten".
     h.get_by_label("Anmerkungen einbetten").click();
     h.run_steps(3);
     h.get_by_label("Alle Anmerkungen einbetten").click();

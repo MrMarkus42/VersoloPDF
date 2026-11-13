@@ -15,12 +15,13 @@ cargo build --release --target $TARGET
 rm -rf "$OUT" "dist/$NAME.zip"
 mkdir -p "$OUT/licenses/pdfium"
 cp "target/$TARGET/release/versolopdf.exe" "$OUT/VersoloPDF.exe"
+cp "target/$TARGET/release/versolopdf-engine.exe" "$OUT/versolopdf-engine.exe"
 cp vendor/pdfium/win-x64/bin/pdfium.dll "$OUT/"
 cp README.md LICENSE-MIT LICENSE-APACHE THIRD_PARTY_NOTICES.md SECURITY.md "$OUT/"
 cp vendor/pdfium/win-x64/LICENSE "$OUT/licenses/pdfium/LICENSE"
 cp vendor/pdfium/win-x64/licenses/* "$OUT/licenses/pdfium/"
 (cd dist && python3 -c "import shutil; shutil.make_archive('$NAME', 'zip', '.', '$NAME')")
-sha256sum "dist/$NAME.zip" | tee "dist/$NAME.zip.sha256"
+sha256sum "dist/$NAME.zip" | sed "s|dist/||" | tee "dist/$NAME.zip.sha256"
 
 # Signature for the update check (only on the machine that holds the key).
 KEY="${VERSOLOPDF_SIGNING_KEY:-$HOME/.config/versolopdf/update-signing.key}"

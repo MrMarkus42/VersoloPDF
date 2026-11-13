@@ -118,6 +118,7 @@ fn before_after() {
             delta: egui::vec2(0.0, -3000.0),
             modifiers: egui::Modifiers::NONE,
             phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Wheel,
         });
         h.run_steps(20);
         let ok = h.query_all_by_label("OK").last().map(|n| n.rect().center());

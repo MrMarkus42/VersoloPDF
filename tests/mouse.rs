@@ -705,6 +705,7 @@ fn compare_documents() {
             delta: egui::vec2(0.0, -400.0),
             modifiers: Modifiers::NONE,
             phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Wheel,
         },
     );
     h.run_steps(30);
@@ -884,6 +885,7 @@ fn dialog_previews() {
             delta: egui::vec2(0.0, 240.0),
             modifiers: Modifiers::NONE,
             phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Wheel,
         },
     );
     // egui spreads the wheel over several frames.

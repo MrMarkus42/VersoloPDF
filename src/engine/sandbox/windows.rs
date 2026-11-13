@@ -244,6 +244,19 @@ struct WinProcess {
 unsafe impl Send for WinProcess {}
 
 impl Process for WinProcess {
+    fn exit_code(&mut self) -> Option<i64> {
+        use windows_sys::Win32::System::Threading::GetExitCodeProcess;
+        if self.process.is_null() {
+            return None;
+        }
+        let mut code = 0u32;
+        // SAFETY: a valid process handle owned by this value.
+        unsafe {
+            WaitForSingleObject(self.process, 2000);
+            (GetExitCodeProcess(self.process, &mut code) != 0).then_some(i64::from(code))
+        }
+    }
+
     fn kill(&mut self) {
         // SAFETY: handles owned by this value, closed once.
         unsafe {

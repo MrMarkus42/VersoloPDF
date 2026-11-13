@@ -1345,7 +1345,7 @@ pub fn logo_rgba() -> (u32, u32, Vec<u8>) {
 
 /// The application icon as a texture, loaded once per context.
 fn logo_texture(ctx: &egui::Context) -> egui::TextureHandle {
-    let id = egui::Id::new("versolopdf-logo-texture");
+    let id = egui::Id::unique("versolopdf-logo-texture");
     if let Some(tex) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
         return tex;
     }

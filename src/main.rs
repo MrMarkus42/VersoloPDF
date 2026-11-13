@@ -31,38 +31,26 @@ fn main() -> eframe::Result {
     if std::env::args_os().nth(1).is_some_and(|a| a == versolopdf::engine::ENGINE_ARG) {
         std::process::exit(versolopdf::engine::run_helper());
     }
-    // "Neue Version": this (new) program copies itself into the program
-    // folder of the running old version, then ends. No window.
-    let mut raw = std::env::args_os().skip(1);
-    if raw.next().is_some_and(|a| a == versolopdf::update::INSTALL_ARG) {
-        let code = match (raw.next(), std::env::current_exe()) {
-            (Some(target), Ok(exe)) => {
-                let target = PathBuf::from(target);
-                let result = if cfg!(target_os = "macos") {
-                    // The new bundle: …/VersoloPDF.app/Contents/MacOS/VersoloPDF.
-                    let bundle = exe.ancestors().nth(3).map(PathBuf::from).unwrap_or_default();
-                    versolopdf::update::install_bundle(&bundle, &target)
-                } else {
-                    let source = exe.parent().map(PathBuf::from).unwrap_or_default();
-                    versolopdf::update::install_files(&source, &target)
-                };
-                match result {
-                    Ok(_) => 0,
-                    Err(err) => {
-                        versolopdf::crashlog::init();
-                        log::error!("Update nicht installiert: {err}");
-                        1
-                    }
-                }
-            }
-            _ => 2,
-        };
-        std::process::exit(code);
+    // "Neue Version": the installed program checks a downloaded update and
+    // puts it in place (possibly with administrator rights), then ends. No
+    // window. See versolopdf::update::install_main.
+    let args_os: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+    if args_os.first().is_some_and(|a| a == versolopdf::update::INSTALL_ARG) {
+        versolopdf::crashlog::init();
+        std::process::exit(versolopdf::update::install_main(&args_os[1..]));
+    }
+    // The uninstaller: remove the file types this user registered.
+    if args_os.first().is_some_and(|a| a == versolopdf::assoc::UNREGISTER_ARG) {
+        versolopdf::assoc::unregister_all();
+        std::process::exit(0);
     }
     // Leftovers of an earlier update (if the folder allows it).
     if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(PathBuf::from)) {
         versolopdf::update::remove_leftovers(&dir);
     }
+    versolopdf::update::clean_old_downloads();
+    // A moved portable copy: the file types this user gave it follow it.
+    versolopdf::assoc::follow_moved_program();
     // Data of the former name "MrPDF" first, before anything is written.
     versolopdf::files::take_over_old_data();
     // Error log and crash reports ("Fehlerprotokoll").
@@ -83,7 +71,7 @@ fn main() -> eframe::Result {
     // or the setting switch it off.
     let in_process = std::env::var("VERSOLOPDF_ENGINE").is_ok_and(|v| v.eq_ignore_ascii_case("inprocess"));
     match std::env::current_exe() {
-        Ok(exe) if !in_process => versolopdf::engine::use_helper(exe),
+        Ok(exe) if !in_process => versolopdf::engine::use_helper(versolopdf::engine::helper_program(&exe)),
         _ => versolopdf::engine::use_in_process(),
     }
     // For testing the crash report only.

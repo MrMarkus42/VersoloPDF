@@ -19,7 +19,7 @@ pub fn lock() -> MutexGuard<'static, ()> {
         // Test programs copied to another machine name the program there.
         let exe = std::env::var_os("VERSOLOPDF_ENGINE_EXE")
             .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| std::path::PathBuf::from(env!("CARGO_BIN_EXE_versolopdf")));
+            .unwrap_or_else(|| std::path::PathBuf::from(env!("CARGO_BIN_EXE_versolopdf-engine")));
         versolopdf::engine::use_helper(exe);
     }
     guard

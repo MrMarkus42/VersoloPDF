@@ -1,19 +1,31 @@
 //! "Neue Version": looks for the newest VersoloPDF release on GitHub and, on
-//! Windows and macOS, installs it.
+//! Windows and macOS, installs it. See SECURITY.md ("Signed updates").
+//!
+//! Trust comes only from a signature, never from where a file came from:
+//! * Each package has a minisign signature (`….zip.minisig`, Ed25519) made
+//!   with a password-protected key that exists only on the developer's own
+//!   computer. The public key is built into the program
+//!   (`keys/update-key.pub`), never read from a file or setting.
+//! * The signed ("trusted") comment names system and version
+//!   (`versolopdf-windows 1.5.0`); it must match the release, and only a
+//!   newer version than the running one is accepted, so an old, genuinely
+//!   signed package can't be passed off as an update.
+//! * Downloads go into a private folder of the user. The *installed*
+//!   program, never the downloaded one, installs the update
+//!   (`--install-update`, with administrator rights where the program folder
+//!   is protected). It opens the package so that nobody can change it, checks
+//!   the signature again with its own key, unpacks it into a folder only it
+//!   may write to, and then replaces the program files ("….old" first, which
+//!   Windows allows for running files; on macOS the whole bundle). The new
+//!   version is started by the old one, without administrator rights.
+//! * Nothing goes to the network unless the user agreed (Einstellungen ›
+//!   Neue Version); only the release list of the project is asked for.
 //!
 //! Like "Von URL öffnen", the system's `curl` program does the network work
-//! (VersoloPDF has no own network or TLS library). The release package is only
-//! taken from this project's GitHub releases, must carry a valid signature
-//! of the project's update key (see [`verify_signature`]; the public key is
-//! built into the program, the private key never leaves the developer's
-//! machine), must match the SHA-256 checksum named in it and is unpacked
-//! with the system's own program (`tar` on
-//! Windows, `ditto` on macOS). The new program then installs itself
-//! (`--install-update`, with administrator rights when the folder is
-//! write-protected): on Windows it copies its files into the program
-//! folder, the running files are renamed to "….old" first, which Windows
-//! allows; on macOS the new bundle takes the place of the old one.
-//! Afterwards the new version is started.
+//! (HTTPS only, sizes limited); `tar` (Windows) and `ditto` (macOS) unpack.
+//!
+//! Versions up to 1.4 know an older signature (`.sig`, ECDSA P-256, see
+//! [`verify_signature`]); the release 1.5.0 carries both so they can update.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -23,8 +35,13 @@ use crate::error::{Error, Result};
 /// GitHub repository ("owner/name") whose releases are used.
 pub const REPOSITORY: &str = "MrMarkus42/VersoloPDF";
 
+/// The public update key (minisign format), built into the program.
+const UPDATE_KEY: &str = include_str!("../keys/update-key.pub");
+
 /// Largest accepted release package.
-const MAX_PACKAGE: u64 = 512 * 1024 * 1024;
+const MAX_PACKAGE: u64 = 300 * 1024 * 1024;
+/// Largest accepted signature file.
+const MAX_SIGNATURE: u64 = 4096;
 /// Largest accepted answer of the GitHub API.
 const MAX_ANSWER: usize = 2 * 1024 * 1024;
 
@@ -51,12 +68,15 @@ pub struct Release {
     pub windows: Option<Asset>,
     /// Its checksum file ("….zip.sha256"), used when GitHub gives no digest.
     pub windows_sha: Option<Asset>,
-    /// Its signature ("….zip.sig").
+    /// Its signature of versions up to 1.4 ("….zip.sig").
     pub windows_sig: Option<Asset>,
+    /// Its minisign signature ("….zip.minisig").
+    pub windows_minisig: Option<Asset>,
     /// The macOS package ("…-macos.zip", the app for Intel and Apple chips).
     pub macos: Option<Asset>,
     pub macos_sha: Option<Asset>,
     pub macos_sig: Option<Asset>,
+    pub macos_minisig: Option<Asset>,
 }
 
 /// The package for this system and its checksum file, if the release has one.
@@ -70,21 +90,86 @@ pub fn package_of(release: &Release) -> Option<(&Asset, Option<&Asset>)> {
     }
 }
 
-/// The signature file of the package for this system.
+/// The minisign signature of the package for this system.
 pub fn signature_of(release: &Release) -> Option<&Asset> {
     if cfg!(windows) {
-        release.windows_sig.as_ref()
+        release.windows_minisig.as_ref()
     } else if cfg!(target_os = "macos") {
-        release.macos_sig.as_ref()
+        release.macos_minisig.as_ref()
     } else {
         None
     }
 }
 
+/// The start of the signed comment of this system's packages
+/// ("versolopdf-windows 1.5.0").
+pub fn package_kind() -> &'static str {
+    if cfg!(target_os = "macos") { "versolopdf-macos" } else { "versolopdf-windows" }
+}
+
 // ---------------------------------------------------------------------------
-// Signatures of release packages
+// minisign signatures
+
+/// Is a real update key built into this program? (A build without one never
+/// looks for or installs updates.)
+pub fn key_configured() -> bool {
+    minisign_verify::PublicKey::decode(UPDATE_KEY).is_ok()
+}
+
+fn signature_error(why: &str) -> Error {
+    Error::Invalid(format!("Update-Signatur ungültig: {why}. Die Datei wurde NICHT installiert."))
+}
+
+/// Checks the package read from `data` against the minisign signature text
+/// `signature` with the public key `key`. The signed comment must be exactly
+/// "`kind` `version`". Only the current, pre-hashed form is accepted.
+pub fn verify_minisign(
+    key: &str,
+    data: &mut dyn std::io::Read,
+    signature: &str,
+    kind: &str,
+    version: &str,
+) -> Result<()> {
+    let key =
+        minisign_verify::PublicKey::decode(key).map_err(|_| signature_error("kein Schlüssel im Programm"))?;
+    let sig = minisign_verify::Signature::decode(signature).map_err(|_| signature_error("unlesbar"))?;
+    // Fails for another key and for the old, not pre-hashed form.
+    let mut verifier =
+        key.verify_stream(&sig).map_err(|_| signature_error("sie stammt nicht vom Herausgeber"))?;
+    let mut buf = vec![0u8; 1 << 16];
+    let mut total = 0u64;
+    loop {
+        let n = data.read(&mut buf).map_err(|e| Error::Invalid(format!("Update nicht lesbar: {e}")))?;
+        if n == 0 {
+            break;
+        }
+        total += n as u64;
+        if total > MAX_PACKAGE {
+            return Err(signature_error("Datei zu groß"));
+        }
+        verifier.update(&buf[..n]);
+    }
+    verifier
+        .finalize()
+        .map_err(|_| signature_error("die Datei wurde verändert oder stammt nicht vom Herausgeber"))?;
+    // The trusted comment is covered by the signature too.
+    if sig.trusted_comment().trim() != format!("{kind} {version}") {
+        return Err(signature_error("sie gehört zu einer anderen Datei oder Version"));
+    }
+    Ok(())
+}
+
+/// [`verify_minisign`] with the key built into this program.
+pub fn verify_package(data: &mut dyn std::io::Read, signature: &str, version: &str) -> Result<()> {
+    verify_minisign(UPDATE_KEY, data, signature, package_kind(), version)
+}
+
+// ---------------------------------------------------------------------------
+// Signatures of versions up to 1.4 (only made, no longer accepted)
 //
-// A ".sig" file next to each package says (text, one item per line):
+// Installed versions up to 1.4 only install packages with this signature, so
+// the release 1.5.0 carries it next to the minisign signature
+// (scripts/sign_release.rs). A ".sig" file says (text, one item per line):
 //
 //     versolopdf-signature-v1
 //     file: VersoloPDF-1.4.0-windows-x64.zip
@@ -177,7 +262,7 @@ pub fn sign_package(secret: &[u8], file: &str, sha256: &str) -> Result<String> {
 pub fn public_key_hex(secret: &[u8]) -> Result<String> {
     let key =
         p256::ecdsa::SigningKey::from_slice(secret).map_err(|_| Error::Invalid("invalid key".into()))?;
-    Ok(key.verifying_key().to_encoded_point(false).as_bytes().iter().map(|b| format!("{b:02x}")).collect())
+    Ok(key.verifying_key().to_sec1_point(false).as_bytes().iter().map(|b| format!("{b:02x}")).collect())
 }
 
 /// The SHA-256 checksum of a file (lower-case hex).
@@ -201,12 +286,29 @@ pub fn parse_version(text: &str) -> Option<(u64, u64, u64)> {
     Some((major, minor, patch))
 }
 
-/// True if `candidate` is a higher version than `current`.
+/// True if `candidate` is a higher version than `current`. The candidate
+/// must be a plain "x.y.z" (no pre-release).
 pub fn is_newer(candidate: &str, current: &str) -> bool {
-    match (parse_version(candidate), parse_version(current)) {
+    match (strict_version(candidate), parse_version(current)) {
         (Some(a), Some(b)) => a > b,
         _ => false,
     }
+}
+
+/// "1.2.3" (or "v1.2.3") only: three numbers, nothing else.
+pub fn strict_version(text: &str) -> Option<(u64, u64, u64)> {
+    let text = text.trim();
+    let text = text.strip_prefix('v').unwrap_or(text);
+    let mut parts = text.split('.');
+    let mut number = || -> Option<u64> {
+        let p = parts.next()?;
+        if p.is_empty() || p.len() > 6 || !p.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        p.parse().ok()
+    };
+    let version = (number()?, number()?, number()?);
+    parts.next().is_none().then_some(version)
 }
 
 // ---------------------------------------------------------------------------
@@ -381,9 +483,14 @@ pub fn parse_release(text: &str) -> Result<Release> {
     let bad = || Error::Invalid("unexpected answer from GitHub".into());
     let json = parse_json(text).ok_or_else(bad)?;
     let tag = json.str("tag_name").ok_or_else(bad)?;
-    let version = tag.trim().trim_start_matches(['v', 'V']).to_string();
-    if parse_version(&version).is_none() {
+    let version = tag.trim().trim_start_matches('v').to_string();
+    if strict_version(&version).is_none() {
         return Err(bad());
+    }
+    // Drafts and test versions are never installed.
+    let flag = |key: &str| matches!(json.get(key), Some(Json::Bool(true)));
+    if flag("draft") || flag("prerelease") {
+        return Err(Error::Invalid("the latest release is not a final version".into()));
     }
     let mut release = Release {
         version,
@@ -392,9 +499,11 @@ pub fn parse_release(text: &str) -> Result<Release> {
         windows: None,
         windows_sha: None,
         windows_sig: None,
+        windows_minisig: None,
         macos: None,
         macos_sha: None,
         macos_sig: None,
+        macos_minisig: None,
     };
     if let Some(Json::Arr(assets)) = json.get("assets") {
         for a in assets {
@@ -412,20 +521,23 @@ pub fn parse_release(text: &str) -> Result<Release> {
                 .map(str::to_ascii_lowercase)
                 .filter(|h| is_sha256_hex(h));
             let asset = Asset { name: name.to_string(), url: url.to_string(), size, sha256 };
-            let lower = name.to_ascii_lowercase();
-            if lower.ends_with("-windows-x64.zip") {
-                release.windows = Some(asset);
-            } else if lower.ends_with("-windows-x64.zip.sha256") {
-                release.windows_sha = Some(asset);
-            } else if lower.ends_with("-windows-x64.zip.sig") {
-                release.windows_sig = Some(asset);
-            } else if lower.ends_with("-macos.zip") {
-                release.macos = Some(asset);
-            } else if lower.ends_with("-macos.zip.sha256") {
-                release.macos_sha = Some(asset);
-            } else if lower.ends_with("-macos.zip.sig") {
-                release.macos_sig = Some(asset);
-            }
+            // Only the packages of exactly this version.
+            let windows = format!("VersoloPDF-{}-windows-x64.zip", release.version);
+            let macos = format!("VersoloPDF-{}-macos.zip", release.version);
+            let slot = match name.strip_prefix(windows.as_str()) {
+                Some("") => &mut release.windows,
+                Some(".sha256") => &mut release.windows_sha,
+                Some(".sig") => &mut release.windows_sig,
+                Some(".minisig") => &mut release.windows_minisig,
+                _ => match name.strip_prefix(macos.as_str()) {
+                    Some("") => &mut release.macos,
+                    Some(".sha256") => &mut release.macos_sha,
+                    Some(".sig") => &mut release.macos_sig,
+                    Some(".minisig") => &mut release.macos_minisig,
+                    _ => continue,
+                },
+            };
+            *slot = Some(asset);
         }
     }
     Ok(release)
@@ -433,9 +545,11 @@ pub fn parse_release(text: &str) -> Result<Release> {
 
 /// Only files of this project's releases on GitHub are downloaded.
 fn is_release_url(url: &str) -> bool {
-    url.starts_with(&format!("https://github.com/{REPOSITORY}/releases/download/"))
+    let prefix = format!("https://github.com/{REPOSITORY}/releases/download/");
+    url.starts_with(&prefix)
         && !url.chars().any(|c| c.is_control() || c.is_whitespace())
-        && !url.contains("/../")
+        && !url.contains("..")
+        && !url[prefix.len()..].contains(['?', '#', '\\', '@', '%'])
 }
 
 fn is_sha256_hex(h: &str) -> bool {
@@ -449,7 +563,7 @@ fn curl() -> Command {
     let mut cmd = Command::new("curl");
     cmd.args(["--silent", "--show-error", "--location"])
         .args(["--proto", "=https", "--proto-redir", "=https"])
-        .args(["--max-redirs", "10", "--connect-timeout", "20"])
+        .args(["--tlsv1.2", "--max-redirs", "10", "--connect-timeout", "20"])
         .args(["--user-agent", "VersoloPDF-update-check"]);
     #[cfg(windows)]
     {
@@ -521,33 +635,78 @@ fn download(asset: &Asset, dest: &Path, max: u64) -> Result<()> {
 /// Shown when a release carries no signature.
 pub const UNSIGNED: &str = "Dieses Update ist nicht signiert und wird deshalb nicht installiert. Bitte etwas später erneut versuchen oder die neue Version selbst von der Projektseite laden.";
 
-/// Downloads the package of `release` for this system into `dir`. It is only
-/// kept if its signature (".sig") is valid for this package and its
-/// SHA-256 checksum is the signed one (and GitHub's digest, if given).
-pub fn download_package(release: &Release, dir: &Path) -> Result<PathBuf> {
+/// The private folder for downloaded updates of this user
+/// (`%LOCALAPPDATA%\VersoloPDF\updates`, `~/Library/Caches/VersoloPDF/updates`).
+pub fn updates_dir() -> Option<PathBuf> {
+    if cfg!(target_os = "macos") {
+        std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/Caches/VersoloPDF/updates"))
+    } else if cfg!(windows) {
+        crate::files::data_dir().map(|d| d.join("updates"))
+    } else {
+        None
+    }
+}
+
+/// A downloaded package, checked: the zip and its minisign signature text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Downloaded {
+    pub zip: PathBuf,
+    pub signature: PathBuf,
+    pub version: String,
+}
+
+/// Downloads the package of `release` for this system and its minisign
+/// signature into `dir`, and checks the signature. Nothing unsigned or
+/// not matching is kept.
+pub fn download_package(release: &Release, dir: &Path) -> Result<Downloaded> {
+    if !key_configured() {
+        return Err(Error::Invalid("this program has no update key".into()));
+    }
     let (asset, _) =
         package_of(release).ok_or_else(|| Error::Invalid("no package for this system".into()))?;
     let sig_asset = signature_of(release).ok_or_else(|| Error::Invalid(UNSIGNED.into()))?;
-    // The package name must belong to this release's version.
-    if !asset.name.contains(&format!("-{}-", release.version)) {
-        return Err(Error::Invalid("the package does not belong to this release".into()));
+    if !is_newer(&release.version, current_version()) {
+        return Err(Error::Invalid("this version is not newer than the installed one".into()));
+    }
+    if asset.size > MAX_PACKAGE {
+        return Err(Error::Invalid("the package is too large".into()));
     }
     std::fs::create_dir_all(dir).map_err(|e| Error::io(dir, e))?;
-    let sig_path = dir.join("package.sig");
-    download(sig_asset, &sig_path, 4096)?;
-    let text = std::fs::read_to_string(&sig_path).map_err(|e| Error::io(&sig_path, e))?;
-    std::fs::remove_file(&sig_path).ok();
-    let expected = verify_signature(&text, &asset.name, UPDATE_KEYS)?;
-    if asset.sha256.as_ref().is_some_and(|h| *h != expected) {
-        return Err(Error::Invalid("checksum mismatch – the release was changed".into()));
+    let zip = dir.join(&asset.name);
+    let signature = dir.join(format!("{}.minisig", asset.name));
+    download(sig_asset, &signature, MAX_SIGNATURE)?;
+    download(asset, &zip, MAX_PACKAGE)?;
+    // Checked here already, so a broken download is reported at once; the
+    // installing program checks again.
+    let checked = (|| {
+        let text = std::fs::read_to_string(&signature).map_err(|e| Error::io(&signature, e))?;
+        let mut file = std::fs::File::open(&zip).map_err(|e| Error::io(&zip, e))?;
+        verify_package(&mut file, &text, &release.version)
+    })();
+    if let Err(err) = checked {
+        std::fs::remove_file(&zip).ok();
+        std::fs::remove_file(&signature).ok();
+        return Err(err);
     }
-    let dest = dir.join("VersoloPDF-update.zip");
-    download(asset, &dest, MAX_PACKAGE)?;
-    if sha256_file(&dest)? != expected {
-        std::fs::remove_file(&dest).ok();
-        return Err(Error::Invalid("checksum mismatch – the download was damaged or changed".into()));
+    Ok(Downloaded { zip, signature, version: release.version.clone() })
+}
+
+/// Removes downloaded packages of this or older versions (at start).
+pub fn clean_old_downloads() {
+    let Some(dir) = updates_dir() else { return };
+    let Ok(entries) = std::fs::read_dir(&dir) else { return };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let version = name.strip_prefix("VersoloPDF-").and_then(|n| n.split('-').next()).unwrap_or("");
+        if !is_newer(version, current_version()) {
+            let path = entry.path();
+            if path.is_dir() {
+                std::fs::remove_dir_all(&path).ok()
+            } else {
+                std::fs::remove_file(&path).ok()
+            };
+        }
     }
-    Ok(dest)
 }
 
 /// The folder in `dir` (or below) that holds `VersoloPDF.exe`.
@@ -625,12 +784,10 @@ fn mac_bundle(dir: &Path) -> Option<PathBuf> {
     std::fs::read_dir(dir).ok()?.flatten().map(|e| e.path().join(MAC_APP)).find(|p| program_exe(p).is_file())
 }
 
-/// Unpacks the package; returns the folder with the new program (Windows)
-/// or the new bundle (macOS).
-pub fn unpack(zip: &Path) -> Result<PathBuf> {
-    let work = zip.parent().ok_or_else(|| Error::Invalid("no folder".into()))?.join("files");
-    std::fs::remove_dir_all(&work).ok();
-    std::fs::create_dir_all(&work).map_err(|e| Error::io(&work, e))?;
+/// Unpacks the package into the new, empty folder `work`; returns the folder
+/// with the new program (Windows) or the new bundle (macOS).
+pub fn unpack(zip: &Path, work: &Path) -> Result<PathBuf> {
+    let work = work.to_path_buf();
     if cfg!(target_os = "macos") {
         // ditto keeps the bundle intact (permissions, signature).
         let output = Command::new("/usr/bin/ditto")
@@ -661,7 +818,9 @@ pub fn unpack(zip: &Path) -> Result<PathBuf> {
     program_folder(&work, 2).ok_or_else(|| Error::Invalid("VersoloPDF.exe not found in the package".into()))
 }
 
-/// Argument with which the new program copies itself into a folder.
+/// Argument with which the installed program installs a downloaded update:
+/// `--install-update <target> <zip> <minisig> <version>`. (Versions up to
+/// 1.4 start the *new* program with only `<target>`; see [`install_main`].)
 pub const INSTALL_ARG: &str = "--install-update";
 /// Argument with which the new version waits until the old one has closed
 /// (followed by its process id).
@@ -867,42 +1026,83 @@ pub fn remove_leftovers(dir: &Path) {
 /// real place is unknown.
 pub const TRANSLOCATED: &str = "macOS startet VersoloPDF aus einer schreibgeschützten Kopie, weil das Programm noch nicht mit dem Finder verschoben wurde. Bitte VersoloPDF beenden, VersoloPDF.app im Finder in den Ordner „Programme“ ziehen, von dort starten und das Update erneut versuchen.";
 
-/// Lets the new program (`new_exe`) copy itself into `target` and waits
-/// until it is done. A write-protected folder (e.g. under "Programme")
-/// makes Windows ask for administrator rights first.
-pub fn run_installer(new_exe: &Path, target: &Path) -> Result<()> {
+/// Lets the *installed* program (the running one) install the downloaded
+/// update into `target` and waits until it is done. A write-protected folder
+/// (e.g. under "Programme") makes the system ask for administrator rights
+/// first. The downloaded program itself is never started here.
+pub fn run_installer(update: &Downloaded, target: &Path) -> Result<()> {
     if crate::mail::no_external() {
         return Err(Error::Invalid("Testbetrieb: keine Installation".into()));
     }
     if target.to_string_lossy().contains("/AppTranslocation/") {
         return Err(Error::Invalid(TRANSLOCATED.into()));
     }
+    let installed =
+        std::env::current_exe().map_err(|e| Error::Invalid(format!("program file unknown: {e}")))?;
+    let args: Vec<std::ffi::OsString> = vec![
+        INSTALL_ARG.into(),
+        target.into(),
+        update.zip.clone().into(),
+        update.signature.clone().into(),
+        update.version.clone().into(),
+    ];
+    log::info!("Update {} wird installiert", update.version);
     let code = if folder_writable(&install_folder(target)) {
-        let mut cmd = Command::new(new_exe);
-        cmd.arg(INSTALL_ARG).arg(target);
+        let mut cmd = Command::new(&installed);
+        cmd.args(&args);
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
             cmd.creation_flags(0x0800_0000);
         }
-        cmd.status().map_err(|e| Error::Invalid(format!("{}: {e}", new_exe.display())))?.code().unwrap_or(1)
+        cmd.status().map_err(|e| Error::Invalid(format!("{}: {e}", installed.display())))?.code().unwrap_or(1)
             as u32
     } else {
-        elevated(new_exe, target)?
+        elevated(&installed, &args)?
     };
     if code == 0 {
         Ok(())
     } else {
         Err(Error::Invalid(
-            "Die neuen Dateien konnten nicht kopiert werden (Details im Fehlerprotokoll).".into(),
+            "Die neue Version konnte nicht installiert werden (Details im Fehlerprotokoll).".into(),
         ))
     }
 }
 
-/// Runs the installer with administrator rights (Windows asks the user).
+/// Quotes one command-line argument for Windows programs.
+#[cfg(windows)]
+fn quote_arg(arg: &std::ffi::OsStr) -> String {
+    let text = arg.to_string_lossy();
+    if !text.is_empty() && !text.contains([' ', '\t', '"']) {
+        return text.into_owned();
+    }
+    let mut out = String::from('"');
+    let mut slashes = 0;
+    for c in text.chars() {
+        match c {
+            '\\' => slashes += 1,
+            '"' => {
+                out.push_str(&"\\".repeat(slashes * 2 + 1));
+                out.push('"');
+                slashes = 0;
+            }
+            _ => {
+                out.push_str(&"\\".repeat(slashes));
+                out.push(c);
+                slashes = 0;
+            }
+        }
+    }
+    out.push_str(&"\\".repeat(slashes * 2));
+    out.push('"');
+    out
+}
+
+/// Runs the installed program with administrator rights (Windows asks the
+/// user).
 #[cfg(windows)]
 #[allow(unsafe_code)]
-fn elevated(new_exe: &Path, target: &Path) -> Result<u32> {
+fn elevated(installed: &Path, args: &[std::ffi::OsString]) -> Result<u32> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::Threading::{GetExitCodeProcess, INFINITE, WaitForSingleObject};
@@ -910,8 +1110,9 @@ fn elevated(new_exe: &Path, target: &Path) -> Result<u32> {
     use windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE;
     let wide = |s: &std::ffi::OsStr| s.encode_wide().chain(std::iter::once(0)).collect::<Vec<u16>>();
     let verb = wide(std::ffi::OsStr::new("runas"));
-    let file = wide(new_exe.as_os_str());
-    let params = wide(std::ffi::OsStr::new(&format!("{INSTALL_ARG} \"{}\"", target.display())));
+    let file = wide(installed.as_os_str());
+    let line: Vec<String> = args.iter().map(|a| quote_arg(a)).collect();
+    let params = wide(std::ffi::OsStr::new(&line.join(" ")));
     // SAFETY: plain C struct, all fields may be zero.
     let mut info: SHELLEXECUTEINFOW = unsafe { std::mem::zeroed() };
     info.cbSize = std::mem::size_of::<SHELLEXECUTEINFOW>() as u32;
@@ -940,19 +1141,28 @@ fn elevated(new_exe: &Path, target: &Path) -> Result<u32> {
     Ok(code)
 }
 
-/// Runs the installer as administrator: macOS asks for an administrator's
-/// password. The paths are passed as arguments, never as script text.
+/// Runs the installed program as administrator: macOS asks for an
+/// administrator's password. The paths are passed as arguments, never as
+/// script text.
 #[cfg(target_os = "macos")]
-fn elevated(new_exe: &Path, target: &Path) -> Result<u32> {
+fn elevated(installed: &Path, args: &[std::ffi::OsString]) -> Result<u32> {
     let output = Command::new("/usr/bin/osascript")
         .args(["-e", "on run argv"])
         .args([
             "-e",
-            "do shell script (quoted form of item 1 of argv) & \" --install-update \" & (quoted form of item 2 of argv) with administrator privileges",
+            "set cmd to quoted form of item 1 of argv",
+            "-e",
+            "repeat with i from 2 to count of argv",
+            "-e",
+            "set cmd to cmd & \" \" & quoted form of item i of argv",
+            "-e",
+            "end repeat",
+            "-e",
+            "do shell script cmd with administrator privileges",
         ])
         .args(["-e", "end run"])
-        .arg(new_exe)
-        .arg(target)
+        .arg(installed)
+        .args(args)
         .output()
         .map_err(|e| Error::Invalid(format!("osascript: {e}")))?;
     if output.status.success() {
@@ -967,8 +1177,145 @@ fn elevated(new_exe: &Path, target: &Path) -> Result<u32> {
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
-fn elevated(_new_exe: &Path, target: &Path) -> Result<u32> {
-    Err(Error::Invalid(format!("{} ist schreibgeschützt.", target.display())))
+fn elevated(_installed: &Path, _args: &[std::ffi::OsString]) -> Result<u32> {
+    Err(Error::Invalid("Der Programmordner ist schreibgeschützt.".into()))
+}
+
+/// Opens the downloaded package so that nobody can change, replace or
+/// delete it while it is used (Windows: others may only read it).
+fn open_locked(path: &Path) -> Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_SHARE_READ: u32 = 1;
+        options.share_mode(FILE_SHARE_READ);
+    }
+    options.open(path).map_err(|e| Error::io(path, e))
+}
+
+/// The folder an update is unpacked into before it replaces the program:
+/// next to the program folder (or bundle), so it has the same protection
+/// (only administrators may write below "Programme"/"Programs").
+fn work_folder(target: &Path) -> Result<PathBuf> {
+    let parent = target.parent().ok_or_else(|| Error::Invalid("no folder".into()))?;
+    let name = target.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    Ok(parent.join(format!(".{name}.update")))
+}
+
+/// What `--install-update` does, in the installed program (possibly with
+/// administrator rights): check the downloaded package once more with the
+/// key built into *this* program, unpack it into a folder only this program
+/// may write to, and replace the program files. Returns the exit code.
+pub fn install_main(args: &[std::ffi::OsString]) -> i32 {
+    let result = match args {
+        // Versions up to 1.4 start the new program: it copies its own files.
+        [target] => legacy_install(Path::new(target)),
+        [target, zip, signature, version] => install_update(
+            Path::new(target),
+            Path::new(zip),
+            Path::new(signature),
+            &version.to_string_lossy(),
+        ),
+        _ => Err(Error::Invalid("wrong arguments".into())),
+    };
+    match result {
+        Ok(count) => {
+            log::info!("Update installiert ({count} Dateien)");
+            0
+        }
+        Err(err) => {
+            log::error!("Update nicht installiert: {err}");
+            1
+        }
+    }
+}
+
+fn legacy_install(target: &Path) -> Result<usize> {
+    let exe = std::env::current_exe().map_err(|e| Error::Invalid(e.to_string()))?;
+    if cfg!(target_os = "macos") {
+        let bundle = exe.ancestors().nth(3).map(PathBuf::from).unwrap_or_default();
+        install_bundle(&bundle, target)
+    } else {
+        let source = exe.parent().map(PathBuf::from).unwrap_or_default();
+        install_files(&source, target)
+    }
+}
+
+/// See [`install_main`].
+pub fn install_update(target: &Path, zip: &Path, signature: &Path, version: &str) -> Result<usize> {
+    if !is_newer(version, current_version()) {
+        return Err(Error::Invalid(format!("{version} is not newer than {}", current_version())));
+    }
+    // The program may only replace itself.
+    let own = install_target().ok_or_else(|| Error::Invalid("program folder unknown".into()))?;
+    let same = |a: &Path, b: &Path| match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    };
+    if !same(&own, target) {
+        return Err(Error::Invalid(format!("{} is not this program's folder", target.display())));
+    }
+    let mut sig_file = open_locked(signature)?;
+    let mut text = String::new();
+    std::io::Read::read_to_string(&mut std::io::Read::take(&mut sig_file, MAX_SIGNATURE), &mut text)
+        .map_err(|e| Error::io(signature, e))?;
+    // Held open (only readable for others) until the files are unpacked.
+    let mut package = open_locked(zip)?;
+    verify_package(&mut package, &text, version)?;
+    let work = work_folder(target)?;
+    std::fs::remove_dir_all(&work).ok();
+    // A fresh folder made by this program; if something else made one in
+    // between, stop.
+    std::fs::create_dir(&work).map_err(|e| Error::io(&work, e))?;
+    let result = (|| {
+        let unpacked = unpack(zip, &work)?;
+        drop(package);
+        if cfg!(target_os = "macos") {
+            install_bundle(&unpacked, target)
+        } else {
+            install_files(&unpacked, target)
+        }
+    })();
+    std::fs::remove_dir_all(&work).ok();
+    let count = result?;
+    #[cfg(windows)]
+    set_installed_version(version);
+    Ok(count)
+}
+
+/// The installer (Inno Setup) shows the version under "Apps"; an update
+/// changes the files only, so the number is set here.
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn set_installed_version(version: &str) {
+    use windows_sys::Win32::System::Registry::{
+        HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_SET_VALUE, REG_SZ, RegCloseKey, RegOpenKeyExW,
+        RegSetValueExW,
+    };
+    let wide = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+    let path = wide(
+        r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{97228796-4F3E-4E55-88D3-641F0C1EADD9}_is1",
+    );
+    let (name, value) = (wide("DisplayVersion"), wide(version));
+    for root in [HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER] {
+        let mut key: HKEY = std::ptr::null_mut();
+        // SAFETY: valid strings and out pointer; the key is closed once.
+        unsafe {
+            if RegOpenKeyExW(root, path.as_ptr(), 0, KEY_SET_VALUE, &mut key) == 0 {
+                RegSetValueExW(
+                    key,
+                    name.as_ptr(),
+                    0,
+                    REG_SZ,
+                    value.as_ptr().cast(),
+                    (value.len() * 2) as u32,
+                );
+                RegCloseKey(key);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1128,16 +1475,22 @@ mod tests {
             r#"{{"tag_name": "v1.4.0", "assets": [
               {{"name": "VersoloPDF-1.4.0-windows-x64.zip", "browser_download_url": "{base}VersoloPDF-1.4.0-windows-x64.zip"}},
               {{"name": "VersoloPDF-1.4.0-windows-x64.zip.sig", "browser_download_url": "{base}VersoloPDF-1.4.0-windows-x64.zip.sig"}},
-              {{"name": "VersoloPDF-1.4.0-macos.zip.sig", "browser_download_url": "{base}VersoloPDF-1.4.0-macos.zip.sig"}}
+              {{"name": "VersoloPDF-1.4.0-macos.zip.sig", "browser_download_url": "{base}VersoloPDF-1.4.0-macos.zip.sig"}},
+              {{"name": "VersoloPDF-1.4.0-windows-x64.zip.minisig", "browser_download_url": "{base}VersoloPDF-1.4.0-windows-x64.zip.minisig"}},
+              {{"name": "VersoloPDF-1.4.0-macos.zip.minisig", "browser_download_url": "{base}VersoloPDF-1.4.0-macos.zip.minisig"}},
+              {{"name": "VersoloPDF-1.3.0-windows-x64.zip.minisig", "browser_download_url": "{base}VersoloPDF-1.3.0-windows-x64.zip.minisig"}}
             ]}}"#
         );
         let r = parse_release(&json).unwrap();
         assert!(r.windows_sig.is_some() && r.macos_sig.is_some());
+        assert!(r.windows_minisig.as_ref().is_some_and(|a| a.name.starts_with("VersoloPDF-1.4.0-")));
+        assert!(r.macos_minisig.is_some());
         // Without a signature nothing is downloaded.
         let mut unsigned = r.clone();
-        unsigned.windows_sig = None;
-        unsigned.macos_sig = None;
-        if package_of(&unsigned).is_some() {
+        unsigned.windows_minisig = None;
+        unsigned.macos_minisig = None;
+        unsigned.version = "999.0.0".into();
+        if package_of(&unsigned).is_some() && key_configured() {
             let err =
                 download_package(&unsigned, &std::env::temp_dir().join("versolopdf-unsigned")).unwrap_err();
             assert!(err.to_string().contains("nicht signiert"), "{err}");
@@ -1145,11 +1498,222 @@ mod tests {
     }
 
     #[test]
+    fn drafts_test_versions_and_odd_tags_are_refused() {
+        let json = |tag: &str, extra: &str| format!(r#"{{"tag_name": "{tag}", {extra} "assets": []}}"#);
+        assert!(parse_release(&json("v2.0.0", "")).is_ok());
+        assert!(parse_release(&json("v2.0.0", r#""draft": true,"#)).is_err());
+        assert!(parse_release(&json("v2.0.0", r#""prerelease": true,"#)).is_err());
+        for tag in ["v2.0", "2.0.0-beta", "2.0.0.1", "v2..0", "neu", "1234567.0.0"] {
+            assert!(parse_release(&json(tag, "")).is_err(), "{tag}");
+        }
+        assert_eq!(strict_version("v1.10.0"), Some((1, 10, 0)));
+        assert!(is_newer("1.10.0", "1.9.9"));
+        assert!(!is_newer("1.10.0-rc1", "1.9.9"));
+        assert!(!is_newer("1.4.0", "1.4.0"));
+    }
+
+    #[test]
+    fn only_this_projects_release_files_are_fetched() {
+        let ok =
+            "https://github.com/MrMarkus42/VersoloPDF/releases/download/v1.5.0/VersoloPDF-1.5.0-macos.zip";
+        assert!(is_release_url(ok));
+        for bad in [
+            "http://github.com/MrMarkus42/VersoloPDF/releases/download/v1.5.0/a.zip",
+            "https://github.com/MrMarkus42/VersoloPDF/releases/download/../../x/a.zip",
+            "https://github.com/MrMarkus42/VersoloPDF/releases/download/v1.5.0/a.zip?x=1",
+            "https://github.com/MrMarkus42/VersoloPDF/releases/download/v1.5.0/a.zip#x",
+            "https://github.com/MrMarkus42/VersoloPDF/releases/download/v1.5.0/@evil.org/a.zip",
+            "https://github.com/MrMarkus42/VersoloPDF-evil/releases/download/v1.5.0/a.zip",
+            "https://github.com/Other/VersoloPDF/releases/download/v1.5.0/a.zip",
+            "https://evil.org/MrMarkus42/VersoloPDF/releases/download/v1.5.0/a.zip",
+            "https://github.com/MrMarkus42/VersoloPDF/releases/download/v1.5.0/a b.zip",
+        ] {
+            assert!(!is_release_url(bad), "{bad}");
+        }
+    }
+
+    #[test]
     fn hidden_read_only_copy_is_not_written() {
         let hidden = Path::new("/private/var/folders/x/T/AppTranslocation/ABC/d/VersoloPDF.app");
-        let err = run_installer(Path::new("/tmp/neu"), hidden).unwrap_err().to_string();
+        let update = Downloaded {
+            zip: PathBuf::from("/tmp/neu.zip"),
+            signature: PathBuf::from("/tmp/neu.zip.minisig"),
+            version: "99.0.0".into(),
+        };
+        let err = run_installer(&update, hidden).unwrap_err().to_string();
         // (in tests VERSOLOPDF_NO_EXTERNAL may stop it first)
         assert!(err.contains("Programme") || err.contains("Testbetrieb"), "{err}");
+    }
+
+    #[test]
+    fn install_refuses_old_versions_and_other_folders() {
+        let dir = tempfile::tempdir().unwrap();
+        let (zip, sig) = (dir.path().join("p.zip"), dir.path().join("p.zip.minisig"));
+        std::fs::write(&zip, b"PK").unwrap();
+        std::fs::write(&sig, b"x").unwrap();
+        // Not newer than this program.
+        let err = install_update(dir.path(), &zip, &sig, current_version()).unwrap_err().to_string();
+        assert!(err.contains("not newer"), "{err}");
+        // Only the program's own folder (a test run has none, or another one).
+        let err = install_update(dir.path(), &zip, &sig, "999.0.0").unwrap_err().to_string();
+        assert!(err.contains("folder"), "{err}");
+        // Wrong arguments.
+        assert_eq!(install_main(&["a".into(), "b".into()]), 1);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn arguments_are_quoted_for_windows() {
+        let q = |s: &str| quote_arg(std::ffi::OsStr::new(s));
+        assert_eq!(q(r"C:\Programme\VersoloPDF"), r"C:\Programme\VersoloPDF");
+        assert_eq!(q(r"C:\Program Files\VersoloPDF"), r#""C:\Program Files\VersoloPDF""#);
+        assert_eq!(q(r"C:\a b\"), r#""C:\a b\\""#);
+        assert_eq!(q(r#"a"b"#), r#""a\"b""#);
+        assert_eq!(q(""), r#""""#);
+    }
+
+    // -----------------------------------------------------------------------
+    // minisign signatures, with test keys made here in minisign's format.
+
+    fn b64(data: &[u8]) -> String {
+        const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut s = String::new();
+        for c in data.chunks(3) {
+            let n =
+                (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+            for i in 0..4 {
+                s.push(if i <= c.len() { A[(n >> (18 - 6 * i) & 63) as usize] as char } else { '=' });
+            }
+        }
+        s
+    }
+
+    struct TestKey {
+        sk: ed25519_dalek::SigningKey,
+        id: [u8; 8],
+    }
+
+    impl TestKey {
+        fn new(seed: u8) -> TestKey {
+            TestKey {
+                sk: ed25519_dalek::SigningKey::from_bytes(&[seed; 32]),
+                id: [seed, 1, 2, 3, 4, 5, 6, 7],
+            }
+        }
+
+        fn public(&self) -> String {
+            let mut b = b"Ed".to_vec();
+            b.extend_from_slice(&self.id);
+            b.extend_from_slice(&self.sk.verifying_key().to_bytes());
+            format!("untrusted comment: minisign public key\n{}\n", b64(&b))
+        }
+
+        /// A signature like `minisign -S` makes; `prehashed: false` is the
+        /// old form.
+        fn sign_as(&self, data: &[u8], trusted: &str, prehashed: bool) -> String {
+            use blake2::Digest;
+            use ed25519_dalek::Signer;
+            let sig = if prehashed {
+                self.sk.sign(&blake2::Blake2b512::digest(data)).to_bytes()
+            } else {
+                self.sk.sign(data).to_bytes()
+            };
+            let mut line = if prehashed { b"ED".to_vec() } else { b"Ed".to_vec() };
+            line.extend_from_slice(&self.id);
+            line.extend_from_slice(&sig);
+            let mut global = sig.to_vec();
+            global.extend_from_slice(trusted.as_bytes());
+            let gsig = self.sk.sign(&global).to_bytes();
+            format!(
+                "untrusted comment: signature\n{}\ntrusted comment: {trusted}\n{}\n",
+                b64(&line),
+                b64(&gsig)
+            )
+        }
+
+        fn sign(&self, data: &[u8], trusted: &str) -> String {
+            self.sign_as(data, trusted, true)
+        }
+    }
+
+    fn check(key: &TestKey, data: &[u8], sig: &str, version: &str) -> Result<()> {
+        verify_minisign(&key.public(), &mut &data[..], sig, "versolopdf-windows", version)
+    }
+
+    #[test]
+    fn a_good_signature_is_accepted() {
+        let k = TestKey::new(7);
+        let data = b"PK pretend package";
+        let sig = k.sign(data, "versolopdf-windows 1.5.0");
+        check(&k, data, &sig, "1.5.0").unwrap();
+        // Windows line endings in the .minisig file don't matter.
+        check(&k, data, &sig.replace('\n', "\r\n"), "1.5.0").unwrap();
+    }
+
+    #[test]
+    fn a_changed_package_is_refused() {
+        let k = TestKey::new(7);
+        let sig = k.sign(b"PK pretend package", "versolopdf-windows 1.5.0");
+        assert!(check(&k, b"PK pretend package!", &sig, "1.5.0").is_err());
+        assert!(check(&k, b"", &sig, "1.5.0").is_err());
+    }
+
+    #[test]
+    fn a_signature_of_another_key_is_refused() {
+        let mine = TestKey::new(7);
+        let data = b"PK evil package";
+        let attacker = TestKey::new(9);
+        assert!(check(&mine, data, &attacker.sign(data, "versolopdf-windows 1.5.0"), "1.5.0").is_err());
+        // The same key id with another key: still refused.
+        let forged = TestKey { sk: ed25519_dalek::SigningKey::from_bytes(&[9; 32]), id: mine.id };
+        assert!(check(&mine, data, &forged.sign(data, "versolopdf-windows 1.5.0"), "1.5.0").is_err());
+    }
+
+    #[test]
+    fn an_old_or_other_package_cannot_pose_as_the_update() {
+        let k = TestKey::new(7);
+        let data = b"PK genuine but old package";
+        // A genuinely signed 1.4.0 package offered as 1.5.0:
+        assert!(check(&k, data, &k.sign(data, "versolopdf-windows 1.4.0"), "1.5.0").is_err());
+        // The macOS package offered for Windows:
+        assert!(check(&k, data, &k.sign(data, "versolopdf-macos 1.5.0"), "1.5.0").is_err());
+        // The signed comment changed afterwards:
+        let changed = k.sign(data, "versolopdf-windows 1.4.0").replace(
+            "trusted comment: versolopdf-windows 1.4.0",
+            "trusted comment: versolopdf-windows 1.5.0",
+        );
+        assert!(check(&k, data, &changed, "1.5.0").is_err());
+    }
+
+    #[test]
+    fn the_old_unhashed_form_is_refused() {
+        let k = TestKey::new(7);
+        let data = b"PK package";
+        let sig = k.sign_as(data, "versolopdf-windows 1.5.0", false);
+        assert!(check(&k, data, &sig, "1.5.0").is_err());
+    }
+
+    #[test]
+    fn broken_signatures_and_keys_are_refused() {
+        let k = TestKey::new(7);
+        for bad in ["", "garbage", "untrusted comment: x\n!!!\ntrusted comment: y\n!!!\n"] {
+            assert!(check(&k, b"x", bad, "1.5.0").is_err(), "{bad:?}");
+        }
+        let sig = k.sign(b"x", "versolopdf-windows 1.5.0");
+        for key in ["", "untrusted comment: x\nNOT-CONFIGURED\n", "untrusted comment: x\nRWQ=\n"] {
+            assert!(verify_minisign(key, &mut &b"x"[..], &sig, "versolopdf-windows", "1.5.0").is_err());
+        }
+    }
+
+    #[test]
+    fn the_built_in_minisign_key_is_valid_or_missing() {
+        // Until the key is made (scripts/new-update-key.ps1) the program
+        // simply has no updates; a real key must be readable.
+        if !UPDATE_KEY.contains("NOT-CONFIGURED") {
+            assert!(key_configured(), "keys/update-key.pub is not a minisign public key");
+        } else {
+            assert!(!key_configured());
+        }
     }
 
     #[test]

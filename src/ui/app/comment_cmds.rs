@@ -208,7 +208,7 @@ fn preset_button(ui: &mut Ui, p: &Preset, label: &str, selected: bool) -> bool {
     let galley = ui.painter().layout_job(job);
     let height = (32.0 + galley.size().y + 2.0).max(50.0);
     let (rect, resp) = ui.allocate_exact_size(vec2(width, height), egui::Sense::click());
-    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, label));
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, selected, label));
     let painter = ui.painter();
     if selected || resp.hovered() {
         painter.rect_filled(
@@ -609,7 +609,7 @@ impl VersoloPdfApp {
                 if ui.button(name).clicked() {
                     ctx.move_to_top(egui::LayerId::new(
                         egui::Order::Middle,
-                        egui::Id::new(("calculator", id)),
+                        egui::Id::unique(("calculator", id)),
                     ));
                     ui.close();
                 }
@@ -624,7 +624,7 @@ impl VersoloPdfApp {
         }
     }
 
-    /// "Anzeigen ▾": which comments are shown, and their pop-ups.
+    /// "Anzeigen ⏷": which comments are shown, and their pop-ups.
     pub(super) fn show_menu(&mut self, ui: &mut Ui, ctx: &Context, big: bool) {
         let de = self.cm_de();
         let label = if de { "Anzeigen" } else { "Show" };

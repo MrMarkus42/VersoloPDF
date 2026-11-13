@@ -5,8 +5,8 @@
 use std::path::{Path, PathBuf};
 
 use egui::{
-    Align2, Color32, FontId, Frame, Margin, Panel, Rect, RichText, Sense, Stroke, Ui, Vec2, WidgetInfo,
-    WidgetType, vec2,
+    Align2, Color32, FontId, Frame, Margin, Panel, Rect, RichText, Role, Sense, Stroke, Ui, Vec2, WidgetInfo,
+    vec2,
 };
 
 use super::commands::Cmd;
@@ -244,7 +244,7 @@ const COLUMN_DISABLED: Color32 = Color32::from_rgb(232, 160, 165);
 fn column_row(ui: &mut Ui, label: &str, enabled: bool, selected: bool) -> egui::Response {
     let sense = if enabled { Sense::click() } else { Sense::hover() };
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 23.0), sense);
-    response.widget_info(|| WidgetInfo::selected(WidgetType::Button, enabled, selected, label));
+    response.widget_info(|| WidgetInfo::selected(Role::Button, enabled, selected, label));
     if ui.is_rect_visible(rect) {
         if selected {
             ui.painter().rect_filled(rect, 0.0, Color32::from_black_alpha(70));
@@ -266,7 +266,7 @@ fn column_row(ui: &mut Ui, label: &str, enabled: bool, selected: bool) -> egui::
 fn list_row(ui: &mut Ui, icon: Icon, label: &str, enabled: bool, selected: bool) -> egui::Response {
     let sense = if enabled { Sense::click() } else { Sense::hover() };
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 36.0), sense);
-    response.widget_info(|| WidgetInfo::selected(WidgetType::Button, enabled, selected, label));
+    response.widget_info(|| WidgetInfo::selected(Role::Button, enabled, selected, label));
     if ui.is_rect_visible(rect) {
         let visuals = ui.visuals();
         if selected {
@@ -667,7 +667,7 @@ impl VersoloPdfApp {
     }
 
     /// Opens the documents of a session (missing files are skipped).
-    fn open_session(&mut self, session: &Session) {
+    pub(super) fn open_session(&mut self, session: &Session) {
         let files: Vec<PathBuf> = session.files.iter().filter(|p| p.exists()).cloned().collect();
         let missing = session.files.len() - files.len();
         self.backstage = None;

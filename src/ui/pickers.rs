@@ -162,52 +162,56 @@ impl PageRange {
             format!("{title}: {selected} of {page_count} pages selected")
         };
         section(ui, header, |ui| {
-            egui::Grid::new(ui.id().with("range")).num_columns(2).spacing(vec2(8.0, 6.0)).show(ui, |ui| {
-                ui.label(if de { "Seiten" } else { "Pages" });
-                ui.horizontal(|ui| {
-                    let options: Vec<(RangeMode, String)> = modes
-                        .iter()
-                        .map(|m| match m {
-                            RangeMode::All => (*m, if de { "Alle" } else { "All" }.to_string()),
-                            RangeMode::Current => {
-                                (*m, format!("{}: {}", if de { "Aktuell" } else { "Current" }, current + 1))
-                            }
-                            RangeMode::Custom => (*m, if de { "Bereich" } else { "Range" }.to_string()),
-                        })
-                        .collect();
-                    if segmented(ui, &mut self.mode, &options)
-                        && self.mode == RangeMode::Custom
-                        && self.text.is_empty()
-                    {
-                        self.text = (current + 1).to_string();
-                    }
-                    if self.mode == RangeMode::Custom {
-                        let valid = parse_pages(&self.text, page_count).is_some();
-                        let edit = egui::TextEdit::singleline(&mut self.text)
-                            .desired_width(120.0)
-                            .hint_text("1-3, 7, 10-")
-                            .text_color_opt((!valid).then_some(Color32::from_rgb(200, 40, 40)));
-                        ui.add(edit).on_hover_text(if de {
-                            "Seitenzahlen und Bereiche, durch Komma getrennt, z. B. 1-3, 7, 10-"
-                        } else {
-                            "Page numbers and ranges separated by commas, e.g. 1-3, 7, 10-"
-                        });
-                        ui.label(format!("/{page_count}"));
-                    }
-                });
-                ui.end_row();
-                ui.label(if de { "Teilmenge" } else { "Subset" });
-                segmented(
-                    ui,
-                    &mut self.subset,
-                    &[
-                        (Subset::All, if de { "Alle" } else { "All" }.into()),
-                        (Subset::Odd, if de { "Ungerade" } else { "Odd" }.into()),
-                        (Subset::Even, if de { "Gerade" } else { "Even" }.into()),
-                    ],
-                );
-                ui.end_row();
-            });
+            egui::Grid::new(ui.scope_id().with("range")).num_columns(2).spacing(vec2(8.0, 6.0)).show(
+                ui,
+                |ui| {
+                    ui.label(if de { "Seiten" } else { "Pages" });
+                    ui.horizontal(|ui| {
+                        let options: Vec<(RangeMode, String)> = modes
+                            .iter()
+                            .map(|m| match m {
+                                RangeMode::All => (*m, if de { "Alle" } else { "All" }.to_string()),
+                                RangeMode::Current => (
+                                    *m,
+                                    format!("{}: {}", if de { "Aktuell" } else { "Current" }, current + 1),
+                                ),
+                                RangeMode::Custom => (*m, if de { "Bereich" } else { "Range" }.to_string()),
+                            })
+                            .collect();
+                        if segmented(ui, &mut self.mode, &options)
+                            && self.mode == RangeMode::Custom
+                            && self.text.is_empty()
+                        {
+                            self.text = (current + 1).to_string();
+                        }
+                        if self.mode == RangeMode::Custom {
+                            let valid = parse_pages(&self.text, page_count).is_some();
+                            let edit = egui::TextEdit::singleline(&mut self.text)
+                                .desired_width(120.0)
+                                .hint_text("1-3, 7, 10-")
+                                .text_color_opt((!valid).then_some(Color32::from_rgb(200, 40, 40)));
+                            ui.add(edit).on_hover_text(if de {
+                                "Seitenzahlen und Bereiche, durch Komma getrennt, z. B. 1-3, 7, 10-"
+                            } else {
+                                "Page numbers and ranges separated by commas, e.g. 1-3, 7, 10-"
+                            });
+                            ui.label(format!("/{page_count}"));
+                        }
+                    });
+                    ui.end_row();
+                    ui.label(if de { "Teilmenge" } else { "Subset" });
+                    segmented(
+                        ui,
+                        &mut self.subset,
+                        &[
+                            (Subset::All, if de { "Alle" } else { "All" }.into()),
+                            (Subset::Odd, if de { "Ungerade" } else { "Odd" }.into()),
+                            (Subset::Even, if de { "Gerade" } else { "Even" }.into()),
+                        ],
+                    );
+                    ui.end_row();
+                },
+            );
         });
     }
 }
@@ -265,41 +269,46 @@ impl Target {
 
     pub fn ui(&mut self, ui: &mut Ui, de: bool, page_count: usize, current: usize) {
         section(ui, if de { "Ziel" } else { "Target" }, |ui| {
-            egui::Grid::new(ui.id().with("target")).num_columns(2).spacing(vec2(8.0, 6.0)).show(ui, |ui| {
-                ui.label(if de { "Bereich" } else { "Position" });
-                segmented(
-                    ui,
-                    &mut self.after,
-                    &[
-                        (false, if de { "Vor" } else { "Before" }.into()),
-                        (true, if de { "Nach" } else { "After" }.into()),
-                    ],
-                );
-                ui.end_row();
-                ui.label(if de { "Seite" } else { "Page" });
-                ui.horizontal(|ui| {
+            egui::Grid::new(ui.scope_id().with("target")).num_columns(2).spacing(vec2(8.0, 6.0)).show(
+                ui,
+                |ui| {
+                    ui.label(if de { "Bereich" } else { "Position" });
                     segmented(
                         ui,
-                        &mut self.page,
+                        &mut self.after,
                         &[
-                            (TargetPage::First, if de { "Erste" } else { "First" }.into()),
-                            (
-                                TargetPage::Current,
-                                format!("{}: {}", if de { "Aktuell" } else { "Current" }, current + 1),
-                            ),
-                            (
-                                TargetPage::Last,
-                                format!("{}: {}", if de { "Letzte" } else { "Last" }, page_count),
-                            ),
-                            (TargetPage::Custom, if de { "Eigene" } else { "Custom" }.into()),
+                            (false, if de { "Vor" } else { "Before" }.into()),
+                            (true, if de { "Nach" } else { "After" }.into()),
                         ],
                     );
-                    if self.page == TargetPage::Custom {
-                        ui.add(egui::DragValue::new(&mut self.custom).range(1..=page_count.max(1) as u32));
-                    }
-                });
-                ui.end_row();
-            });
+                    ui.end_row();
+                    ui.label(if de { "Seite" } else { "Page" });
+                    ui.horizontal(|ui| {
+                        segmented(
+                            ui,
+                            &mut self.page,
+                            &[
+                                (TargetPage::First, if de { "Erste" } else { "First" }.into()),
+                                (
+                                    TargetPage::Current,
+                                    format!("{}: {}", if de { "Aktuell" } else { "Current" }, current + 1),
+                                ),
+                                (
+                                    TargetPage::Last,
+                                    format!("{}: {}", if de { "Letzte" } else { "Last" }, page_count),
+                                ),
+                                (TargetPage::Custom, if de { "Eigene" } else { "Custom" }.into()),
+                            ],
+                        );
+                        if self.page == TargetPage::Custom {
+                            ui.add(
+                                egui::DragValue::new(&mut self.custom).range(1..=page_count.max(1) as u32),
+                            );
+                        }
+                    });
+                    ui.end_row();
+                },
+            );
         });
     }
 }
@@ -345,26 +354,26 @@ impl Unit {
     }
 }
 
-/// "Einheit: mm ▾".
+/// "Einheit: mm ⏷".
 pub fn unit_combo(ui: &mut Ui, de: bool, unit: &mut Unit) {
     ui.horizontal(|ui| {
         ui.label(RichText::new(if de { "Einheit:" } else { "Unit:" }).weak());
-        egui::ComboBox::from_id_salt(ui.id().with("unit")).selected_text(unit.suffix()).width(50.0).show_ui(
-            ui,
-            |ui| {
+        egui::ComboBox::from_id_salt(ui.scope_id().with("unit"))
+            .selected_text(unit.suffix())
+            .width(50.0)
+            .show_ui(ui, |ui| {
                 for u in Unit::ALL {
                     ui.selectable_value(unit, u, u.suffix());
                 }
-            },
-        );
+            });
     });
 }
 
-/// "Einheit: mm ▾" at the right edge of a row.
+/// "Einheit: mm ⏷" at the right edge of a row.
 pub fn unit_combo_right(ui: &mut Ui, de: bool, unit: &mut Unit) {
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         // Right to left: the combo first, then its label to the left of it.
-        egui::ComboBox::from_id_salt(ui.id().with("unit-r"))
+        egui::ComboBox::from_id_salt(ui.scope_id().with("unit-r"))
             .selected_text(unit.suffix())
             .width(50.0)
             .show_ui(ui, |ui| {
@@ -400,7 +409,7 @@ pub fn length(
 }
 
 // ---------------------------------------------------------------------------
-// Presets ("Einstellungen: <Benutzerdefiniert> ▾")
+// Presets ("Einstellungen: <Benutzerdefiniert> ⏷")
 
 /// Stored presets: (dialog key, name, serialized form).
 pub type PresetStore = Vec<(String, String, String)>;

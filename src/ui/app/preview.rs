@@ -278,7 +278,7 @@ fn zoom_buttons(
         x += w + 2.0;
         let resp = ui.interact(
             r,
-            ui.id().with(("preview-zoom", bg.min.x as i32, bg.min.y as i32, i)),
+            ui.scope_id().with(("preview-zoom", bg.min.x as i32, bg.min.y as i32, i)),
             Sense::click(),
         );
         let fill =

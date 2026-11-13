@@ -199,7 +199,7 @@ pub(super) fn scope_ui(ui: &mut Ui, de: bool, s: &mut ScopeState, has_selection:
         } else {
             tr(de, "Alle Lesezeichen", "All bookmarks")
         };
-        egui::ComboBox::from_id_salt(ui.id().with("scope")).selected_text(shown).width(220.0).show_ui(
+        egui::ComboBox::from_id_salt(ui.scope_id().with("scope")).selected_text(shown).width(220.0).show_ui(
             ui,
             |ui| {
                 ui.selectable_value(&mut s.selected, false, tr(de, "Alle Lesezeichen", "All bookmarks"));
@@ -233,7 +233,7 @@ pub(super) fn scope_ui(ui: &mut Ui, de: bool, s: &mut ScopeState, has_selection:
 /// "[…]": appends a placeholder to `text`.
 pub(super) fn placeholder_button(ui: &mut Ui, de: bool, salt: &str, text: &mut String) {
     let resp = ui.button("[…]").on_hover_text(tr(de, "Platzhalter einfügen", "Insert placeholder"));
-    egui::Popup::menu(&resp).id(ui.id().with(("ph", salt))).show(|ui| {
+    egui::Popup::menu(&resp).id(ui.scope_id().with(("ph", salt))).show(|ui| {
         ui.set_min_width(220.0);
         for (ph, g, e) in PLACEHOLDERS {
             if ui.button(if de { g } else { e }).on_hover_text(ph).clicked() {
@@ -247,7 +247,7 @@ pub(super) fn placeholder_button(ui: &mut Ui, de: bool, salt: &str, text: &mut S
 /// Zoom list with a field for any percentage.
 pub(super) fn zoom_ui(ui: &mut Ui, de: bool, salt: &str, zoom: &mut Zoom, text: &mut String) {
     ui.horizontal(|ui| {
-        egui::ComboBox::from_id_salt(ui.id().with(("zoom", salt)))
+        egui::ComboBox::from_id_salt(ui.scope_id().with(("zoom", salt)))
             .selected_text(zoom.label(de))
             .width(210.0)
             .show_ui(ui, |ui| {
@@ -288,7 +288,7 @@ pub(super) fn appearance_ui(ui: &mut Ui, de: bool, look: &mut Appearance, zoom_t
         "Legen Sie das Aussehen der erstellten Lesezeichen fest:",
         "Set the look of the new bookmarks:",
     ));
-    egui::Grid::new(ui.id().with("look")).num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
+    egui::Grid::new(ui.scope_id().with("look")).num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
         ui.label(tr(de, "Textfarbe:", "Text colour:"));
         color_button(ui, &mut look.color);
         ui.end_row();
@@ -300,17 +300,17 @@ pub(super) fn appearance_ui(ui: &mut Ui, de: bool, look: &mut Appearance, zoom_t
             ((true, true), tr(de, "Fett und Kursiv", "Bold and italic")),
         ];
         let current = styles.iter().find(|(s, _)| *s == (look.bold, look.italic)).map_or("", |(_, l)| l);
-        egui::ComboBox::from_id_salt(ui.id().with("style")).selected_text(current).width(210.0).show_ui(
-            ui,
-            |ui| {
+        egui::ComboBox::from_id_salt(ui.scope_id().with("style"))
+            .selected_text(current)
+            .width(210.0)
+            .show_ui(ui, |ui| {
                 for ((b, i), label) in styles {
                     if ui.selectable_label((look.bold, look.italic) == (b, i), label).clicked() {
                         look.bold = b;
                         look.italic = i;
                     }
                 }
-            },
-        );
+            });
         ui.end_row();
         ui.label(tr(de, "Vergrößerung:", "Zoom:"));
         zoom_ui(ui, de, "look", &mut look.zoom, zoom_text);
@@ -355,7 +355,7 @@ pub(super) fn format_ui(ui: &mut Ui, de: bool, f: &mut FormatEdit) {
         );
         ui.add_enabled_ui(f.replace_on, |ui| replace_fields(ui, de, &mut f.replace, "fmt"));
     });
-    egui::Grid::new(ui.id().with("fmt")).num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
+    egui::Grid::new(ui.scope_id().with("fmt")).num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
         ui.checkbox(&mut f.prefix_on, tr(de, "Text voranstellen:", "Prefix:"));
         ui.horizontal(|ui| {
             ui.add_enabled(f.prefix_on, egui::TextEdit::singleline(&mut f.prefix).desired_width(200.0));
@@ -375,14 +375,13 @@ pub(super) fn format_ui(ui: &mut Ui, de: bool, f: &mut FormatEdit) {
                 Numbering::Add => tr(de, "Hinzufügen", "Add"),
                 Numbering::Remove => tr(de, "Löschen", "Remove"),
             };
-            egui::ComboBox::from_id_salt(ui.id().with("num")).selected_text(label(f.numbering)).show_ui(
-                ui,
-                |ui| {
+            egui::ComboBox::from_id_salt(ui.scope_id().with("num"))
+                .selected_text(label(f.numbering))
+                .show_ui(ui, |ui| {
                     for n in [Numbering::Keep, Numbering::Add, Numbering::Remove] {
                         ui.selectable_value(&mut f.numbering, n, label(n));
                     }
-                },
-            );
+                });
             ui.label(tr(de, "Benutze:", "Use:"));
             ui.add_enabled_ui(f.numbering == Numbering::Add, |ui| {
                 number_style_combo(ui, "fmtstyle", &mut f.style)
@@ -407,7 +406,7 @@ pub(super) fn format_ui(ui: &mut Ui, de: bool, f: &mut FormatEdit) {
 }
 
 pub(super) fn number_style_combo(ui: &mut Ui, salt: &str, style: &mut NumberStyle) {
-    egui::ComboBox::from_id_salt(ui.id().with(salt)).selected_text(style.label()).show_ui(ui, |ui| {
+    egui::ComboBox::from_id_salt(ui.scope_id().with(salt)).selected_text(style.label()).show_ui(ui, |ui| {
         for s in NumberStyle::ALL {
             ui.selectable_value(style, s, s.label());
         }
@@ -416,7 +415,7 @@ pub(super) fn number_style_combo(ui: &mut Ui, salt: &str, style: &mut NumberStyl
 
 /// Search, replace and their options.
 pub(super) fn replace_fields(ui: &mut Ui, de: bool, fr: &mut FindReplace, salt: &str) {
-    egui::Grid::new(ui.id().with(("fr", salt))).num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
+    egui::Grid::new(ui.scope_id().with(("fr", salt))).num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
         ui.label(tr(de, "Suchen nach:", "Find:"));
         ui.add(egui::TextEdit::singleline(&mut fr.find).desired_width(260.0));
         ui.end_row();

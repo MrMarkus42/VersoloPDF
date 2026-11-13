@@ -495,7 +495,7 @@ enum SpellAction {
     Add,
 }
 
-/// "Anmerkungen hinzufügen ▾".
+/// "Anmerkungen hinzufügen ⏷".
 const ADD_TOOLS: [Tool; 16] = [
     Tool::Note,
     Tool::Typewriter,

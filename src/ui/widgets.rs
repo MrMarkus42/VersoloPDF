@@ -1,8 +1,8 @@
 //! Ribbon style buttons and small helpers.
 
 use egui::{
-    Align2, Color32, FontId, Rect, Response, Sense, Stroke, StrokeKind, TextWrapMode, Ui, Vec2, WidgetInfo,
-    WidgetType, vec2,
+    Align2, Color32, FontId, Rect, Response, Role, Sense, Stroke, StrokeKind, TextWrapMode, Ui, Vec2,
+    WidgetInfo, vec2,
 };
 
 use crate::model::Rgba;
@@ -60,11 +60,11 @@ impl RibbonFit {
 }
 
 fn fit_id() -> egui::Id {
-    egui::Id::new("versolopdf-ribbon-fit")
+    egui::Id::unique("versolopdf-ribbon-fit")
 }
 
 fn too_tall_id() -> egui::Id {
-    egui::Id::new("versolopdf-ribbon-too-tall")
+    egui::Id::unique("versolopdf-ribbon-too-tall")
 }
 
 /// Caption and height of the last ribbon group whose contents were taller
@@ -79,7 +79,7 @@ pub fn reset_ribbon_group_too_tall(ctx: &egui::Context) {
 }
 
 fn command_ran_id() -> egui::Id {
-    egui::Id::new("versolopdf-ribbon-command-ran")
+    egui::Id::unique("versolopdf-ribbon-command-ran")
 }
 
 pub fn ribbon_fit(ctx: &egui::Context) -> RibbonFit {
@@ -174,7 +174,7 @@ pub fn big_button(ui: &mut Ui, icon: Icon, label: &str, selected: bool, enabled:
     let size = vec2(width, (31.0 + galley.size().y + 3.0).max(56.0));
     let sense = if enabled { Sense::click() } else { Sense::hover() };
     let (rect, response) = ui.allocate_exact_size(size, sense);
-    response.widget_info(|| WidgetInfo::selected(WidgetType::Button, enabled, selected, label));
+    response.widget_info(|| WidgetInfo::selected(Role::Button, enabled, selected, label));
     if ui.is_rect_visible(rect) {
         button_frame(ui, rect, &response, selected);
         if selected {
@@ -201,7 +201,7 @@ fn paint_chevron(ui: &Ui, center: egui::Pos2, color: Color32) {
     );
 }
 
-/// Large ribbon button that opens a drop-down menu (label with ▾ below).
+/// Large ribbon button that opens a drop-down menu (label with ⏷ below).
 pub fn big_menu_button(ui: &mut Ui, icon: Icon, label: &str, enabled: bool, open: bool) -> Response {
     note_icon(ui, icon);
     let text_color = if enabled { ui.visuals().text_color() } else { ui.visuals().weak_text_color() };
@@ -210,7 +210,7 @@ pub fn big_menu_button(ui: &mut Ui, icon: Icon, label: &str, enabled: bool, open
     let size = vec2(width, (30.0 + galley.size().y + 8.0).max(58.0));
     let sense = if enabled { Sense::click() } else { Sense::hover() };
     let (rect, response) = ui.allocate_exact_size(size, sense);
-    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, label));
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, label));
     if ui.is_rect_visible(rect) {
         button_frame(ui, rect, &response, open);
         let icon_rect = Rect::from_center_size(rect.center_top() + vec2(0.0, 15.0), Vec2::splat(24.0));
@@ -231,7 +231,7 @@ pub fn big_menu_button(ui: &mut Ui, icon: Icon, label: &str, enabled: bool, open
     response
 }
 
-/// Small ribbon button with ▾ that opens a drop-down menu.
+/// Small ribbon button with ⏷ that opens a drop-down menu.
 pub fn small_menu_button(ui: &mut Ui, icon: Icon, label: &str, enabled: bool, open: bool) -> Response {
     note_icon(ui, icon);
     let shrunk = ribbon_fit(ui.ctx()).shrunk();
@@ -240,7 +240,7 @@ pub fn small_menu_button(ui: &mut Ui, icon: Icon, label: &str, enabled: bool, op
     let size = if shrunk { vec2(34.0, 20.0) } else { vec2(text_w + 42.0, 20.0) };
     let sense = if enabled { Sense::click() } else { Sense::hover() };
     let (rect, response) = ui.allocate_exact_size(size, sense);
-    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, label));
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, label));
     if ui.is_rect_visible(rect) {
         button_frame(ui, rect, &response, open);
         let mut painter = ui.painter_at(rect);
@@ -282,7 +282,7 @@ pub fn menu_item(
     let width = (text_w + sc_w + 52.0).max(ui.available_width().min(330.0)).max(220.0);
     let sense = if enabled { Sense::click() } else { Sense::hover() };
     let (rect, response) = ui.allocate_exact_size(vec2(width, 26.0), sense);
-    response.widget_info(|| WidgetInfo::selected(WidgetType::Button, enabled, checked, label));
+    response.widget_info(|| WidgetInfo::selected(Role::Button, enabled, checked, label));
     if ui.is_rect_visible(rect) {
         if enabled && response.hovered() {
             ui.painter().rect_filled(rect, 2.0, theme::ACCENT.gamma_multiply(0.18));
@@ -340,7 +340,7 @@ pub fn small_button(ui: &mut Ui, icon: Icon, label: &str, selected: bool, enable
     let size = if shrunk { vec2(24.0, 20.0) } else { vec2(text_w + 30.0, 20.0) };
     let sense = if enabled { Sense::click() } else { Sense::hover() };
     let (rect, response) = ui.allocate_exact_size(size, sense);
-    response.widget_info(|| WidgetInfo::selected(WidgetType::Button, enabled, selected, label));
+    response.widget_info(|| WidgetInfo::selected(Role::Button, enabled, selected, label));
     if ui.is_rect_visible(rect) {
         button_frame(ui, rect, &response, selected);
         let icon_rect = Rect::from_min_size(rect.min + vec2(3.0, 2.0), Vec2::splat(16.0));
@@ -377,7 +377,7 @@ pub fn icon_button_named(
     let size = if ribbon_fit(ui.ctx()).in_ribbon { vec2(24.0, 20.0) } else { Vec2::splat(24.0) };
     let sense = if enabled { Sense::click() } else { Sense::hover() };
     let (rect, response) = ui.allocate_exact_size(size, sense);
-    response.widget_info(|| WidgetInfo::selected(WidgetType::Button, enabled, selected, name));
+    response.widget_info(|| WidgetInfo::selected(Role::Button, enabled, selected, name));
     if ui.is_rect_visible(rect) {
         button_frame(ui, rect, &response, selected);
         let painter = ui.painter_at(rect);
@@ -403,8 +403,7 @@ pub fn ribbon_tab(ui: &mut Ui, text: egui::RichText, selected: bool) -> Response
     );
     let (rect, response) = ui.allocate_exact_size(galley.size() + 2.0 * pad, Sense::click());
     let enabled = ui.is_enabled();
-    response
-        .widget_info(|| WidgetInfo::selected(WidgetType::SelectableLabel, enabled, selected, galley.text()));
+    response.widget_info(|| WidgetInfo::selected(Role::Button, enabled, selected, galley.text()));
     if ui.is_rect_visible(rect) {
         let visuals = ui.style().interact_selectable(&response, selected);
         let radius = ui.visuals().widgets.hovered.corner_radius;
@@ -427,7 +426,7 @@ pub fn group(ui: &mut Ui, caption: &str, add: impl FnOnce(&mut Ui)) {
     let mut fit = ribbon_fit(&ctx);
     let index = fit.next_group;
     fit.next_group += 1;
-    let icon_id = egui::Id::new(("versolopdf-ribbon-group-icon", caption));
+    let icon_id = egui::Id::unique(("versolopdf-ribbon-group-icon", caption));
     if !fit.in_popup && index >= fit.collapse_from {
         set_ribbon_fit(&ctx, fit);
         let icon = ctx.data(|d| d.get_temp::<Icon>(icon_id)).unwrap_or(Icon::Gear);

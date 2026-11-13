@@ -206,11 +206,6 @@ impl Cat {
                 "VersoloPDF startet keine fremden Programme aus Dokumenten.",
                 "VersoloPDF does not start other programs from documents.",
             ),
-            Cat::FileAssoc => tr(
-                de,
-                "Das Standardprogramm für PDF-Dateien wird in den Einstellungen des Betriebssystems festgelegt.",
-                "The default program for PDF files is set in the settings of the operating system.",
-            ),
             Cat::InfoBar => tr(
                 de,
                 "VersoloPDF zeigt nur die Wiederherstellungsleiste (siehe „Dokumente“).",
@@ -340,6 +335,85 @@ impl VersoloPdfApp {
         self.settings.pinned_files.clone_from(&draft.pinned_files);
     }
 
+    /// Closes "Einstellungen" like OK (before an update is installed).
+    pub(super) fn close_settings_keep_draft(&mut self) {
+        if self.settings_draft.is_some() {
+            self.apply_draft();
+            crate::engine::set_enabled(self.settings.protected_mode);
+        }
+        self.settings_draft = None;
+        self.dialog = None;
+    }
+
+    /// The page "Dateizuordnung": which files open with VersoloPDF on a
+    /// double click. Changes the system at once.
+    fn file_assoc_page(&mut self, ui: &mut Ui, de: bool) {
+        use crate::assoc::{self, Outcome as AssocOutcome, State};
+        section(ui, tr(de, "Dateien mit VersoloPDF öffnen", "Open files with VersoloPDF"), |ui| {
+            ui.label(tr(
+                de,
+                "Hier legen Sie fest, welche Dateien beim Doppelklick mit VersoloPDF geöffnet werden.",
+                "Choose which files open with VersoloPDF on a double click.",
+            ));
+            ui.add_space(6.0);
+            let mut change: Option<(assoc::Kind, bool)> = None;
+            egui::Grid::new("file-assoc").num_columns(3).spacing([12.0, 8.0]).show(ui, |ui| {
+                for kind in assoc::kinds() {
+                    let state = assoc::state(kind);
+                    ui.label(if de { kind.german } else { kind.english });
+                    ui.label(match (state, de) {
+                        (State::Default, true) => "✔ öffnet VersoloPDF",
+                        (State::Default, false) => "✔ opens VersoloPDF",
+                        (State::Offered, true) => "anderes Programm",
+                        (State::Offered, false) => "another program",
+                        (State::Off, true) => "nicht zugeordnet",
+                        (State::Off, false) => "not associated",
+                    });
+                    if state == State::Default {
+                        if ui.button(tr(de, "Zuordnung entfernen", "Remove association")).clicked() {
+                            change = Some((*kind, false));
+                        }
+                    } else if ui.button(tr(de, "Mit VersoloPDF öffnen", "Open with VersoloPDF")).clicked() {
+                        change = Some((*kind, true));
+                    }
+                    ui.end_row();
+                }
+            });
+            if let Some((kind, on)) = change {
+                self.file_assoc_note = Some(match assoc::set(&[kind], on) {
+                    Ok(AssocOutcome::ConfirmInSettings) => tr(
+                        de,
+                        "Windows hat seine Einstellungen „Standard-Apps“ geöffnet: Dort bei „.pdf“ VersoloPDF auswählen. Windows lässt Programme diese Wahl nicht selbst treffen.",
+                        "Windows opened its \"Default apps\" settings: choose VersoloPDF for \".pdf\" there. Windows does not let programs make this choice themselves.",
+                    )
+                    .to_string(),
+                    Ok(AssocOutcome::Done) => tr(de, "Erledigt.", "Done.").to_string(),
+                    Err(err) => err.to_string(),
+                });
+            }
+            if let Some(note) = &self.file_assoc_note {
+                ui.add_space(6.0);
+                ui.label(RichText::new(note.as_str()).small());
+            }
+            ui.add_space(6.0);
+            ui.label(
+                RichText::new(if cfg!(windows) {
+                    tr(
+                        de,
+                        "Gilt für Ihr Benutzerkonto. Der Installer von VersoloPDF kann das auch gleich bei der Installation einrichten.",
+                        "Applies to your user account. The VersoloPDF installer can also set this up during installation.",
+                    )
+                } else if cfg!(target_os = "macos") {
+                    tr(de, "macOS fragt eventuell einmal nach, ob es die Änderung übernehmen soll.", "macOS may ask once whether to make the change.")
+                } else {
+                    tr(de, "Gilt für Ihr Benutzerkonto (freedesktop.org-Standard).", "Applies to your user account (freedesktop.org standard).")
+                })
+                .small()
+                .weak(),
+            );
+        });
+    }
+
     /// Draws "Einstellungen".
     pub(super) fn settings_dialog(&mut self, ui: &mut Ui, s: &mut SettingsPage) -> (Outcome, Option<Action>) {
         let de = self.settings.language == Language::German;
@@ -381,6 +455,9 @@ impl VersoloPdfApp {
                     } else if s.page == Cat::Update {
                         // Needs the program state (running check, found release).
                         self.update_page(ui, de, &mut draft);
+                    } else if s.page == Cat::FileAssoc {
+                        // Changes the system at once (not part of OK / Abbrechen).
+                        self.file_assoc_page(ui, de);
                     } else {
                         settings_page(ui, de, s, &mut draft);
                     }

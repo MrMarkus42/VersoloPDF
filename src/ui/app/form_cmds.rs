@@ -236,7 +236,7 @@ impl VersoloPdfApp {
         });
     }
 
-    /// "Felder hervorheben ▾": the button switches highlighting, the menu
+    /// "Felder hervorheben ⏷": the button switches highlighting, the menu
     /// chooses the kinds.
     fn highlight_menu(&mut self, ui: &mut Ui, ctx: &Context) {
         let de = self.fc_de();

@@ -62,9 +62,11 @@ impl VersoloPdfApp {
                 }
             }
         });
-        Panel::left("side-panel").resizable(true).default_size(200.0).size_range(150.0..=480.0).show(
-            ui,
-            |ui| {
+        let shown = Panel::left("side-panel")
+            .resizable(true)
+            .default_size(200.0)
+            .size_range(150.0..=480.0)
+            .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     let title = match self.side {
                         SidePanel::Thumbnails => t.thumbnails,
@@ -92,8 +94,8 @@ impl VersoloPdfApp {
                     SidePanel::Search => self.search_panel(ui),
                     SidePanel::Layers => self.layers_panel(ui),
                 }
-            },
-        );
+            });
+        self.side_panel_width = shown.response.rect.width();
     }
 
     /// "Ebenen": a check box per layer; switching is saved with the

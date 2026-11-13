@@ -1879,6 +1879,11 @@ pub fn optimize(
         let version = o.version.clone().unwrap_or_else(|| doc.version.clone());
         doc.version = version.clone();
         let modern = version.as_str() >= "1.5";
+        if !modern {
+            // Older versions have no cross-reference streams (lopdf would raise
+            // the version for them).
+            doc.reference_table.cross_reference_type = lopdf::xref::XrefType::CrossReferenceTable;
+        }
         let mut out = Vec::new();
         let saved = if modern { doc.save_modern(&mut out) } else { doc.save_to(&mut out).map(|_| ()) };
         saved.map_err(|e| Error::Structure(e.to_string()))?;

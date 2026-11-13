@@ -84,7 +84,7 @@ impl Fonts {
         let fallback = egui::FontDefinitions::default()
             .font_data
             .get("Ubuntu-Light")
-            .map(|f| f.font.to_vec())
+            .map(|f| (*f.font).as_ref().to_vec())
             .unwrap_or_default();
         Self { programs, fallback }
     }

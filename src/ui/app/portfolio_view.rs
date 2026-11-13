@@ -244,7 +244,7 @@ impl VersoloPdfApp {
             {
                 s.files.extend(folder_files(&dir));
             }
-            let resp = ui.button(tr(de, "Dateiliste ▾", "File list ▾"));
+            let resp = ui.button(tr(de, "Dateiliste ⏷", "File list ⏷"));
             egui::Popup::menu(&resp).show(|ui| {
                 if ui
                     .add_enabled(

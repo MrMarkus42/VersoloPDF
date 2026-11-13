@@ -9,16 +9,16 @@ set -euo pipefail
 
 # Keep this current (security fixes in the PDF parser): the newest release
 # that is at least 14 days old. Checksums from the GitHub release digests.
-RELEASE="chromium/8125"
+RELEASE="chromium/8152"
 # (also runs with the old bash 3 of macOS: no associative arrays)
 sha256_of_platform() {
   case "$1" in
-    linux-x64) echo e1c3ce6e270cb5e0c20816b379ad9f2c1309972697c505f508de92bf5e7d6659 ;;
-    linux-arm64) echo 8b8818f2ec57d1b213d952ca6d7f0ffeca9d0110487d0e20ad83ba918bc92efa ;;
-    win-x64) echo 9a964261760cff52570aabf038ab346d3a5034dd8b30d0d5fe8861235d356b8b ;;
-    win-arm64) echo d394ba61991fb53f4d87f70988035f337d9e73f2bd2c3c1b966df8c43fcabb05 ;;
-    mac-arm64) echo 4939bd935ac83ddc09a3a4f038bc43a19cea1660316a3667f26cb07a070e139d ;;
-    mac-x64) echo 8a5193535b80c7215d8932f6647ae5097465b6dba2811602c21e120c2af112b0 ;;
+    linux-x64) echo 384ab5c51882408a143a21f9c14dcd2caf1f75280ae41c554d0489b46c3dba9f ;;
+    linux-arm64) echo c6ed1a91234aede0cfafdc09c401b83bd44ac69deafc4599fda75d511c36403e ;;
+    win-x64) echo cee2b0e9990bc67c0721774932961b9dbf2766046c10eec925acd4cfba6fdfe3 ;;
+    win-arm64) echo 8614b10c6a780acc3ae9fdd425d6b61f9d22ae84301b19e1ac82f573930c217c ;;
+    mac-arm64) echo 30b0c3f55448840f0947b54bedbe35185bbaccbadd35b8cd960270d6fa6caf80 ;;
+    mac-x64) echo acb975e637ffa1f41430205c62baacac70e34b60811e22fc0e0274dfcd601fcc ;;
   esac
 }
 sha256_of_file() {

@@ -17,7 +17,7 @@ pub(super) enum Outcome {
 const TITLE_BAR: f32 = 30.0;
 
 fn title_id() -> Id {
-    Id::new("versolopdf-dialog-title")
+    Id::unique("versolopdf-dialog-title")
 }
 
 /// Sets the text of the dialog's title bar (drawn by `VersoloPdfApp::dialogs`).
@@ -30,7 +30,7 @@ pub(super) fn set_title(ui: &mut Ui, text: impl Into<String>) {
 /// movement, close button clicked).
 fn title_bar(ui: &mut Ui, bar: egui::Rect, title: &str) -> (Option<egui::Vec2>, bool) {
     let visuals = ui.visuals().clone();
-    let drag = ui.interact(bar, Id::new("versolopdf-dialog-bar"), egui::Sense::drag());
+    let drag = ui.interact(bar, Id::unique("versolopdf-dialog-bar"), egui::Sense::drag());
     let fill = if visuals.dark_mode { egui::Color32::from_gray(48) } else { egui::Color32::from_gray(236) };
     let r = visuals.window_corner_radius;
     ui.painter().rect_filled(bar, egui::CornerRadius { nw: r.nw, ne: r.ne, sw: 0, se: 0 }, fill);
@@ -55,9 +55,9 @@ fn title_bar(ui: &mut Ui, bar: egui::Rect, title: &str) -> (Option<egui::Vec2>, 
         visuals.strong_text_color(),
     );
     // Accessible name of the bar: the title (found by tests and screen readers).
-    drag.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, title));
-    let close = ui.interact(close_rect, Id::new("versolopdf-dialog-close"), egui::Sense::click());
-    close.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "✕"));
+    drag.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, title));
+    let close = ui.interact(close_rect, Id::unique("versolopdf-dialog-close"), egui::Sense::click());
+    close.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "✕"));
     if close.hovered() {
         ui.painter().rect_filled(close_rect, 3.0, egui::Color32::from_rgb(196, 43, 28));
     }
@@ -100,7 +100,7 @@ impl VersoloPdfApp {
 
         // The dialog is a window: title bar (drag to move, ✕ to close) and
         // content. A different dialog opens in the middle again.
-        let area_id = Id::new("versolopdf-dialog");
+        let area_id = Id::unique("versolopdf-dialog");
         let kind = std::mem::discriminant(&dialog);
         let pos = self.dialog_pos.filter(|(k, _)| *k == kind).map(|(_, p)| p);
         let area = match pos {
@@ -592,6 +592,20 @@ impl VersoloPdfApp {
                             action = a;
                         }
                         Dialog::Signatures(sigs) => outcome = self.signatures_dialog(ui, sigs),
+                        Dialog::UpdateConsent => {
+                            let de = self.settings.language == crate::ui::i18n::Language::German;
+                            set_title(ui, if de { "Neue Versionen" } else { "New versions" });
+                            if self.update_consent_ui(ui) {
+                                outcome = Outcome::Close;
+                            }
+                        }
+                        Dialog::UpdateFound => {
+                            let de = self.settings.language == crate::ui::i18n::Language::German;
+                            set_title(ui, if de { "Neue Version" } else { "New version" });
+                            if self.update_found_ui(ui) {
+                                outcome = Outcome::Close;
+                            }
+                        }
                         Dialog::About => {
                             set_title(
                                 ui,

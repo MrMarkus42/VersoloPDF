@@ -218,7 +218,7 @@ impl VersoloPdfApp {
                     for (i, preset) in list.iter().enumerate() {
                         let name = if de { &preset.de } else { &preset.en };
                         let (rect, tile) = ui.allocate_exact_size(vec2(92.0, 70.0), Sense::click());
-                        tile.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
+                        tile.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, name));
                         let selected = matches(&current, tool, preset);
                         let fill = if tile.hovered() || selected {
                             crate::ui::theme::ACCENT.gamma_multiply(if selected { 0.22 } else { 0.12 })

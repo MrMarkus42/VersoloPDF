@@ -172,7 +172,7 @@ pub struct CanvasCtx<'a> {
     pub view: ViewOptions,
     /// "Exklusiver Modus" (see `Settings::exclusive_mode`).
     pub exclusive: bool,
-    /// "Felder hervorheben ▾": kinds not highlighted, only required fields.
+    /// "Felder hervorheben ⏷": kinds not highlighted, only required fields.
     pub highlight_off: Vec<crate::ui::settings::FieldGroup>,
     pub highlight_required_only: bool,
 }
@@ -411,7 +411,7 @@ fn rulers(ui: &mut Ui, tab: &mut DocTab, cx: &mut CanvasCtx, full: Rect, area: R
     }
     let scale = tab.scale();
     for (rect, vertical, id) in [(top, false, "ruler-top"), (left, true, "ruler-left")] {
-        let response = ui.interact(rect, ui.id().with(id), Sense::drag());
+        let response = ui.interact(rect, ui.scope_id().with(id), Sense::drag());
         if response.hovered() {
             ui.ctx().set_cursor_icon(if vertical {
                 CursorIcon::ResizeHorizontal
@@ -480,7 +480,7 @@ fn snap_point(tab: &DocTab, cx: &CanvasCtx, page: usize, v: PointF) -> PointF {
 
 /// Checkerboard texture for "Transparenzgitter" (repeated).
 fn checker_texture(ctx: &egui::Context) -> egui::TextureHandle {
-    let id = egui::Id::new("versolopdf-checker");
+    let id = egui::Id::unique("versolopdf-checker");
     if let Some(tex) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
         return tex;
     }
@@ -549,7 +549,7 @@ pub fn show(ui: &mut Ui, tab: &mut DocTab, cx: &mut CanvasCtx) {
     let output = area.show_viewport(ui, |ui, viewport| {
         draw_and_interact(ui, tab, cx, viewport, &ctx);
     });
-    tab.scroll_offset = output.state.offset;
+    tab.scroll_offset = output.state.clamped_offset();
 
     // Page by page layouts: the mouse wheel flips pages at the top/bottom edge.
     if tab.layout_mode.paged()
@@ -562,10 +562,10 @@ pub fn show(ui: &mut Ui, tab: &mut DocTab, cx: &mut CanvasCtx) {
         let shown_last = tab.layout.slots.iter().map(|s| s.page).max().unwrap_or(tab.current_page);
         let shown_first = tab.layout.slots.iter().map(|s| s.page).min().unwrap_or(tab.current_page);
         if now - tab.last_flip > 0.35 {
-            if dy < 0.0 && output.state.offset.y >= max_y - 1.0 && shown_last + 1 < count {
+            if dy < 0.0 && output.state.clamped_offset().y >= max_y - 1.0 && shown_last + 1 < count {
                 tab.go_to_page(shown_last + 1);
                 tab.last_flip = now;
-            } else if dy > 0.0 && output.state.offset.y <= 1.0 && shown_first > 0 {
+            } else if dy > 0.0 && output.state.clamped_offset().y <= 1.0 && shown_first > 0 {
                 tab.go_to_page(shown_first - 1);
                 tab.last_flip = now;
             }

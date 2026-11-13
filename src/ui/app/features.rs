@@ -83,18 +83,8 @@ impl VersoloPdfApp {
                 };
                 self.info(Cmd::CommandLineHelp.label(self.settings.language), text.to_string());
             }
-            Cmd::FileAssociation => {
-                if cfg!(windows) {
-                    // Windows only lets the user choose default apps in the settings.
-                    let _ = std::process::Command::new("explorer").arg("ms-settings:defaultapps").spawn();
-                }
-                let text = if de {
-                    "Um VersoloPDF als Standardprogramm für PDF-Dateien festzulegen:\nWindows-Einstellungen > Apps > Standard-Apps > „.pdf“ > VersoloPDF auswählen.\n(Unter Linux/macOS über die Dateieigenschaften „Öffnen mit“.)"
-                } else {
-                    "To make VersoloPDF the default program for PDF files:\nWindows Settings > Apps > Default apps > \".pdf\" > choose VersoloPDF.\n(On Linux/macOS use \"Open with\" in the file properties.)"
-                };
-                self.info(Cmd::FileAssociation.label(self.settings.language), text.to_string());
-            }
+            // Einstellungen › Dateizuordnung.
+            Cmd::FileAssociation => self.open_settings_at(super::settings_dialog::Cat::FileAssoc),
             other => {
                 if !self.run_forms(ctx, other)
                     && !self.run_outline(ctx, other)

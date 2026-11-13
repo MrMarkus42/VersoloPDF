@@ -40,6 +40,15 @@ pub enum Protection {
     Off(String),
 }
 
+/// The helper program next to the program `main_exe`: `versolopdf-engine`, a
+/// program of its own that contains only the PDF engine (so it loads no window
+/// or system libraries that a sandbox may refuse). Without it, the program
+/// itself is the helper.
+pub fn helper_program(main_exe: &std::path::Path) -> PathBuf {
+    let name = if cfg!(windows) { "versolopdf-engine.exe" } else { "versolopdf-engine" };
+    main_exe.parent().map(|d| d.join(name)).filter(|p| p.is_file()).unwrap_or_else(|| main_exe.to_path_buf())
+}
+
 /// Protected mode: documents are read by `exe` started as helper.
 pub fn use_helper(exe: PathBuf) {
     if let Ok(mut h) = HELPER_EXE.lock() {

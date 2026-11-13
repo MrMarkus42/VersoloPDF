@@ -25,6 +25,8 @@ rm -rf "dist/$NAME" "dist/$NAME.zip"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Frameworks" "$APP/Contents/Resources/licenses/pdfium"
 lipo -create -output "$APP/Contents/MacOS/VersoloPDF" \
   target/aarch64-apple-darwin/release/versolopdf target/x86_64-apple-darwin/release/versolopdf
+lipo -create -output "$APP/Contents/MacOS/versolopdf-engine" \
+  target/aarch64-apple-darwin/release/versolopdf-engine target/x86_64-apple-darwin/release/versolopdf-engine
 lipo -create -output "$APP/Contents/Frameworks/libpdfium.dylib" \
   vendor/pdfium/mac-arm64/lib/libpdfium.dylib vendor/pdfium/mac-x64/lib/libpdfium.dylib
 cp README.md LICENSE-MIT LICENSE-APACHE THIRD_PARTY_NOTICES.md SECURITY.md "$APP/Contents/Resources/"

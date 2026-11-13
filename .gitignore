@@ -13,3 +13,6 @@
 /docs/RIBBON.md
 /docs/UEBERPRUEFEN.md
 /docs/UMWANDELN.md
+# Signing keys never belong into the repository.
+Update-Schluessel/
+*.key

@@ -809,7 +809,7 @@ fn draw_text_editor(ui: &mut Ui, tab: &mut DocTab, cx: &mut CanvasCtx, on_screen
         .text_color(to_color32(edit.style.color))
         .frame(egui::Frame::NONE)
         .margin(egui::Margin::ZERO)
-        .horizontal_align(align)
+        .align(egui::Align2([align, egui::Align::TOP]))
         .desired_width(width)
         .desired_rows(lines as usize)
         .id_salt(("content-text", edit.page, b.objects.first().copied().unwrap_or(0)));

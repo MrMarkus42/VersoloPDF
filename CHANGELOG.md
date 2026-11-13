@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.5.0 – 2026-11-13
+
+* **Windows installer** (`…-windows-x64-setup.exe`): installs VersoloPDF for
+  the current user (no administrator rights) or for all users, with a start
+  menu entry, an optional desktop icon, the file association for PDF files as
+  an option, and an uninstaller. The zip package without installation stays
+* **File association**: *Einstellungen › Dateizuordnung* makes VersoloPDF the
+  program that opens PDF files and VersoloPDF session files on a double click,
+  or removes that again – on Windows (where the system asks the user to
+  confirm in its "Standard-Apps" settings if another program was chosen
+  before), on macOS and on Linux. Double-clicked session files open their
+  documents
+* **Updates, reworked for safety**:
+  * packages are signed with **minisign** (Ed25519, password-protected key
+    kept only on the developer's own computer); the signed comment binds
+    system and version, and only newer versions are accepted
+  * the **installed** program checks and installs the update, never the
+    downloaded program; the package is locked while it is checked and
+    unpacked into a protected folder; administrator rights only where the
+    program folder needs them, and the new version starts without them
+  * downloads go into a private folder of the user; old ones are removed
+  * VersoloPDF **asks once** whether it may look for new versions; nothing
+    goes online before. *Einstellungen › Neue Version*: look at every start,
+    daily, weekly or never; when a version is found just say so, download it
+    and offer to install it, or install it when VersoloPDF closes; skip a
+    version; installed version and kind of installation are shown
+  * before installing, every document with unsaved changes is asked about
+  * this version is signed both ways so that versions up to 1.4 can update
+    to it
+* Newest components (this once also releases younger than 14 days, for their
+  security fixes): PDFium chromium/8152, egui/eframe 0.37, pdfium-render
+  0.9.5, lopdf 0.47 and all other libraries; Rust 1.95 or newer is needed to
+  build
+
 ## 1.4.0 – 2026-11-10
 
 * **Protected mode**: PDFium, the C++ engine that reads and draws the

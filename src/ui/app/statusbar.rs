@@ -89,7 +89,12 @@ impl VersoloPdfApp {
                         self.goto_text = (cur + 1).to_string();
                     }
                     let resp = ui
-                        .add(egui::TextEdit::singleline(&mut self.goto_text).id(goto_id).desired_width(42.0));
+                        .add(egui::TextEdit::singleline(&mut self.goto_text).id(goto_id).desired_width(42.0))
+                        .accessible_name(if self.settings.language == crate::ui::i18n::Language::German {
+                            "Seite"
+                        } else {
+                            "Page"
+                        });
                     if resp.lost_focus()
                         && ui.input(|i| i.key_pressed(egui::Key::Enter))
                         && let Ok(n) = self.goto_text.trim().parse::<usize>()
