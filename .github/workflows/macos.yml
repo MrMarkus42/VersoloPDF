@@ -40,9 +40,7 @@ jobs:
         run: bash scripts/fetch-pdfium.sh mac-arm64 mac-x64
 
       - name: Tests
-        # Some interface tests fail now and then on GitHub's slow Mac
-        # computers only (never on Linux or Windows); once more before giving up.
-        run: cargo test --locked || { echo "::warning::tests failed once, running them again"; cargo test --locked; }
+        run: cargo test --locked
 
       - name: Sandbox of the PDF engine
         run: cargo test --locked --test engine -- --nocapture --test-threads=1

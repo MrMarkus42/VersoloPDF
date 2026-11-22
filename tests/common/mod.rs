@@ -13,6 +13,14 @@ use pdfium_render::prelude::*;
 pub fn lock() -> MutexGuard<'static, ()> {
     static LOCK: Mutex<()> = Mutex::new(());
     let guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    // Tests never act outside: no network (update check, its question at
+    // first start), no new windows, mail, printing, recycle bin or file
+    // association. Set while holding the lock, so no other thread reads the
+    // environment at the same moment.
+    if std::env::var_os("VERSOLOPDF_NO_EXTERNAL").is_none() {
+        // SAFETY: only test threads holding LOCK read the environment.
+        unsafe { std::env::set_var("VERSOLOPDF_NO_EXTERNAL", "1") };
+    }
     if std::env::var("VERSOLOPDF_ENGINE").is_ok_and(|v| v == "inprocess") {
         versolopdf::engine::use_in_process();
     } else {

@@ -3166,3 +3166,15 @@ fn layers_barcode_certify_and_no_placeholders() {
     let read = Cmd::View(versolopdf::ui::app::view_cmds::ViewCmd::ReadStart);
     assert!(h.state().cmd_enabled(read), "read aloud enabled");
 }
+
+/// Tests never act outside the program: the question about update checks
+/// (shown at the first start of a real program) does not appear.
+#[test]
+fn no_dialog_opens_by_itself_in_tests() {
+    let _guard = common::lock();
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = harness(vec![sample_file(&dir, 1)], false);
+    h.run_steps(20);
+    assert!(h.state().dialog().is_none(), "{:?}", h.state().dialog());
+    assert!(versolopdf::mail::no_external());
+}
