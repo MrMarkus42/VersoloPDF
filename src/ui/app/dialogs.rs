@@ -140,14 +140,40 @@ impl VersoloPdfApp {
                     match &mut dialog {
                         Dialog::Message { title, text } => {
                             super::dialogs::set_title(ui, title.as_str());
-                            ui.label(text.as_str());
+                            // The text can be selected; "Kopieren" and Strg+C
+                            // copy the whole message (e.g. for a bug report).
+                            ui.add(egui::Label::new(text.as_str()).selectable(true));
                             ui.add_space(8.0);
-                            if ui.button(t.ok).clicked()
-                                || ui.input(|i| {
-                                    i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::Escape)
-                                })
-                            {
-                                outcome = Outcome::Close;
+                            let copied_id = Id::unique("versolopdf-message-copied");
+                            let mut copy = false;
+                            ui.horizontal(|ui| {
+                                if ui.button(t.ok).clicked()
+                                    || ui.input(|i| {
+                                        i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::Escape)
+                                    })
+                                {
+                                    outcome = Outcome::Close;
+                                }
+                                copy = ui.button(t.copy).clicked();
+                                if ui.ctx().data(|d| d.get_temp::<bool>(copied_id)).unwrap_or(false) {
+                                    let de = self.settings.language == crate::ui::i18n::Language::German;
+                                    ui.weak(if de {
+                                        "✔ In die Zwischenablage kopiert"
+                                    } else {
+                                        "✔ Copied to the clipboard"
+                                    });
+                                }
+                            });
+                            copy |= ui.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Copy)));
+                            if copy {
+                                ui.ctx().copy_text(format!(
+                                    "{title}
+{text}"
+                                ));
+                                ui.ctx().data_mut(|d| d.insert_temp(copied_id, true));
+                            }
+                            if matches!(outcome, Outcome::Close) {
+                                ui.ctx().data_mut(|d| d.remove::<bool>(copied_id));
                             }
                         }
                         Dialog::Password { path, password, wrong } => {

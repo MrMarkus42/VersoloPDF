@@ -122,23 +122,33 @@ pub fn move_to_trash(path: &Path) -> Result<()> {
 }
 
 #[cfg(windows)]
+#[allow(unsafe_code)]
 fn trash_impl(path: &Path) -> Result<()> {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    // The path is passed in an environment variable, never as script text.
-    let script = "Add-Type -AssemblyName Microsoft.VisualBasic; \
-                  [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($env:VERSOLOPDF_TRASH_PATH, 'OnlyErrorDialogs', 'SendToRecycleBin')";
-    let output = std::process::Command::new("powershell.exe")
-        .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script])
-        .env("VERSOLOPDF_TRASH_PATH", path)
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .map_err(|e| Error::Invalid(format!("powershell: {e}")))?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(Error::Invalid(String::from_utf8_lossy(&output.stderr).trim().chars().take(400).collect()))
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::UI::Shell::{
+        FO_DELETE, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT, FOF_WANTNUKEWARNING,
+        SHFILEOPSTRUCTW, SHFileOperationW,
+    };
+    // The shell knows no long-path prefix; the list ends with two zeros.
+    let plain = strip_verbatim(path.to_path_buf());
+    let from: Vec<u16> = plain.as_os_str().encode_wide().chain([0, 0]).collect();
+    // SAFETY: plain C struct, all fields may be zero.
+    let mut op: SHFILEOPSTRUCTW = unsafe { std::mem::zeroed() };
+    op.wFunc = FO_DELETE;
+    op.pFrom = from.as_ptr();
+    // Into the recycle bin; where there is none (e.g. a network drive)
+    // Windows asks instead of deleting the file for good.
+    op.fFlags =
+        (FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT | FOF_WANTNUKEWARNING) as u16;
+    // SAFETY: `op` and the path it points to live until the call returns.
+    let code = unsafe { SHFileOperationW(&mut op) };
+    if op.fAnyOperationsAborted != 0 {
+        return Err(Error::Invalid("cancelled – the file was not deleted".into()));
     }
+    if code != 0 {
+        return Err(Error::Invalid(format!("the recycle bin refused the file (code {code:#x})")));
+    }
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]
@@ -446,5 +456,23 @@ mod tests {
         remove_recovery(&dir, "12-3");
         assert_eq!(list_recovery(&dir).len(), 1);
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// "In den Papierkorb werfen" with a long-path name (\\?\…), as
+    /// `canonicalize` gives it. Only on GitHub's Windows computers: tests
+    /// never put files into the recycle bin of a real user.
+    #[cfg(windows)]
+    #[test]
+    fn trash_takes_long_path_names() {
+        if std::env::var_os("GITHUB_ACTIONS").is_none() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("Papierkorb Test.pdf");
+        std::fs::write(&file, b"%PDF-1.4").unwrap();
+        let long = file.canonicalize().unwrap();
+        assert!(long.to_string_lossy().starts_with(r"\\?\"), "{}", long.display());
+        move_to_trash(&long).unwrap();
+        assert!(!file.exists());
     }
 }

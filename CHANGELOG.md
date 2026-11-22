@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.5.1 – 2026-11-22
+
+* Windows: **"In den Papierkorb werfen"** failed with "Das angegebene
+  Pfadformat wird nicht unterstützt". The file now goes to the recycle bin
+  through Windows itself (no PowerShell any more); where a drive has no
+  recycle bin, Windows asks before deleting the file for good
+* **Error messages can be copied**: the text can be selected, and
+  "Kopieren" or Ctrl+C copies the whole message. The error log now holds
+  the whole message (the home folder shortened to "~"), not only its first
+  line
+* The error log notes the protected start of the PDF engine once per run
+  instead of once per opened file and preview
+
 ## 1.5.0 – 2026-11-13
 
 * **Windows installer** (`…-windows-x64-setup.exe`): installs VersoloPDF for

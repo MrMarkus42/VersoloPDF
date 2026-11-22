@@ -115,7 +115,14 @@ fn start_helper(exe: &std::path::Path) -> Result<Helper> {
         return Err(fail(format!("protocol {}", hello.protocol)));
     }
     if hello.locked {
-        log::info!("PDF-Kern geschützt gestartet: {}", hello.detail);
+        // Once per run in the log; every document (and every preview) gets
+        // its own helper, which would fill it.
+        static LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if LOGGED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            log::debug!("PDF-Kern geschützt gestartet: {}", hello.detail);
+        } else {
+            log::info!("PDF-Kern geschützt gestartet: {}", hello.detail);
+        }
         set_status(Protection::Protected(hello.detail));
     } else {
         log::warn!("PDF engine helper without full restrictions: {}", hello.detail);

@@ -59,12 +59,26 @@ pub fn is_safe_uri(uri: &str) -> bool {
         && uri.len() <= 4096
 }
 
+/// A message for the error log: one line, the user's home folder as "~".
+fn log_text(text: &str) -> String {
+    let mut line = text.lines().map(str::trim).filter(|l| !l.is_empty()).collect::<Vec<_>>().join(" | ");
+    for var in ["USERPROFILE", "HOME"] {
+        if let Some(home) = std::env::var_os(var).map(|h| h.to_string_lossy().into_owned())
+            && home.len() > 3
+        {
+            line = line.replace(&home, "~");
+        }
+    }
+    line.chars().take(2000).collect()
+}
+
 impl VersoloPdfApp {
     pub(super) fn show_error(&mut self, err: &Error) {
         let t = self.t();
         let text = error_text(t, err);
-        // In the error log the first line only (it may name a file).
-        log::error!("Fehlermeldung: {}", text.lines().next().unwrap_or_default());
+        // The whole message in the error log (one line; the home folder
+        // shortened to "~").
+        log::error!("Fehlermeldung: {}", log_text(&text));
         self.dialog = Some(Dialog::Message { title: t.error.to_string(), text });
     }
 
@@ -796,5 +810,18 @@ mod tests {
         assert!(!is_safe_uri("javascript:alert(1)"));
         assert!(!is_safe_uri("https://exa mple.org"));
         assert!(!is_safe_uri("C:\\Windows\\system32\\calc.exe"));
+    }
+}
+
+#[cfg(test)]
+mod log_tests {
+    #[test]
+    fn whole_message_goes_into_one_log_line() {
+        let text = "Die Aktion ist fehlgeschlagen.
+  Grund: kaputt
+
+Zeile 3";
+        assert_eq!(super::log_text(text), "Die Aktion ist fehlgeschlagen. | Grund: kaputt | Zeile 3");
+        assert!(super::log_text(&"x".repeat(5000)).len() <= 2000);
     }
 }
